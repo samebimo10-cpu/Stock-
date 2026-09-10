@@ -177,6 +177,14 @@ def export_web(
         subprocess.run([sys.executable, str(script), "--pack", str(out)], check=True)
 
 
+@app.command("probe-ngx")
+def probe_ngx(url: list[str] = typer.Option(None, "--url", help="Extra URLs to try")):
+    """Diagnose the public NGX endpoints (prints raw field names and statuses)."""
+    from .data.ngx_probe import probe
+
+    probe(url or [])
+
+
 @app.command("init-goals")
 def init_goals(path: Path = typer.Argument(Path("goals.yaml"))):
     """Write a goal-profile template you can edit and pass with --goals."""
