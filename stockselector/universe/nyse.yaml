@@ -1,0 +1,81 @@
+# Default NYSE screening universe (NYSE-listed common stock and ADRs).
+# Symbols are Yahoo Finance symbols (BRK-B uses a hyphen). Edit freely.
+exchange: NYSE
+currency: USD
+stocks:
+  - {symbol: JPM,   name: JPMorgan Chase,            sector: Financial Services}
+  - {symbol: BAC,   name: Bank of America,           sector: Financial Services}
+  - {symbol: WFC,   name: Wells Fargo,               sector: Financial Services}
+  - {symbol: C,     name: Citigroup,                 sector: Financial Services}
+  - {symbol: GS,    name: Goldman Sachs,             sector: Financial Services}
+  - {symbol: MS,    name: Morgan Stanley,            sector: Financial Services}
+  - {symbol: BLK,   name: BlackRock,                 sector: Financial Services}
+  - {symbol: SPGI,  name: S&P Global,                sector: Financial Services}
+  - {symbol: AXP,   name: American Express,          sector: Financial Services}
+  - {symbol: V,     name: Visa,                      sector: Financial Services}
+  - {symbol: MA,    name: Mastercard,                sector: Financial Services}
+  - {symbol: BRK-B, name: Berkshire Hathaway B,      sector: Financial Services}
+  - {symbol: XOM,   name: Exxon Mobil,               sector: Energy}
+  - {symbol: CVX,   name: Chevron,                   sector: Energy}
+  - {symbol: COP,   name: ConocoPhillips,            sector: Energy}
+  - {symbol: SHEL,  name: Shell (ADR),               sector: Energy}
+  - {symbol: BP,    name: BP (ADR),                  sector: Energy}
+  - {symbol: SLB,   name: Schlumberger,              sector: Energy}
+  - {symbol: JNJ,   name: Johnson & Johnson,         sector: Healthcare}
+  - {symbol: LLY,   name: Eli Lilly,                 sector: Healthcare}
+  - {symbol: UNH,   name: UnitedHealth Group,        sector: Healthcare}
+  - {symbol: MRK,   name: Merck,                     sector: Healthcare}
+  - {symbol: PFE,   name: Pfizer,                    sector: Healthcare}
+  - {symbol: ABBV,  name: AbbVie,                    sector: Healthcare}
+  - {symbol: ABT,   name: Abbott Laboratories,       sector: Healthcare}
+  - {symbol: TMO,   name: Thermo Fisher Scientific,  sector: Healthcare}
+  - {symbol: DHR,   name: Danaher,                   sector: Healthcare}
+  - {symbol: CVS,   name: CVS Health,                sector: Healthcare}
+  - {symbol: NVO,   name: Novo Nordisk (ADR),        sector: Healthcare}
+  - {symbol: PG,    name: Procter & Gamble,          sector: Consumer Staples}
+  - {symbol: KO,    name: Coca-Cola,                 sector: Consumer Staples}
+  - {symbol: WMT,   name: Walmart,                   sector: Consumer Staples}
+  - {symbol: PM,    name: Philip Morris International, sector: Consumer Staples}
+  - {symbol: CL,    name: Colgate-Palmolive,         sector: Consumer Staples}
+  - {symbol: MO,    name: Altria,                    sector: Consumer Staples}
+  - {symbol: UL,    name: Unilever (ADR),            sector: Consumer Staples}
+  - {symbol: HD,    name: Home Depot,                sector: Consumer Discretionary}
+  - {symbol: LOW,   name: Lowe's,                    sector: Consumer Discretionary}
+  - {symbol: MCD,   name: McDonald's,                sector: Consumer Discretionary}
+  - {symbol: NKE,   name: Nike,                      sector: Consumer Discretionary}
+  - {symbol: DIS,   name: Walt Disney,               sector: Consumer Discretionary}
+  - {symbol: TGT,   name: Target,                    sector: Consumer Discretionary}
+  - {symbol: F,     name: Ford Motor,                sector: Consumer Discretionary}
+  - {symbol: GM,    name: General Motors,            sector: Consumer Discretionary}
+  - {symbol: TJX,   name: TJX Companies,             sector: Consumer Discretionary}
+  - {symbol: CAT,   name: Caterpillar,               sector: Industrials}
+  - {symbol: DE,    name: Deere & Company,           sector: Industrials}
+  - {symbol: BA,    name: Boeing,                    sector: Industrials}
+  - {symbol: RTX,   name: RTX Corporation,           sector: Industrials}
+  - {symbol: LMT,   name: Lockheed Martin,           sector: Industrials}
+  - {symbol: GE,    name: GE Aerospace,              sector: Industrials}
+  - {symbol: UNP,   name: Union Pacific,             sector: Industrials}
+  - {symbol: UPS,   name: United Parcel Service,     sector: Industrials}
+  - {symbol: MMM,   name: 3M,                        sector: Industrials}
+  - {symbol: ETN,   name: Eaton,                     sector: Industrials}
+  - {symbol: WM,    name: Waste Management,          sector: Industrials}
+  - {symbol: IBM,   name: IBM,                       sector: Technology}
+  - {symbol: ORCL,  name: Oracle,                    sector: Technology}
+  - {symbol: CRM,   name: Salesforce,                sector: Technology}
+  - {symbol: ACN,   name: Accenture,                 sector: Technology}
+  - {symbol: TSM,   name: Taiwan Semiconductor (ADR), sector: Technology}
+  - {symbol: NOW,   name: ServiceNow,                sector: Technology}
+  - {symbol: ANET,  name: Arista Networks,           sector: Technology}
+  - {symbol: VZ,    name: Verizon,                   sector: Communication Services}
+  - {symbol: T,     name: AT&T,                      sector: Communication Services}
+  - {symbol: LIN,   name: Linde,                     sector: Materials}
+  - {symbol: NEM,   name: Newmont,                   sector: Materials}
+  - {symbol: FCX,   name: Freeport-McMoRan,          sector: Materials}
+  - {symbol: SHW,   name: Sherwin-Williams,          sector: Materials}
+  - {symbol: NEE,   name: NextEra Energy,            sector: Utilities}
+  - {symbol: SO,    name: Southern Company,          sector: Utilities}
+  - {symbol: DUK,   name: Duke Energy,               sector: Utilities}
+  - {symbol: D,     name: Dominion Energy,           sector: Utilities}
+  - {symbol: PLD,   name: Prologis,                  sector: Real Estate}
+  - {symbol: AMT,   name: American Tower,            sector: Real Estate}
+  - {symbol: O,     name: Realty Income,             sector: Real Estate}

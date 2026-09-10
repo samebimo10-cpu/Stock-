@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockselector"
+version = "0.1.0"
+description = "Goal-driven stock selector and portfolio allocator for the Nigerian Exchange (NGX) and the New York Stock Exchange (NYSE), built on publicly available data."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "requests>=2.28",
+    "yfinance>=0.2.40",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "pyyaml>=6.0",
+    "typer>=0.9",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.49", "plotly>=5.18"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+stockselector = "stockselector.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["stockselector*"]
+
+[tool.setuptools.package-data]
+stockselector = ["universe/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

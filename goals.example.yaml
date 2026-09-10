@@ -1,0 +1,19 @@
+# Example goal profile. Use with:  stockselector allocate --goals goals.example.yaml
+objective: balanced            # growth | income | balanced | preservation
+risk_tolerance: 3              # 1 (very conservative) .. 5 (very aggressive)
+horizon_years: 5
+budget: 5000000                # in base_currency
+base_currency: NGN             # NGN | USD
+target_amount: 10000000        # optional: value you want at the end of the horizon
+target_income_yield: null      # optional, e.g. 0.05 for a 5% dividend yield
+picks_per_exchange: 8
+ngx_weight_range: [0.2, 0.7]   # NGX share of the equity sleeve (min, max)
+max_weight_per_stock: 0.15
+max_weight_per_sector: 0.35
+min_weight_per_stock: 0.0
+allow_cash: true
+cash_rate_ngn: 0.18            # NGN T-bill rate used for cash and Sharpe
+cash_rate_usd: 0.045
+min_avg_daily_value_ngn: 5000000
+min_avg_daily_value_usd: 20000000
+factor_weight_overrides: {}    # e.g. {momentum: 0.4} to tilt the score

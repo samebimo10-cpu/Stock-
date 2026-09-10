@@ -1,0 +1,58 @@
+# Default NGX (Nigerian Exchange) screening universe.
+# Symbols are NGX trading symbols. Sector labels follow NGX sector classification.
+# Edit freely: add or remove rows; the selector reads this file at startup.
+exchange: NGX
+currency: NGN
+stocks:
+  - {symbol: DANGCEM,      name: Dangote Cement,                 sector: Industrial Goods}
+  - {symbol: BUACEMENT,    name: BUA Cement,                     sector: Industrial Goods}
+  - {symbol: WAPCO,        name: Lafarge Africa,                 sector: Industrial Goods}
+  - {symbol: MTNN,         name: MTN Nigeria,                    sector: ICT}
+  - {symbol: AIRTELAFRI,   name: Airtel Africa,                  sector: ICT}
+  - {symbol: CWG,          name: CWG Plc,                        sector: ICT}
+  - {symbol: GTCO,         name: Guaranty Trust Holding,         sector: Financial Services}
+  - {symbol: ZENITHBANK,   name: Zenith Bank,                    sector: Financial Services}
+  - {symbol: ACCESSCORP,   name: Access Holdings,                sector: Financial Services}
+  - {symbol: UBA,          name: United Bank for Africa,         sector: Financial Services}
+  - {symbol: FIRSTHOLDCO,  name: First HoldCo,                   sector: Financial Services}
+  - {symbol: STANBIC,      name: Stanbic IBTC Holdings,          sector: Financial Services}
+  - {symbol: FIDELITYBK,   name: Fidelity Bank,                  sector: Financial Services}
+  - {symbol: FCMB,         name: FCMB Group,                     sector: Financial Services}
+  - {symbol: STERLINGNG,   name: Sterling Financial Holdings,    sector: Financial Services}
+  - {symbol: WEMABANK,     name: Wema Bank,                      sector: Financial Services}
+  - {symbol: ETI,          name: Ecobank Transnational,          sector: Financial Services}
+  - {symbol: JAIZBANK,     name: Jaiz Bank,                      sector: Financial Services}
+  - {symbol: UCAP,         name: United Capital,                 sector: Financial Services}
+  - {symbol: CUSTODIAN,    name: Custodian Investment,           sector: Financial Services}
+  - {symbol: AXAMANSARD,   name: AXA Mansard Insurance,          sector: Financial Services}
+  - {symbol: VFDGROUP,     name: VFD Group,                      sector: Financial Services}
+  - {symbol: SEPLAT,       name: Seplat Energy,                  sector: Oil & Gas}
+  - {symbol: ARADEL,       name: Aradel Holdings,                sector: Oil & Gas}
+  - {symbol: OANDO,        name: Oando,                          sector: Oil & Gas}
+  - {symbol: TOTALENERGIES, name: TotalEnergies Marketing Nigeria, sector: Oil & Gas}
+  - {symbol: CONOIL,       name: Conoil,                         sector: Oil & Gas}
+  - {symbol: ETERNA,       name: Eterna,                         sector: Oil & Gas}
+  - {symbol: MRS,          name: MRS Oil Nigeria,                sector: Oil & Gas}
+  - {symbol: NESTLE,       name: Nestle Nigeria,                 sector: Consumer Goods}
+  - {symbol: NB,           name: Nigerian Breweries,             sector: Consumer Goods}
+  - {symbol: GUINNESS,     name: Guinness Nigeria,               sector: Consumer Goods}
+  - {symbol: INTBREW,      name: International Breweries,        sector: Consumer Goods}
+  - {symbol: BUAFOODS,     name: BUA Foods,                      sector: Consumer Goods}
+  - {symbol: DANGSUGAR,    name: Dangote Sugar Refinery,         sector: Consumer Goods}
+  - {symbol: NASCON,       name: NASCON Allied Industries,       sector: Consumer Goods}
+  - {symbol: FLOURMILL,    name: Flour Mills of Nigeria,         sector: Consumer Goods}
+  - {symbol: UNILEVER,     name: Unilever Nigeria,               sector: Consumer Goods}
+  - {symbol: CADBURY,      name: Cadbury Nigeria,                sector: Consumer Goods}
+  - {symbol: VITAFOAM,     name: Vitafoam Nigeria,               sector: Consumer Goods}
+  - {symbol: PRESCO,       name: Presco,                         sector: Agriculture}
+  - {symbol: OKOMUOIL,     name: Okomu Oil Palm,                 sector: Agriculture}
+  - {symbol: LIVESTOCK,    name: Livestock Feeds,                sector: Agriculture}
+  - {symbol: GEREGU,       name: Geregu Power,                   sector: Utilities}
+  - {symbol: TRANSPOWER,   name: Transcorp Power,                sector: Utilities}
+  - {symbol: TRANSCORP,    name: Transnational Corporation,      sector: Conglomerates}
+  - {symbol: JBERGER,      name: Julius Berger Nigeria,          sector: Construction/Real Estate}
+  - {symbol: NAHCO,        name: Nigerian Aviation Handling,     sector: Services}
+  - {symbol: TRANSCOHOT,   name: Transcorp Hotels,               sector: Services}
+  - {symbol: FIDSON,       name: Fidson Healthcare,              sector: Healthcare}
+  - {symbol: MAYBAKER,     name: May & Baker Nigeria,            sector: Healthcare}
+  - {symbol: BERGER,       name: Berger Paints,                  sector: Industrial Goods}
