@@ -147,7 +147,8 @@ def optimise(mu: pd.Series, cov: pd.DataFrame, objective: str, cons: Constraints
             elif cand.feasible == best.feasible and fn(w) < fn(best.weights.values):
                 best = cand
     assert best is not None
-    best.weights[best.weights < 1e-4] = 0.0
+    # Drop dust positions (< 1%) that no one would actually trade, then renormalise.
+    best.weights[best.weights < 0.01] = 0.0
     best.weights /= best.weights.sum()
     best.expected_return, best.volatility = _portfolio_stats(best.weights.values, m, C)
     return best

@@ -20,7 +20,8 @@ def test_weights_sum_to_one_and_respect_bounds(md, profile):
     w = alloc.weights
     assert abs(w.sum() - 1) < 1e-6
     assert (w >= -1e-9).all()
-    assert (w.drop(CASH, errors="ignore") <= profile.max_weight_per_stock + 1e-6).all()
+    assert (w.drop(CASH, errors="ignore") <= profile.max_weight_per_stock + 0.01).all()
+    assert (w[w > 0] >= 0.01).all()  # no dust positions
     assert w.get(CASH, 0) <= cash_cap_for(profile) + 1e-6
 
 

@@ -88,7 +88,19 @@ stockselector allocate --mode sample --objective income --risk 2 --budget 20000 
 
 # Dashboard
 stockselector ui            # or: streamlit run app.py
+
+# Browser version (no Python needed to *use* it): export a data pack, embed it, open web/index.html
+stockselector export-web web/data-pack.json --build
 ```
+
+## Browser version
+
+`web/index.html` is a self-contained single page that runs the same selector and allocator in
+JavaScript (factor scores, goal mapping, a projected-gradient optimiser, whole-share orders, Monte
+Carlo projection). It ships with the synthetic sample pack embedded and clearly labelled. To use it
+with real public data either rebuild it with `stockselector export-web --build`, or load a data
+pack on its **Data** tab (the pack stays in that browser's local storage). The file can be hosted
+anywhere static, including GitHub Pages.
 
 Useful flags: `--fx 1550` to pin today's USD/NGN rate, `--ngx-lot 100` if your broker enforces
 board lots, `--no-cash` to force full equity exposure, `--mode live|cache|sample`.
@@ -117,6 +129,8 @@ stockselector/
   report.py            console tables and exports
   cli.py               Typer CLI
 app.py                 Streamlit dashboard
+web/template.html      browser version (single page, vanilla JS); scripts/build_web.py embeds a data pack
+web/index.html         built browser version with the sample pack embedded
 tests/                 pytest suite (runs on sample data, no network)
 ```
 

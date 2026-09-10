@@ -154,6 +154,29 @@ def refresh(
     console.print(f"USD/NGN: {md.latest_fx():,.2f}")
 
 
+@app.command("export-web")
+def export_web(
+    path: Path = typer.Argument(Path("web/data-pack.json"), help="Where to write the JSON data pack"),
+    exchange: str = typer.Option("both", help="ngx | nyse | both"),
+    mode: str = ModeOpt, cache_dir: Optional[Path] = CacheOpt, fx: Optional[float] = FxOpt,
+    ngx_history: Optional[Path] = NgxHistOpt,
+    build: bool = typer.Option(False, "--build", help="Also rebuild web/index.html with this pack embedded"),
+):
+    """Write a data pack for the browser app (load it on the page's Data tab, or embed with --build)."""
+    from .webdata import write_web_pack
+
+    md = _load(_exchanges(exchange), mode, cache_dir, fx, ngx_history)
+    data_banner(md)
+    out = write_web_pack(md, path)
+    console.print(f"wrote {out} ({out.stat().st_size / 1024:.0f} KB)")
+    if build:
+        import subprocess
+        import sys
+
+        script = Path(__file__).resolve().parent.parent / "scripts" / "build_web.py"
+        subprocess.run([sys.executable, str(script), "--pack", str(out)], check=True)
+
+
 @app.command("init-goals")
 def init_goals(path: Path = typer.Argument(Path("goals.yaml"))):
     """Write a goal-profile template you can edit and pass with --goals."""

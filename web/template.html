@@ -1,0 +1,960 @@
+<title>NGX NYSE Allocator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f4f6f3; --panel:#ffffff; --panel-2:#eef1ec; --line:#d9dfd9; --line-strong:#b9c2ba;
+  --ink:#16201c; --ink-2:#4b5652; --ink-3:#7a847f;
+  --accent:#0f6e5d; --accent-ink:#ffffff; --accent-soft:#dcefe9;
+  --ngx:#1baf7a; --nyse:#2a78d6; --cash:#8a908c;
+  --good:#0ca30c; --warn:#b97a00; --crit:#d03b3b; --warn-bg:#fff6dd; --crit-bg:#fdeaea;
+  --font-ui:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-display:"Bricolage Grotesque","Public Sans",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --radius:6px; --shadow:0 1px 2px rgba(22,32,28,.06),0 4px 14px rgba(22,32,28,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#131816; --panel:#1b211e; --panel-2:#232b27; --line:#2e3833; --line-strong:#465249;
+    --ink:#eef2ee; --ink-2:#b9c3bc; --ink-3:#7f8a83;
+    --accent:#3fbfa3; --accent-ink:#0d1512; --accent-soft:#1c3a33;
+    --ngx:#199e70; --nyse:#3987e5; --cash:#8a908c;
+    --good:#0ca30c; --warn:#fab219; --crit:#e66767; --warn-bg:#2d2610; --crit-bg:#3a1c1c;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#131816; --panel:#1b211e; --panel-2:#232b27; --line:#2e3833; --line-strong:#465249;
+  --ink:#eef2ee; --ink-2:#b9c3bc; --ink-3:#7f8a83;
+  --accent:#3fbfa3; --accent-ink:#0d1512; --accent-soft:#1c3a33;
+  --ngx:#199e70; --nyse:#3987e5; --cash:#8a908c;
+  --good:#0ca30c; --warn:#fab219; --crit:#e66767; --warn-bg:#2d2610; --crit-bg:#3a1c1c;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:14px;line-height:1.45;padding-inline:16px;padding-block:0 40px}
+h1,h2,h3{font-family:var(--font-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h2{font-size:18px;font-weight:700}
+h3{font-size:15px;font-weight:600}
+a{color:var(--accent)}
+button,input,select{font:inherit;color:inherit}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);font-weight:600}
+.muted{color:var(--ink-2)}
+.small{font-size:12px}
+
+/* ---- header */
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:18px 14px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.brand{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.brand h1{font-size:24px;font-weight:700}
+.brand h1 span{color:var(--accent)}
+.brand .tag{font-size:12px;color:var(--ink-2)}
+.top .status{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid var(--line-strong);font-size:12px;color:var(--ink-2);background:var(--panel)}
+.pill.warn{background:var(--warn-bg);border-color:transparent;color:var(--ink)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.pill.warn .dot{background:var(--warn)}
+
+/* ---- layout */
+.layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:22px;align-items:start}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+aside{position:sticky;top:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
+@media (max-width:900px){aside{position:static}}
+aside h2{font-size:16px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:12px;font-weight:600;color:var(--ink-2)}
+.field .hint{font-size:11px;color:var(--ink-3)}
+.field input[type=number],.field select{width:100%;padding:7px 9px;border:1px solid var(--line-strong);border-radius:4px;background:var(--panel);color:var(--ink)}
+.field input[type=number]{font-family:var(--font-mono);font-size:13px}
+.field input:focus-visible,.field select:focus-visible,button:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line-strong);border-radius:4px;overflow:hidden}
+.seg button{background:var(--panel);border:0;padding:7px 4px;cursor:pointer;font-size:12.5px;font-weight:500;color:var(--ink-2);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.range-row{display:flex;align-items:center;gap:8px}
+.range-row input[type=range]{flex:1;accent-color:var(--accent)}
+.range-row output{font-family:var(--font-mono);font-size:12.5px;min-width:44px;text-align:right}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+details{border-top:1px solid var(--line);padding-top:10px}
+details summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--ink-2)}
+details .field{margin-top:10px}
+.btn{border:1px solid var(--line-strong);background:var(--panel);border-radius:4px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:default}
+.check{display:flex;align-items:center;gap:8px;font-size:13px}
+.check input{accent-color:var(--accent);width:15px;height:15px}
+
+/* ---- main */
+main{display:flex;flex-direction:column;gap:18px;min-width:0}
+.banner{padding:10px 12px;border-radius:var(--radius);font-size:13px;display:flex;gap:10px;align-items:flex-start}
+.banner.warn{background:var(--warn-bg)}
+.banner.crit{background:var(--crit-bg)}
+.banner strong{font-weight:600}
+.strip{display:grid;grid-template-columns:1.6fr repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+@media (max-width:1100px){.strip{grid-template-columns:repeat(3,1fr)}.strip .hero{grid-column:1/-1}}
+@media (max-width:520px){.strip{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--panel);padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.tile .label{font-size:11.5px;color:var(--ink-2)}
+.tile .value{font-family:var(--font-ui);font-weight:600;font-size:20px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tile .sub{font-size:11.5px;color:var(--ink-3)}
+.tile.hero .value{font-size:clamp(22px,2.3vw,32px);line-height:1.05;color:var(--accent)}
+.tile.hero{background:var(--panel)}
+.tile .value.ok{color:var(--good)} .tile .value.bad{color:var(--crit)}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--ink-2);margin-bottom:-1px}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+.panel[hidden]{display:none}
+.panel{display:flex;flex-direction:column;gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.grid-2{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:1000px){.grid-2{grid-template-columns:1fr}}
+.notes{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2)}
+.notes li{list-style:none;padding-left:14px;position:relative}
+.notes li::before{content:"";position:absolute;left:0;top:.55em;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.notes ul{margin:0;padding:0}
+
+/* ---- tables */
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:middle}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600;position:sticky;top:0;background:var(--panel)}
+td.r,th.r{text-align:right}
+td.num,td.r{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12.5px}
+tr.pick td{background:var(--accent-soft)}
+tr.dim td{color:var(--ink-3)}
+.sym{font-weight:600}
+.ex{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:1px}
+.ex.NGX{background:var(--ngx)} .ex.NYSE{background:var(--nyse)} .ex.CASH{background:var(--cash)}
+.zbar{display:inline-block;width:64px;height:8px;background:var(--panel-2);border-radius:2px;position:relative;vertical-align:middle}
+.zbar i{position:absolute;top:0;height:100%;background:var(--accent);border-radius:2px}
+.zbar i.neg{background:var(--crit)}
+.zbar::after{content:"";position:absolute;left:50%;top:-2px;width:1px;height:12px;background:var(--line-strong)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink-2)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+
+/* ---- charts */
+.chart{position:relative;width:100%}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart text{font-family:var(--font-ui);font-size:11px;fill:var(--ink-2)}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .axis{stroke:var(--line-strong);stroke-width:1}
+.chart .bar{rx:0}
+.chart .hit{fill:transparent;cursor:crosshair}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);padding:6px 9px;border-radius:4px;font-size:12px;line-height:1.35;white-space:nowrap;box-shadow:var(--shadow);transform:translate(-50%,calc(-100% - 10px));opacity:0;transition:opacity .08s}
+.tip b{font-weight:600}
+.tip.show{opacity:1}
+.chart .cross{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 3}
+
+.dropzone{border:1px dashed var(--line-strong);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:8px;font-size:13px}
+code{font-family:var(--font-mono);font-size:12px;background:var(--panel-2);padding:1px 5px;border-radius:3px}
+pre{font-family:var(--font-mono);font-size:12px;background:var(--panel-2);padding:10px 12px;border-radius:4px;overflow-x:auto;margin:0}
+footer{margin-top:24px;font-size:12px;color:var(--ink-3);border-top:1px solid var(--line);padding-top:12px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>NGX<span>·</span>NYSE Allocator</h1>
+    <span class="tag">Goal-based stock selection across Lagos and New York, from public data.</span>
+  </div>
+  <div class="status" id="status"></div>
+</header>
+
+<div class="layout">
+<aside aria-label="Your goals">
+  <h2>Your goals</h2>
+  <div class="field">
+    <label>Objective</label>
+    <div class="seg" id="objective" role="group" aria-label="Objective">
+      <button type="button" data-v="growth">Growth</button>
+      <button type="button" data-v="income">Income</button>
+      <button type="button" data-v="balanced" aria-pressed="true">Balanced</button>
+      <button type="button" data-v="preservation">Preserve</button>
+    </div>
+  </div>
+  <div class="field">
+    <label for="risk">Risk tolerance <span class="hint">1 cautious → 5 aggressive</span></label>
+    <div class="range-row"><input type="range" id="risk" min="1" max="5" step="1" value="3"><output id="risk-out">3</output></div>
+  </div>
+  <div class="field">
+    <label>Base currency</label>
+    <div class="seg" id="currency" role="group" aria-label="Base currency">
+      <button type="button" data-v="NGN" aria-pressed="true">₦ Naira</button>
+      <button type="button" data-v="USD">$ US dollar</button>
+    </div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="budget">Budget</label><input type="number" id="budget" min="1" step="1000" value="5000000"></div>
+    <div class="field"><label for="horizon">Horizon, years</label><input type="number" id="horizon" min="1" max="40" step="1" value="5"></div>
+  </div>
+  <div class="field">
+    <label class="check"><input type="checkbox" id="use-target" checked> I have a target amount</label>
+    <input type="number" id="target" min="0" step="1000" value="10000000" aria-label="Target amount">
+  </div>
+  <div class="field" id="income-field" hidden>
+    <label for="income-yield">Target dividend yield</label>
+    <div class="range-row"><input type="range" id="income-yield" min="0" max="0.12" step="0.005" value="0.05"><output id="income-yield-out">5.0%</output></div>
+  </div>
+  <details>
+    <summary>Portfolio rules</summary>
+    <div class="field">
+      <label for="picks">Picks per exchange</label>
+      <div class="range-row"><input type="range" id="picks" min="3" max="15" step="1" value="8"><output id="picks-out">8</output></div>
+    </div>
+    <div class="field">
+      <label>NGX share of equities</label>
+      <div class="range-row"><span class="small muted">min</span><input type="range" id="ngx-min" min="0" max="1" step="0.05" value="0.2"><output id="ngx-min-out">20%</output></div>
+      <div class="range-row"><span class="small muted">max</span><input type="range" id="ngx-max" min="0" max="1" step="0.05" value="0.7"><output id="ngx-max-out">70%</output></div>
+      <span class="hint">Set max 0% for NYSE only, min 100% for NGX only.</span>
+    </div>
+    <div class="field">
+      <label for="max-w">Max weight per stock</label>
+      <div class="range-row"><input type="range" id="max-w" min="0.05" max="0.5" step="0.01" value="0.15"><output id="max-w-out">15%</output></div>
+    </div>
+    <div class="field">
+      <label for="max-sector">Max weight per sector</label>
+      <div class="range-row"><input type="range" id="max-sector" min="0.1" max="1" step="0.05" value="0.35"><output id="max-sector-out">35%</output></div>
+    </div>
+    <div class="field"><label class="check"><input type="checkbox" id="allow-cash" checked> Allow a cash / T-bill sleeve</label></div>
+    <div class="two">
+      <div class="field"><label for="ngx-lot">NGX lot size</label><input type="number" id="ngx-lot" min="1" step="1" value="1"></div>
+      <div class="field"><label for="fx">USD/NGN</label><input type="number" id="fx" min="1" step="1" value=""></div>
+    </div>
+  </details>
+  <details>
+    <summary>Rates</summary>
+    <div class="two">
+      <div class="field"><label for="rate-ngn">NGN T-bill %</label><input type="number" id="rate-ngn" min="0" max="100" step="0.5" value="18"></div>
+      <div class="field"><label for="rate-usd">USD T-bill %</label><input type="number" id="rate-usd" min="0" max="100" step="0.25" value="4.5"></div>
+    </div>
+  </details>
+  <button class="btn primary" id="build" type="button">Build portfolio</button>
+  <span class="small muted" id="build-note">Recomputes the screen, the allocation and the projection.</span>
+</aside>
+
+<main>
+  <div id="banner"></div>
+  <section class="strip" id="strip" aria-label="Summary"></section>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="portfolio" id="tab-portfolio">Portfolio</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="projection" id="tab-projection">Projection</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="screener" id="tab-screener">Screener</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="data" id="tab-data">Data</button>
+  </div>
+  <section class="panel" id="panel-portfolio" role="tabpanel"></section>
+  <section class="panel" id="panel-projection" role="tabpanel" hidden></section>
+  <section class="panel" id="panel-screener" role="tabpanel" hidden></section>
+  <section class="panel" id="panel-data" role="tabpanel" hidden></section>
+  <footer>Analytical tool, not investment advice. Figures come from free public sources and can be stale; verify before trading. Expected returns are estimates with wide error bars.</footer>
+</main>
+</div>
+<script id="data-pack" type="application/json">__DATA_PACK__</script>
+<script>
+(() => {
+"use strict";
+// ============================================================ utilities
+const $ = (s, el = document) => el.querySelector(s);
+const isNum = v => typeof v === "number" && Number.isFinite(v);
+const NaNv = Number.NaN;
+const sum = a => a.reduce((s, v) => s + v, 0);
+const mean = a => a.length ? sum(a) / a.length : NaNv;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const pct = (v, d = 1) => isNum(v) ? (v * 100).toFixed(d) + "%" : "–";
+const spct = v => isNum(v) ? (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%" : "–";
+const fmtN = (v, d = 0) => isNum(v) ? v.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d }) : "–";
+const money = (v, ccy) => (ccy === "NGN" ? "₦" : "$") + fmtN(v, 0);
+const compact = (v, ccy) => {
+  if (!isNum(v)) return "–";
+  const s = ccy === "NGN" ? "₦" : "$";
+  const a = Math.abs(v);
+  if (a >= 1e12) return s + (v / 1e12).toFixed(2) + "T";
+  if (a >= 1e9) return s + (v / 1e9).toFixed(2) + "B";
+  if (a >= 1e6) return s + (v / 1e6).toFixed(2) + "M";
+  if (a >= 1e4) return s + (v / 1e3).toFixed(1) + "K";
+  return s + fmtN(v, 0);
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gauss(rng) { let u = 0, v = 0; while (u === 0) u = rng(); while (v === 0) v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+function quantile(sorted, q) { const p = (sorted.length - 1) * q, lo = Math.floor(p), hi = Math.ceil(p); return sorted[lo] + (sorted[hi] - sorted[lo]) * (p - lo); }
+function std(a) { const m = mean(a); return Math.sqrt(sum(a.map(v => (v - m) ** 2)) / Math.max(1, a.length - 1)); }
+
+// ============================================================ profile
+const FACTORS = ["value", "quality", "momentum", "low_vol", "dividend", "liquidity"];
+const FACTOR_WEIGHTS = {
+  growth:       { value: .15, quality: .25, momentum: .35, low_vol: .05, dividend: .05, liquidity: .15 },
+  income:       { value: .15, quality: .25, momentum: .05, low_vol: .15, dividend: .35, liquidity: .05 },
+  balanced:     { value: .20, quality: .25, momentum: .20, low_vol: .15, dividend: .10, liquidity: .10 },
+  preservation: { value: .15, quality: .30, momentum: .05, low_vol: .35, dividend: .10, liquidity: .05 },
+};
+const VOL_CEIL = { USD: { 1: .10, 2: .14, 3: .18, 4: .24, 5: .35 }, NGN: { 1: .16, 2: .22, 3: .28, 4: .36, 5: .50 } };
+const CASH_CAP = { 1: .60, 2: .40, 3: .25, 4: .15, 5: .05 };
+const RISK_AVERSION = { 1: 8, 2: 5, 3: 3, 4: 2, 5: 1.2 };
+const MIN_ADV = { NGN: 5e6, USD: 20e6 };
+const CASH = "CASH";
+
+function readProfile() {
+  const v = id => $("#" + id).value;
+  const seg = id => $("#" + id + " [aria-pressed=true]").dataset.v;
+  const p = {
+    objective: seg("objective"), risk: +v("risk"), currency: seg("currency"),
+    budget: Math.max(1, +v("budget")), horizon: Math.max(1, +v("horizon")),
+    target: $("#use-target").checked ? +v("target") : null,
+    incomeYield: seg("objective") === "income" ? +v("income-yield") : null,
+    picks: +v("picks"), ngxMin: +v("ngx-min"), ngxMax: +v("ngx-max"),
+    maxW: +v("max-w"), maxSector: +v("max-sector"), allowCash: $("#allow-cash").checked,
+    ngxLot: Math.max(1, Math.round(+v("ngx-lot") || 1)), fxOverride: +v("fx") || null,
+    rateNGN: +v("rate-ngn") / 100, rateUSD: +v("rate-usd") / 100,
+  };
+  if (p.ngxMin > p.ngxMax) p.ngxMin = p.ngxMax;
+  p.cashRate = p.currency === "NGN" ? p.rateNGN : p.rateUSD;
+  p.maxVol = VOL_CEIL[p.currency][p.risk];
+  p.required = (p.target && p.target > p.budget) ? Math.pow(p.target / p.budget, 1 / p.horizon) - 1 : null;
+  p.factorWeights = FACTOR_WEIGHTS[p.objective];
+  return p;
+}
+
+// ============================================================ data pack
+let PACK = null;
+function loadPack(obj) {
+  if (!obj || !Array.isArray(obj.stocks) || !Array.isArray(obj.dates)) throw new Error("Not a data pack: expected {dates, fx_usdngn, stocks[]}");
+  obj.stocks = obj.stocks.filter(s => s && s.symbol).map(s => ({ ...s, symbol: String(s.symbol).toUpperCase(), closes: (s.closes || []).map(c => isNum(c) ? c : NaNv) }));
+  obj.fx_usdngn = (obj.fx_usdngn || []).map(c => isNum(c) ? c : NaNv);
+  // forward/back fill fx
+  let last = NaNv; for (let i = 0; i < obj.fx_usdngn.length; i++) { if (isNum(obj.fx_usdngn[i])) last = obj.fx_usdngn[i]; else obj.fx_usdngn[i] = last; }
+  for (let i = obj.fx_usdngn.length - 1; i >= 0; i--) { if (isNum(obj.fx_usdngn[i])) last = obj.fx_usdngn[i]; else obj.fx_usdngn[i] = last; }
+  obj.bySymbol = Object.fromEntries(obj.stocks.map(s => [s.symbol, s]));
+  PACK = obj;
+  return obj;
+}
+const latestFx = p => p.fxOverride || [...PACK.fx_usdngn].reverse().find(isNum) || 1500;
+
+// ============================================================ scoring
+const MIN_HISTORY = 60, L12 = 252, L6 = 126, SKIP1 = 21;
+function winsorZ(vals, clip = 2.5) {
+  const valid = vals.filter(isNum);
+  if (valid.length < 3) return vals.map(() => 0);
+  const s = [...valid].sort((a, b) => a - b);
+  const lo = quantile(s, .02), hi = quantile(s, .98);
+  const cl = vals.map(v => isNum(v) ? clamp(v, lo, hi) : NaNv);
+  const cv = cl.filter(isNum); const m = mean(cv); const sd = Math.sqrt(sum(cv.map(v => (v - m) ** 2)) / cv.length) || 1;
+  return cl.map(v => isNum(v) ? clamp((v - m) / sd, -clip, clip) : 0);
+}
+const avg = arrs => arrs[0].map((_, i) => mean(arrs.map(a => a[i])));
+const neg = a => a.map(v => -v);
+
+function rawMetrics(stock) {
+  const c = stock.closes.filter(isNum);
+  const n = c.length;
+  const r = { symbol: stock.symbol, name: stock.name, exchange: stock.exchange, sector: stock.sector, currency: stock.currency, price: stock.price, history: n, proxy: false };
+  const pe = stock.pe;
+  r.earnings_yield = isNum(pe) ? (pe > 0 ? 1 / pe : -0.05) : NaNv;
+  r.book_yield = isNum(stock.pb) && stock.pb > 0 ? 1 / stock.pb : NaNv;
+  r.roe = isNum(stock.roe) ? stock.roe : NaNv;
+  r.profit_margin = isNum(stock.profit_margin) ? stock.profit_margin : NaNv;
+  r.leverage = isNum(stock.debt_to_equity) ? stock.debt_to_equity : NaNv;
+  r.mom12 = r.mom6 = r.vol = r.mdd = NaNv;
+  if (n >= MIN_HISTORY) {
+    const lr = []; for (let i = 1; i < n; i++) lr.push(Math.log(c[i] / c[i - 1]));
+    r.vol = std(lr.slice(-L12)) * Math.sqrt(252);
+    const last = c[n - 1];
+    r.mom6 = n > L6 ? last / c[n - 1 - L6] - 1 : last / c[0] - 1;
+    r.mom12 = n > L12 ? c[n - 1 - SKIP1] / c[n - 1 - L12] - 1 : c[n - 1 - Math.min(SKIP1, n - 2)] / c[0] - 1;
+    const w = c.slice(-L12); let peak = -Infinity, mdd = 0; for (const v of w) { peak = Math.max(peak, v); mdd = Math.min(mdd, v / peak - 1); }
+    r.mdd = mdd;
+  } else {
+    const hi = stock.high_52w, lo = stock.low_52w, px = stock.price;
+    if (isNum(hi) && isNum(lo) && isNum(px) && hi > 0 && lo > 0 && hi >= lo) {
+      r.proxy = true;
+      const pos = hi > lo ? (px - lo) / (hi - lo) : .5;
+      r.mom12 = pos * 2 - 1; r.mom6 = px / hi - 1;
+      r.vol = Math.log(hi / lo) / (2 * Math.sqrt(Math.log(2)));
+      r.mdd = px / hi - 1;
+    }
+  }
+  r.dividend_yield = isNum(stock.dividend_yield) ? stock.dividend_yield : 0;
+  r.adv = stock.avg_daily_value;
+  r.log_adv = isNum(r.adv) && r.adv > 0 ? Math.log(r.adv) : NaNv;
+  r.log_mcap = isNum(stock.market_cap) && stock.market_cap > 0 ? Math.log(stock.market_cap) : NaNv;
+  return r;
+}
+
+function scoreUniverse(profile) {
+  const rows = PACK.stocks.map(rawMetrics);
+  for (const ex of ["NGX", "NYSE"]) {
+    const g = rows.filter(r => r.exchange === ex);
+    if (!g.length) continue;
+    const col = k => g.map(r => r[k]);
+    const value = avg([winsorZ(col("earnings_yield")), winsorZ(col("book_yield"))]);
+    const quality = avg([winsorZ(col("roe")), winsorZ(col("profit_margin")), neg(winsorZ(col("leverage")))]);
+    const momentum = avg([winsorZ(col("mom12")), winsorZ(col("mom6"))]);
+    const low_vol = avg([neg(winsorZ(col("vol"))), winsorZ(col("mdd"))]);
+    const dividend = winsorZ(col("dividend_yield"));
+    const liquidity = avg([winsorZ(col("log_adv")), winsorZ(col("log_mcap"))]);
+    const inputs = ["earnings_yield", "book_yield", "roe", "profit_margin", "leverage", "mom12", "vol", "dividend_yield", "adv", "log_mcap"];
+    g.forEach((r, i) => {
+      r.value = value[i]; r.quality = quality[i]; r.momentum = momentum[i]; r.low_vol = low_vol[i]; r.dividend = dividend[i]; r.liquidity = liquidity[i];
+      r.coverage = inputs.filter(k => isNum(r[k])).length / inputs.length;
+      r.composite = FACTORS.reduce((s, f) => s + profile.factorWeights[f] * r[f], 0) - 0.5 * (1 - r.coverage);
+      r.eligible = isNum(r.price) && r.price > 0 && (!isNum(r.adv) || r.adv >= MIN_ADV[r.currency === "NGN" ? "NGN" : "USD"]);
+    });
+    g.sort((a, b) => b.composite - a.composite).forEach((r, i) => r.rank = i + 1);
+  }
+  rows.sort((a, b) => a.exchange.localeCompare(b.exchange) || b.composite - a.composite);
+  return rows;
+}
+
+function selectStocks(rows, p) {
+  const n = Math.max(1, p.picks), maxPerSector = Math.max(2, Math.ceil(0.4 * n));
+  const exs = []; if (p.ngxMax > 0) exs.push("NGX"); if (p.ngxMin < 1) exs.push("NYSE");
+  const picks = {}, notes = [];
+  for (const ex of exs) {
+    const pool = rows.filter(r => r.exchange === ex && r.eligible).sort((a, b) => b.composite - a.composite);
+    const chosen = [], cnt = {};
+    for (const r of pool) { if ((cnt[r.sector] || 0) >= maxPerSector) continue; chosen.push(r); cnt[r.sector] = (cnt[r.sector] || 0) + 1; if (chosen.length >= n) break; }
+    if (!pool.length) notes.push(`${ex}: no eligible stocks in the data pack.`);
+    else if (chosen.length < n) notes.push(`${ex}: only ${chosen.length} eligible stocks after sector limits (wanted ${n}).`);
+    const proxies = chosen.filter(r => r.proxy).length;
+    if (proxies) notes.push(`${ex}: ${proxies} pick(s) scored with 52-week range proxies because their stored price history is short.`);
+    picks[ex] = chosen.map(r => r.symbol);
+  }
+  return { picks, notes, symbols: [...(picks.NGX || []), ...(picks.NYSE || [])] };
+}
+
+// ============================================================ risk model
+const ERP = { NGX: .06, NYSE: .05 }, VOL_PRIOR = { NGX: .40, NYSE: .25 };
+const C_SECTOR = .55, C_EXCH = .30, C_CROSS = .15, C_FX = .35, MEAN_SHRINK = .6, TILT = .02;
+function basePrices(stock, p) {
+  const fx = PACK.fx_usdngn, n = stock.closes.length, out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const c = stock.closes[i], f = fx[i] ?? fx[fx.length - 1];
+    if (!isNum(c)) { out[i] = NaNv; continue; }
+    if (stock.currency === p.currency) out[i] = c;
+    else if (stock.currency === "USD") out[i] = c * f; else out[i] = c / f;
+  }
+  return out;
+}
+function fxDrift(p, ex) { const ccy = ex === "NGX" ? "NGN" : "USD"; if (ccy === p.currency) return 0; const d = p.rateNGN - p.rateUSD; return p.currency === "NGN" ? d : -d; }
+
+function buildRiskModel(p, symbols, compositeOf) {
+  const stocks = symbols.map(s => PACK.bySymbol[s]);
+  const px = stocks.map(s => basePrices(s, p));
+  const T = PACK.dates.length;
+  const rets = px.map(a => { const r = new Array(T).fill(NaNv); for (let i = 1; i < T; i++) if (isNum(a[i]) && isNum(a[i - 1])) r[i] = Math.log(a[i] / a[i - 1]); return r; });
+  const days = rets.map(r => r.filter(isNum).length), enough = days.map(d => d >= MIN_HISTORY);
+  const n = symbols.length;
+  const fxr = []; for (let i = 1; i < PACK.fx_usdngn.length; i++) fxr.push(Math.log(PACK.fx_usdngn[i] / PACK.fx_usdngn[i - 1]));
+  const fxVol = fxr.length > 30 ? std(fxr) * Math.sqrt(252) : .10;
+  const mu = [], vol = [];
+  for (let i = 0; i < n; i++) {
+    const ex = stocks[i].exchange, cash = ex === "NGX" ? p.rateNGN : p.rateUSD;
+    const prior = cash + (ERP[ex] ?? .05) + fxDrift(p, ex);
+    let m = prior;
+    if (enough[i]) { const r = rets[i].filter(isNum); const v = std(r) ** 2; const hist = mean(r) * 252 + 0.5 * v * 252; m = MEAN_SHRINK * prior + (1 - MEAN_SHRINK) * hist; }
+    if (compositeOf && isNum(compositeOf[symbols[i]])) m += TILT * clamp(compositeOf[symbols[i]], -2, 2);
+    mu.push(clamp(m, -.10, .60));
+    if (enough[i]) vol.push(std(rets[i].filter(isNum)) * Math.sqrt(252));
+    else { const s = stocks[i]; let v = (isNum(s.high_52w) && isNum(s.low_52w) && s.high_52w > s.low_52w && s.low_52w > 0) ? Math.log(s.high_52w / s.low_52w) / (2 * Math.sqrt(Math.log(2))) : (VOL_PRIOR[ex] ?? .3); if (fxDrift(p, ex) !== 0) v = Math.sqrt(v * v + fxVol * fxVol); vol.push(v); }
+  }
+  const corr = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) { corr[i][i] = 1; for (let j = i + 1; j < n; j++) {
+    let c = NaNv;
+    if (enough[i] && enough[j]) { const xs = [], ys = []; for (let t = 0; t < T; t++) if (isNum(rets[i][t]) && isNum(rets[j][t])) { xs.push(rets[i][t]); ys.push(rets[j][t]); }
+      if (xs.length >= MIN_HISTORY) { const mx = mean(xs), my = mean(ys); let sxy = 0, sxx = 0, syy = 0; for (let k = 0; k < xs.length; k++) { sxy += (xs[k] - mx) * (ys[k] - my); sxx += (xs[k] - mx) ** 2; syy += (ys[k] - my) ** 2; } c = sxy / Math.sqrt(sxx * syy || 1); } }
+    if (!isNum(c)) { const a = stocks[i], b = stocks[j]; if (a.exchange === b.exchange) { c = a.sector === b.sector ? C_SECTOR : C_EXCH; if (a.exchange === "NYSE" && p.currency === "NGN") c = Math.max(c, C_FX); } else c = C_CROSS; }
+    corr[i][j] = corr[j][i] = clamp(c, -.95, .95);
+  } }
+  const avgDays = enough.some(Boolean) ? mean(days.filter((d, i) => enough[i])) : 0;
+  const intensity = clamp(.25 + .5 * Math.max(0, 1 - avgDays / 252), .25, .75);
+  const off = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) off.push(corr[i][j]);
+  const tgt = off.length ? mean(off) : .3;
+  const cov = Array.from({ length: n }, () => new Array(n));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const cij = i === j ? 1 : (1 - intensity) * corr[i][j] + intensity * tgt; cov[i][j] = vol[i] * vol[j] * cij; }
+  return { symbols, mu, cov, vol, days, exchange: stocks.map(s => s.exchange), sector: stocks.map(s => s.sector), yield: stocks.map(s => isNum(s.dividend_yield) ? s.dividend_yield : 0) };
+}
+
+// ============================================================ optimiser (projected gradient + penalties)
+const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+const matvec = (C, w) => C.map(row => dot(row, w));
+const pvar = (w, C) => dot(w, matvec(C, w));
+function projectSimplex(v, lo, hi) {
+  // find tau: sum clip(v - tau, lo, hi) = 1
+  let a = -1e3, b = 1e3;
+  const f = t => sum(v.map((x, i) => clamp(x - t, lo[i], hi[i]))) - 1;
+  if (sum(hi) < 1) return hi.slice(); if (sum(lo) > 1) return lo.slice();
+  for (let k = 0; k < 100; k++) { const m = (a + b) / 2; if (f(m) > 0) a = m; else b = m; }
+  const t = (a + b) / 2; return v.map((x, i) => clamp(x - t, lo[i], hi[i]));
+}
+function optimise(mu, cov, objective, cons, opts) {
+  const n = mu.length, { rf = 0, income = new Array(n).fill(0), cashIndex = null, riskAversion = 3, divPen = 0 } = opts;
+  const risky = new Array(n).fill(true); if (cashIndex !== null) risky[cashIndex] = false;
+  const riskyTotal = w => { let s = 0; for (let i = 0; i < n; i++) if (risky[i]) s += w[i]; return s; };
+  const stats = w => { const r = dot(w, mu), v = Math.sqrt(Math.max(pvar(w, cov), 1e-16)); return [r, v]; };
+  const f = {
+    max_sharpe: w => { const [r, v] = stats(w); return -(r - rf) / v + divPen * dot(w, w); },
+    min_vol: w => pvar(w, cov),
+    max_return: w => -dot(w, mu) + divPen * dot(w, w),
+    max_income: w => { const [r, v] = stats(w); return -(dot(w, income) + .35 * r - .5 * riskAversion * v * v) + divPen * dot(w, w); },
+    max_utility: w => { const [r, v] = stats(w); return -(r - .5 * riskAversion * v * v) + divPen * dot(w, w); },
+  }[objective];
+  // constraints g(w) >= 0
+  const g = [];
+  for (const [mask, gmin, gmax] of cons.groups) {
+    if (gmin > 0) g.push(w => { let s = 0; for (let i = 0; i < n; i++) if (mask[i]) s += w[i]; return s - gmin * riskyTotal(w); });
+    if (gmax < 1) g.push(w => { let s = 0; for (let i = 0; i < n; i++) if (mask[i]) s += w[i]; return gmax * riskyTotal(w) - s; });
+  }
+  if (cons.maxVol != null) g.push(w => cons.maxVol - Math.sqrt(Math.max(pvar(w, cov), 0)));
+  if (cons.minReturn != null) g.push(w => dot(w, mu) - cons.minReturn);
+  if (cons.minIncome != null) g.push(w => dot(w, income) - cons.minIncome);
+  const viol = w => g.reduce((s, c) => { const v = c(w); return v < 0 ? s + v * v : s; }, 0);
+  const feasible = w => g.every(c => c(w) >= -1e-3);
+  const lo = cons.lower, hi = cons.upper;
+  const run = (w0) => {
+    let w = projectSimplex(w0, lo, hi);
+    for (const rho of [10, 100, 1000, 1e4, 1e5]) {
+      const F = x => f(x) + rho * viol(x);
+      let step = 0.05;
+      for (let it = 0; it < 150; it++) {
+        const base = F(w), grad = new Array(n);
+        const h = 1e-6;
+        for (let i = 0; i < n; i++) { const wp = w.slice(); wp[i] += h; grad[i] = (F(wp) - base) / h; }
+        const gn = Math.sqrt(dot(grad, grad)) || 1;
+        let improved = false;
+        for (let ls = 0; ls < 12; ls++) {
+          const cand = projectSimplex(w.map((x, i) => x - step * grad[i] / gn), lo, hi);
+          if (F(cand) < base - 1e-12) { w = cand; improved = true; step = Math.min(step * 1.5, 0.5); break; }
+          step *= 0.5;
+        }
+        if (!improved && step < 1e-7) break;
+      }
+    }
+    return w;
+  };
+  const starts = [];
+  starts.push(new Array(n).fill(1 / n));
+  const iv = mu.map((_, i) => risky[i] ? 1 / Math.sqrt(cov[i][i] + 1e-12) : 0); const ivs = sum(iv); starts.push(iv.map(v => v / ivs));
+  const idx = mu.map((m, i) => [m, i]).filter(x => risky[x[1]]).sort((a, b) => b[0] - a[0]).slice(0, Math.max(3, Math.floor(n / 3))).map(x => x[1]);
+  const top = new Array(n).fill(0); idx.forEach(i => top[i] = 1 / idx.length); starts.push(top);
+  let best = null;
+  for (const s of starts) {
+    const w = run(s).map(x => x < 0.01 ? 0 : x); const t = sum(w); const wn = w.map((x, i) => Math.min(x / t, hi[i] + 0.01));
+    const cand = { w: wn, feasible: feasible(wn), obj: f(wn) };
+    if (!best || (cand.feasible && !best.feasible) || (cand.feasible === best.feasible && cand.obj < best.obj)) best = cand;
+  }
+  const [r, v] = stats(best.w);
+  return { weights: best.w, feasible: best.feasible, expectedReturn: r, volatility: v, objective };
+}
+
+// ============================================================ goal problem + allocation
+function buildProblem(p, rm, includeCash) {
+  const syms = [...rm.symbols, ...(includeCash ? [CASH] : [])], n = syms.length;
+  const lower = new Array(n).fill(0), upper = new Array(n).fill(p.maxW);
+  if (includeCash) { upper[n - 1] = CASH_CAP[p.risk]; }
+  const ex = syms.map((s, i) => i < rm.symbols.length ? rm.exchange[i] : "CASH");
+  const sec = syms.map((s, i) => i < rm.symbols.length ? rm.sector[i] : "Cash");
+  const groups = [];
+  const ngxMask = ex.map(e => e === "NGX");
+  if (ngxMask.some(Boolean) && ex.some(e => e === "NYSE")) groups.push([ngxMask, p.ngxMin, p.ngxMax]);
+  for (const s of new Set(sec.filter((_, i) => ex[i] !== "CASH"))) { const mask = sec.map(x => x === s); if (mask.filter(Boolean).length * p.maxW > p.maxSector) groups.push([mask, 0, p.maxSector]); }
+  const cons = { lower, upper, groups, maxVol: p.maxVol, minReturn: p.required, minIncome: p.incomeYield || null };
+  const ra = RISK_AVERSION[p.risk];
+  const map = {
+    growth: ["max_sharpe", .05, "Growth: maximise risk-adjusted return (Sharpe) inside your volatility ceiling."],
+    income: ["max_income", .05, "Income: maximise portfolio dividend yield with a return-versus-volatility trade-off."],
+    preservation: ["min_vol", 0, "Preservation: minimise volatility while beating cash by at least 1%."],
+    balanced: ["max_utility", .15, "Balanced: maximise return net of a risk charge, with a diversification bonus."],
+  };
+  const [objective, divPen, rationale] = map[p.objective];
+  if (p.objective === "preservation") cons.minReturn = Math.max(cons.minReturn ?? 0, p.cashRate + .01);
+  return { objective, cons, riskAversion: ra, divPen, rationale, syms };
+}
+
+function allocate(p, rows, sel) {
+  const compositeOf = Object.fromEntries(rows.map(r => [r.symbol, r.composite]));
+  const rm = buildRiskModel(p, sel.symbols, compositeOf);
+  const includeCash = p.allowCash && CASH_CAP[p.risk] > 0;
+  const prob = buildProblem(p, rm, includeCash);
+  const notes = [prob.rationale];
+  let mu = rm.mu.slice(), cov = rm.cov.map(r => r.slice()), income = rm.yield.slice(), cashIndex = null;
+  if (includeCash) { mu.push(p.cashRate); income.push(p.cashRate); cov.forEach(r => r.push(0)); cov.push(new Array(mu.length).fill(0)); cov[mu.length - 1][mu.length - 1] = 1e-8; cashIndex = mu.length - 1; }
+  const opts = { rf: p.cashRate, income, cashIndex, riskAversion: prob.riskAversion, divPen: prob.divPen };
+  let res = optimise(mu, cov, prob.objective, prob.cons, opts);
+  if (!res.feasible) {
+    const relaxed = [];
+    if (prob.cons.minReturn != null && p.objective !== "preservation") { relaxed.push("required return"); prob.cons.minReturn = null; }
+    if (prob.cons.minIncome != null) { relaxed.push("income target"); prob.cons.minIncome = null; }
+    let retry = optimise(mu, cov, prob.objective, prob.cons, opts);
+    if (retry.feasible) { res = retry; if (relaxed.length) notes.push("Your goal is not reachable inside your risk tolerance; dropped the " + relaxed.join(" and ") + " constraint and solved for the best achievable mix."); }
+    else { prob.cons.maxVol = null; prob.cons.minReturn = null; res = optimise(mu, cov, "min_vol", prob.cons, opts); notes.push("Even the lowest-volatility mix breaches your volatility ceiling; showing the minimum-volatility portfolio instead."); }
+  }
+  if (p.required != null && res.expectedReturn < p.required - 1e-6) notes.push(`Reaching ${money(p.target, p.currency)} needs ${pct(p.required)} a year; this mix is expected to return ${pct(res.expectedReturn)}. Extend the horizon, raise the budget or accept more risk.`);
+  if (p.incomeYield && dot(res.weights, income) < p.incomeYield - 1e-6) notes.push("The income target is not met by the eligible universe at this risk level.");
+  const weights = prob.syms.map((s, i) => ({ symbol: s, w: res.weights[i] })).filter(x => x.w > 0);
+  const lots = toLots(weights, p);
+  if (lots.unaffordable.length) notes.push("Budget too small for even one lot of: " + lots.unaffordable.join(", ") + ". Raise the budget or use a broker with fractional shares.");
+  const yieldW = dot(res.weights, income);
+  const proj = project(p.budget, res.expectedReturn, res.volatility, p.horizon, p.target);
+  const bt = backtest(weights, p);
+  const rcs = riskContribution(rm, weights);
+  return { rm, prob, res, weights, lots, proj, bt, notes, yieldW, rcs, sel };
+}
+
+function riskContribution(rm, weights) {
+  const idx = weights.filter(x => x.symbol !== CASH).map(x => [rm.symbols.indexOf(x.symbol), x.w]);
+  const w = new Array(rm.symbols.length).fill(0); idx.forEach(([i, v]) => w[i] = v);
+  const Cw = matvec(rm.cov, w), v = dot(w, Cw); const out = {};
+  if (v > 0) rm.symbols.forEach((s, i) => out[s] = w[i] * Cw[i] / v);
+  return out;
+}
+
+function toLots(weights, p) {
+  const fx = latestFx(p), cashW = weights.find(x => x.symbol === CASH)?.w || 0;
+  const orders = [];
+  for (const { symbol, w } of weights) {
+    if (symbol === CASH) continue;
+    const s = PACK.bySymbol[symbol]; if (!isNum(s.price) || s.price <= 0) continue;
+    const pxBase = s.currency === p.currency ? s.price : (s.currency === "USD" ? s.price * fx : s.price / fx);
+    const lot = s.exchange === "NGX" ? p.ngxLot : 1;
+    const shares = Math.floor(w * p.budget / (pxBase * lot)) * lot;
+    orders.push({ symbol, name: s.name, exchange: s.exchange, sector: s.sector, currency: s.currency, price: s.price, pxBase, lot, shares, target: w, cost: shares * pxBase });
+  }
+  let leftover = p.budget - cashW * p.budget - sum(orders.map(o => o.cost));
+  for (let k = 0; k < 10000; k++) {
+    let bi = -1, bg = 0;
+    for (let i = 0; i < orders.length; i++) { const o = orders[i]; const gap = o.target - o.cost / p.budget, lw = o.pxBase * o.lot / p.budget; if (gap > 0 && Math.abs(gap - lw) < Math.abs(gap) && lw * p.budget <= leftover && gap > bg) { bg = gap; bi = i; } }
+    if (bi < 0) break; const o = orders[bi]; o.shares += o.lot; o.cost = o.shares * o.pxBase; leftover -= o.pxBase * o.lot;
+  }
+  orders.forEach(o => o.actual = o.cost / p.budget);
+  orders.sort((a, b) => b.cost - a.cost);
+  const invested = sum(orders.map(o => o.cost));
+  return { orders, invested, cash: p.budget - invested, sleeve: cashW * p.budget, unaffordable: orders.filter(o => o.shares === 0).map(o => o.symbol) };
+}
+
+function project(start, er, vol, years, target, nPaths = 4000, seed = 7) {
+  const spy = 12, steps = Math.max(1, Math.round(years * spy)), dt = 1 / spy, rng = mulberry32(seed);
+  const drift = (Math.log1p(er) - .5 * vol * vol) * dt, sd = vol * Math.sqrt(dt);
+  const paths = new Array(nPaths); const finals = new Array(nPaths);
+  for (let k = 0; k < nPaths; k++) { const a = new Float64Array(steps + 1); a[0] = start; let l = 0; for (let t = 1; t <= steps; t++) { l += drift + sd * gauss(rng); a[t] = start * Math.exp(l); } paths[k] = a; finals[k] = a[steps]; }
+  const p10 = [], p50 = [], p90 = [], yrs = [];
+  for (let t = 0; t <= steps; t++) { const col = paths.map(a => a[t]).sort((x, y) => x - y); p10.push(quantile(col, .1)); p50.push(quantile(col, .5)); p90.push(quantile(col, .9)); yrs.push(t * dt); }
+  return { years: yrs, p10, p50, p90, probTarget: target ? finals.filter(v => v >= target).length / nPaths : null, probLoss: finals.filter(v => v < start).length / nPaths, target };
+}
+
+function backtest(weights, p) {
+  const eq = weights.filter(x => x.symbol !== CASH), cashW = weights.find(x => x.symbol === CASH)?.w || 0;
+  const series = eq.map(x => ({ w: x.w, px: basePrices(PACK.bySymbol[x.symbol], p) }));
+  const T = PACK.dates.length, idx = [];
+  for (let t = 0; t < T; t++) if (series.every(s => isNum(s.px[t]))) idx.push(t);
+  if (idx.length < 20) return null;
+  const t0 = idx[0], out = [];
+  let peak = -Infinity;
+  for (const t of idx) { let v = 0; for (const s of series) v += s.w * s.px[t] / s.px[t0]; v += cashW * Math.pow(1 + p.cashRate, (t - t0) / 252); const val = v * p.budget; peak = Math.max(peak, val); out.push({ date: PACK.dates[t], value: val, dd: val / peak - 1 }); }
+  return out;
+}
+
+// ============================================================ charts (SVG)
+function weightsChart(alloc, p) {
+  const rows = alloc.weights.slice().sort((a, b) => b.w - a.w);
+  const W = 560, rowH = 22, padL = 96, padR = 60, H = rows.length * rowH + 8;
+  const maxW = Math.max(...rows.map(r => r.w), .01), sx = v => padL + v / maxW * (W - padL - padR);
+  const ticks = []; for (let v = 0; v <= maxW + 1e-9; v += .05) ticks.push(v);
+  let s = `<svg viewBox="0 0 ${W} ${H + 18}" role="img" aria-label="Target weights by holding">`;
+  ticks.forEach(v => { s += `<line class="grid" x1="${sx(v)}" x2="${sx(v)}" y1="0" y2="${H}"/><text x="${sx(v)}" y="${H + 14}" text-anchor="middle">${Math.round(v * 100)}%</text>`; });
+  rows.forEach((r, i) => {
+    const ex = r.symbol === CASH ? "CASH" : PACK.bySymbol[r.symbol].exchange; const col = `var(--${ex.toLowerCase()})`;
+    const y = i * rowH + 4, x1 = sx(0), x2 = sx(r.w);
+    s += `<text x="${padL - 8}" y="${y + 14}" text-anchor="end" style="fill:var(--ink);font-weight:600">${esc(r.symbol)}</text>`;
+    s += `<path d="M${x1},${y} H${x2 - 4} a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 H${x1} Z" fill="${col}"/>`;
+    s += `<text x="${x2 + 6}" y="${y + 14}" class="num">${pct(r.w)}</text>`;
+    s += `<rect class="hit" x="0" y="${y - 2}" width="${W}" height="${rowH}" data-tip="${esc(r.symbol)}|${pct(r.w)} · ${ex}${r.symbol !== CASH ? " · " + esc(PACK.bySymbol[r.symbol].name) : ""}"/>`;
+  });
+  return s + "</svg>";
+}
+
+function fanChart(proj, p) {
+  const W = 640, H = 300, padL = 70, padR = 20, padT = 14, padB = 30;
+  const allV = [...proj.p10, ...proj.p90, proj.target || 0], ymax = Math.max(...allV) * 1.05, ymin = 0;
+  const sx = t => padL + t / proj.years[proj.years.length - 1] * (W - padL - padR), sy = v => padT + (1 - (v - ymin) / (ymax - ymin)) * (H - padT - padB);
+  const nice = niceTicks(ymin, ymax, 5);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Projected portfolio value">`;
+  nice.forEach(v => { s += `<line class="grid" x1="${padL}" x2="${W - padR}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${padL - 8}" y="${sy(v) + 4}" text-anchor="end">${compact(v, p.currency)}</text>`; });
+  for (let y = 0; y <= p.horizon; y += Math.max(1, Math.ceil(p.horizon / 8))) s += `<text x="${sx(y)}" y="${H - 8}" text-anchor="middle">${y}y</text>`;
+  const band = proj.years.map((t, i) => `${sx(t)},${sy(proj.p90[i])}`).join(" ") + " " + proj.years.map((t, i) => `${sx(t)},${sy(proj.p10[i])}`).reverse().join(" ");
+  s += `<polygon points="${band}" fill="var(--accent)" opacity=".12"/>`;
+  s += `<polyline points="${proj.years.map((t, i) => `${sx(t)},${sy(proj.p50[i])}`).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`;
+  if (proj.target) s += `<line x1="${padL}" x2="${W - padR}" y1="${sy(proj.target)}" y2="${sy(proj.target)}" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="4 4"/><text x="${W - padR}" y="${sy(proj.target) - 5}" text-anchor="end">target ${compact(proj.target, p.currency)}</text>`;
+  const last = proj.years.length - 1;
+  s += `<circle cx="${sx(proj.years[last])}" cy="${sy(proj.p50[last])}" r="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="2"/>`;
+  s += `<line class="cross" id="fan-cross" x1="0" x2="0" y1="${padT}" y2="${H - padB}" opacity="0"/>`;
+  s += `<rect class="hit" x="${padL}" y="${padT}" width="${W - padL - padR}" height="${H - padT - padB}" data-fan="1"/>`;
+  return s + "</svg>";
+}
+
+function lineChart(bt, p) {
+  const W = 640, H = 220, padL = 70, padR = 16, padT = 12, padB = 26;
+  const vals = bt.map(d => d.value), ymin = Math.min(...vals) * .97, ymax = Math.max(...vals) * 1.03;
+  const sx = i => padL + i / (bt.length - 1) * (W - padL - padR), sy = v => padT + (1 - (v - ymin) / (ymax - ymin)) * (H - padT - padB);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Buy-and-hold value over the data window">`;
+  niceTicks(ymin, ymax, 4).forEach(v => { s += `<line class="grid" x1="${padL}" x2="${W - padR}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${padL - 8}" y="${sy(v) + 4}" text-anchor="end">${compact(v, p.currency)}</text>`; });
+  const step = Math.max(1, Math.floor(bt.length / 6));
+  for (let i = 0; i < bt.length; i += step) s += `<text x="${sx(i)}" y="${H - 8}" text-anchor="middle">${bt[i].date.slice(0, 7)}</text>`;
+  const pts = bt.map((d, i) => `${sx(i)},${sy(d.value)}`).join(" ");
+  s += `<polygon points="${pts} ${sx(bt.length - 1)},${sy(ymin)} ${sx(0)},${sy(ymin)}" fill="var(--nyse)" opacity=".10"/>`;
+  s += `<polyline points="${pts}" fill="none" stroke="var(--nyse)" stroke-width="2" stroke-linejoin="round"/>`;
+  s += `<circle cx="${sx(bt.length - 1)}" cy="${sy(vals[vals.length - 1])}" r="4" fill="var(--nyse)" stroke="var(--panel)" stroke-width="2"/>`;
+  s += `<line class="cross" id="bt-cross" x1="0" x2="0" y1="${padT}" y2="${H - padB}" opacity="0"/>`;
+  s += `<rect class="hit" x="${padL}" y="${padT}" width="${W - padL - padR}" height="${H - padT - padB}" data-bt="1"/>`;
+  return s + "</svg>";
+}
+function niceTicks(lo, hi, n) { const span = hi - lo, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), norm = raw / mag; const stepN = norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10; const step = stepN * mag; const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(v); return out; }
+
+function attachTips(container, alloc, p) {
+  const tip = document.createElement("div"); tip.className = "tip"; container.appendChild(tip);
+  const show = (x, y, html) => { tip.innerHTML = html; tip.style.left = x + "px"; tip.style.top = y + "px"; tip.classList.add("show"); };
+  container.addEventListener("mousemove", e => {
+    const t = e.target; const rect = container.getBoundingClientRect();
+    if (t.dataset.tip) { const [a, b] = t.dataset.tip.split("|"); show(e.clientX - rect.left, e.clientY - rect.top, `<b>${a}</b><br>${b}`); return; }
+    if (t.dataset.fan || t.dataset.bt) {
+      const svg = t.ownerSVGElement, vb = svg.viewBox.baseVal, sr = svg.getBoundingClientRect();
+      const xv = (e.clientX - sr.left) / sr.width * vb.width; const x0 = +t.getAttribute("x"), w = +t.getAttribute("width");
+      const frac = clamp((xv - x0) / w, 0, 1);
+      if (t.dataset.fan) { const pr = alloc.proj, i = Math.round(frac * (pr.years.length - 1)); $("#fan-cross").setAttribute("x1", xv); $("#fan-cross").setAttribute("x2", xv); $("#fan-cross").setAttribute("opacity", 1);
+        show(e.clientX - rect.left, e.clientY - rect.top, `<b>Year ${pr.years[i].toFixed(1)}</b><br>90th pct ${money(pr.p90[i], p.currency)}<br>median ${money(pr.p50[i], p.currency)}<br>10th pct ${money(pr.p10[i], p.currency)}`); }
+      else { const bt = alloc.bt, i = Math.round(frac * (bt.length - 1)); $("#bt-cross").setAttribute("x1", xv); $("#bt-cross").setAttribute("x2", xv); $("#bt-cross").setAttribute("opacity", 1);
+        show(e.clientX - rect.left, e.clientY - rect.top, `<b>${bt[i].date}</b><br>${money(bt[i].value, p.currency)}<br>drawdown ${pct(bt[i].dd)}`); }
+      return;
+    }
+    tip.classList.remove("show");
+  });
+  container.addEventListener("mouseleave", () => { tip.classList.remove("show"); for (const id of ["#fan-cross", "#bt-cross"]) { const el = $(id); if (el) el.setAttribute("opacity", 0); } });
+}
+
+// ============================================================ rendering
+const zbar = z => { const v = clamp(z, -2.5, 2.5) / 2.5 * 50; return `<span class="zbar" title="${z.toFixed(2)}"><i class="${v < 0 ? "neg" : ""}" style="left:${v < 0 ? 50 + v : 50}%;width:${Math.abs(v)}%"></i></span>`; };
+let STATE = { rows: null, sel: null, alloc: null, profile: null };
+
+function renderStatus() {
+  const m = PACK.meta || {}; const el = $("#status"); const b = $("#banner");
+  const n = PACK.stocks.length, ngx = PACK.stocks.filter(s => s.exchange === "NGX").length;
+  el.innerHTML = m.is_sample
+    ? `<span class="pill warn"><span class="dot"></span>Sample data</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`
+    : `<span class="pill"><span class="dot"></span>Data ${esc((m.fetched_at || "").slice(0, 10))}</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`;
+  b.innerHTML = m.is_sample
+    ? `<div class="banner warn"><strong>Sample data.</strong><span>The figures on this page are synthetic and illustrative, not live quotes. To run it on real public data, export a data pack from the desktop app (<code>stockselector export-web</code>) and load it on the <a href="#" data-goto="data">Data</a> tab.</span></div>`
+    : (m.warnings && m.warnings.length ? `<div class="banner warn"><span>${m.warnings.map(esc).join("<br>")}</span></div>` : "");
+}
+
+function renderStrip(a, p) {
+  const el = $("#strip");
+  if (!a) { el.innerHTML = `<div class="tile hero"><span class="label">Projected median value</span><span class="value">–</span><span class="sub">Build a portfolio to see it</span></div>` + ["Expected return", "Volatility", "Sharpe", "Dividend yield", "Chance of reaching target"].map(l => `<div class="tile"><span class="label">${l}</span><span class="value">–</span></div>`).join(""); return; }
+  const last = a.proj.p50.length - 1, ccy = p.currency;
+  const sharpe = a.res.volatility > 0 ? (a.res.expectedReturn - p.cashRate) / a.res.volatility : NaNv;
+  const goal = a.proj.probTarget != null
+    ? `<div class="tile"><span class="label">Chance of reaching target</span><span class="value ${a.proj.probTarget >= .6 ? "ok" : a.proj.probTarget < .35 ? "bad" : ""}">${pct(a.proj.probTarget, 0)}</span><span class="sub">needs ${pct(p.required)}/yr</span></div>`
+    : `<div class="tile"><span class="label">Chance of a loss at horizon</span><span class="value ${a.proj.probLoss <= .15 ? "ok" : a.proj.probLoss > .35 ? "bad" : ""}">${pct(a.proj.probLoss, 0)}</span><span class="sub">ending below ${compact(p.budget, ccy)}</span></div>`;
+  el.innerHTML = `
+    <div class="tile hero"><span class="label">Projected median value in ${p.horizon} years</span><span class="value">${money(a.proj.p50[last], ccy)}</span><span class="sub">from ${money(p.budget, ccy)} · 10th–90th pct ${compact(a.proj.p10[last], ccy)} – ${compact(a.proj.p90[last], ccy)}</span></div>
+    <div class="tile"><span class="label">Expected return</span><span class="value">${pct(a.res.expectedReturn)}</span><span class="sub">per year, in ${ccy}</span></div>
+    <div class="tile"><span class="label">Volatility</span><span class="value ${a.res.volatility <= p.maxVol + 1e-3 ? "" : "bad"}">${pct(a.res.volatility)}</span><span class="sub">ceiling ${pct(p.maxVol, 0)} at risk ${p.risk}/5</span></div>
+    <div class="tile"><span class="label">Sharpe ratio</span><span class="value">${isNum(sharpe) ? sharpe.toFixed(2) : "–"}</span><span class="sub">over ${pct(p.cashRate)} cash</span></div>
+    <div class="tile"><span class="label">Dividend yield</span><span class="value">${pct(a.yieldW)}</span><span class="sub">${money(a.yieldW * p.budget, ccy)} a year</span></div>
+    ${goal}`;
+}
+
+function renderPortfolio(a, p) {
+  const el = $("#panel-portfolio");
+  if (!a) { el.innerHTML = `<div class="card"><p class="muted">Set your goals on the left and press <strong>Build portfolio</strong>.</p></div>`; return; }
+  const ccy = p.currency;
+  const split = {}; a.weights.forEach(x => { const ex = x.symbol === CASH ? "CASH" : PACK.bySymbol[x.symbol].exchange; split[ex] = (split[ex] || 0) + x.w; });
+  const sectors = {}; a.weights.forEach(x => { const s = x.symbol === CASH ? "Cash / T-bills" : PACK.bySymbol[x.symbol].sector; sectors[s] = (sectors[s] || 0) + x.w; });
+  const secRows = Object.entries(sectors).sort((x, y) => y[1] - x[1]);
+  const wRows = a.weights.slice().sort((x, y) => y.w - x.w).map(x => {
+    if (x.symbol === CASH) return `<tr><td class="sym"><span class="ex CASH"></span>CASH</td><td>–</td><td>Cash / T-bills</td><td class="r">${pct(x.w)}</td><td class="r">${pct(p.cashRate)}</td><td class="r">0.0%</td><td class="r">${pct(p.cashRate)}</td><td class="r">–</td></tr>`;
+    const i = a.rm.symbols.indexOf(x.symbol), s = PACK.bySymbol[x.symbol];
+    return `<tr><td class="sym"><span class="ex ${s.exchange}"></span>${esc(x.symbol)}</td><td>${esc(s.name)}</td><td>${esc(s.sector)}</td><td class="r">${pct(x.w)}</td><td class="r">${pct(a.rm.mu[i])}</td><td class="r">${pct(a.rm.vol[i])}</td><td class="r">${pct(a.rm.yield[i])}</td><td class="r">${pct(a.rcs[x.symbol] || 0, 0)}</td></tr>`;
+  }).join("");
+  const oRows = a.lots.orders.map(o => `<tr class="${o.shares === 0 ? "dim" : ""}"><td class="sym"><span class="ex ${o.exchange}"></span>${esc(o.symbol)}</td><td>${o.exchange}</td><td class="r">${fmtN(o.price, 2)} ${o.currency}</td><td class="r">${fmtN(o.shares)}</td><td class="r">${fmtN(o.cost)}</td><td class="r">${pct(o.target)}</td><td class="r">${pct(o.actual)}</td></tr>`).join("")
+    + `<tr><td class="sym"><span class="ex CASH"></span>CASH</td><td>–</td><td class="r">–</td><td class="r">–</td><td class="r">${fmtN(a.lots.cash)}</td><td class="r">${pct(a.lots.sleeve / p.budget)}</td><td class="r">${pct(a.lots.cash / p.budget)}</td></tr>`;
+  const bt = a.bt;
+  el.innerHTML = `
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h2>Target weights</h2><div class="legend"><span style="--c:var(--ngx)">NGX</span><span style="--c:var(--nyse)">NYSE</span><span style="--c:var(--cash)">Cash</span></div></div>
+        <div class="chart" id="weights-chart">${weightsChart(a, p)}</div>
+        <div class="small muted">Split: ${Object.entries(split).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${pct(v, 0)}`).join(" · ")}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>How this mix was built</h2></div>
+        <div class="notes"><ul>${a.notes.map(n => `<li>${esc(n)}</li>`).join("")}${a.sel.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>
+        <h3>By sector</h3>
+        <div class="tscroll"><table><thead><tr><th>Sector</th><th class="r">Weight</th></tr></thead><tbody>${secRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${pct(v)}</td></tr>`).join("")}</tbody></table></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Holdings</h2><span class="small muted">Expected return and volatility are annual, in ${ccy}. Risk contribution is each holding's share of portfolio variance.</span></div>
+      <div class="tscroll"><table><thead><tr><th>Symbol</th><th>Name</th><th>Sector</th><th class="r">Weight</th><th class="r">Exp. return</th><th class="r">Volatility</th><th class="r">Div. yield</th><th class="r">Risk contrib.</th></tr></thead><tbody>${wRows}</tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Orders</h2><div style="display:flex;gap:8px;align-items:center"><span class="small muted">Whole shares inside ${money(p.budget, ccy)} at USD/NGN ${fmtN(latestFx(p), 2)}</span><button class="btn" id="dl-orders" type="button" hidden>Save orders CSV</button></div></div>
+      <div class="tscroll"><table><thead><tr><th>Symbol</th><th>Exchange</th><th class="r">Price</th><th class="r">Shares</th><th class="r">Cost (${ccy})</th><th class="r">Target</th><th class="r">Actual</th></tr></thead><tbody>${oRows}</tbody></table></div>
+      <div class="small muted">Invested ${money(a.lots.invested, ccy)} · cash left ${money(a.lots.cash, ccy)} (of which ${money(a.lots.sleeve, ccy)} is the deliberate cash sleeve).</div>
+    </div>
+    ${bt ? `<div class="card"><div class="card-head"><h2>If you had held this mix</h2><span class="small muted">${bt[0].date} → ${bt[bt.length - 1].date}: ${spct(bt[bt.length - 1].value / bt[0].value - 1)} total, worst drawdown ${pct(Math.min(...bt.map(d => d.dd)))}. Past performance is not a forecast.</span></div><div class="chart" id="bt-chart">${lineChart(bt, p)}</div></div>` : ""}`;
+  attachTips($("#weights-chart"), a, p);
+  if (bt) attachTips($("#bt-chart"), a, p);
+  setupDownload(a, p);
+}
+
+function renderProjection(a, p) {
+  const el = $("#panel-projection");
+  if (!a) { el.innerHTML = `<div class="card"><p class="muted">Build a portfolio first.</p></div>`; return; }
+  const pr = a.proj, last = pr.years.length - 1, ccy = p.currency;
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>Monte Carlo projection</h2><span class="small muted">4,000 simulated paths · ${pct(a.res.expectedReturn)} expected return · ${pct(a.res.volatility)} volatility · monthly steps</span></div>
+      <div class="chart" id="fan-chart">${fanChart(pr, p)}</div>
+      <div class="legend"><span style="--c:var(--accent)">Median path</span><span style="--c:color-mix(in srgb, var(--accent) 25%, var(--panel))">10th–90th percentile band</span></div>
+    </div>
+    <div class="strip">
+      <div class="tile"><span class="label">Bad case (10th pct)</span><span class="value">${money(pr.p10[last], ccy)}</span></div>
+      <div class="tile"><span class="label">Median</span><span class="value">${money(pr.p50[last], ccy)}</span></div>
+      <div class="tile"><span class="label">Good case (90th pct)</span><span class="value">${money(pr.p90[last], ccy)}</span></div>
+      <div class="tile"><span class="label">Chance of a loss</span><span class="value">${pct(pr.probLoss, 0)}</span></div>
+      ${pr.probTarget != null ? `<div class="tile"><span class="label">Chance of reaching ${compact(pr.target, ccy)}</span><span class="value">${pct(pr.probTarget, 0)}</span></div>` : ""}
+    </div>
+    ${p.required != null ? `<div class="card"><p class="muted" style="margin:0">Your target needs <strong>${pct(p.required)} a year</strong>. This mix is expected to deliver <strong>${pct(a.res.expectedReturn)}</strong>, so the chance of getting there is about <strong>${pct(pr.probTarget, 0)}</strong>. ${a.res.expectedReturn < p.required ? "A longer horizon, a bigger budget or a higher risk level would improve the odds." : "The constraint is comfortably met at this risk level."}</p></div>` : ""}`;
+  attachTips($("#fan-chart"), a, p);
+}
+
+function renderScreener(rows, sel, p) {
+  const el = $("#panel-screener");
+  const picked = new Set(sel ? sel.symbols : []);
+  const table = ex => {
+    const g = rows.filter(r => r.exchange === ex);
+    if (!g.length) return "";
+    return `<div class="card"><div class="card-head"><h2>${ex}</h2><span class="small muted">${g.length} stocks ranked by the ${p.objective} composite. Highlighted rows are the current picks.</span></div>
+      <div class="tscroll"><table><thead><tr><th class="r">#</th><th>Symbol</th><th>Name</th><th>Sector</th><th class="r">Score</th><th>Value</th><th>Quality</th><th>Momentum</th><th>Low vol</th><th>Dividend</th><th>Liquidity</th><th class="r">P/E</th><th class="r">Yield</th><th class="r">12m</th><th class="r">Vol</th><th class="r">Mkt cap</th></tr></thead><tbody>
+      ${g.map(r => `<tr class="${picked.has(r.symbol) ? "pick" : ""}${r.eligible ? "" : " dim"}"><td class="r">${r.rank}</td><td class="sym">${esc(r.symbol)}${r.proxy ? " <span title='52-week range proxy' class='muted'>*</span>" : ""}</td><td>${esc(r.name)}</td><td>${esc(r.sector)}</td><td class="r">${r.composite.toFixed(2)}</td><td>${zbar(r.value)}</td><td>${zbar(r.quality)}</td><td>${zbar(r.momentum)}</td><td>${zbar(r.low_vol)}</td><td>${zbar(r.dividend)}</td><td>${zbar(r.liquidity)}</td><td class="r">${isNum(PACK.bySymbol[r.symbol].pe) ? PACK.bySymbol[r.symbol].pe.toFixed(1) : "–"}</td><td class="r">${pct(r.dividend_yield)}</td><td class="r">${spct(r.mom12)}</td><td class="r">${pct(r.vol, 0)}</td><td class="r">${compact(PACK.bySymbol[r.symbol].market_cap, r.currency === "NGN" ? "NGN" : "USD")}</td></tr>`).join("")}
+      </tbody></table></div></div>`;
+  };
+  el.innerHTML = `<div class="card"><p class="muted" style="margin:0">Each factor is a z-score against the stock's own exchange: the bar sits right of centre when the stock beats its peers. Greyed rows fail the liquidity floor. <span class="num">*</span> marks price factors estimated from the 52-week range.</p></div>` + table("NGX") + table("NYSE");
+}
+
+function renderData() {
+  const el = $("#panel-data"), m = PACK.meta || {};
+  el.innerHTML = `
+    <div class="grid-2">
+      <div class="card">
+        <h2>Data in this page</h2>
+        <div class="tscroll"><table><tbody>
+          <tr><td>Source</td><td>${m.is_sample ? "Synthetic sample (not live)" : esc((m.sources || []).join(", ") || "data pack")}</td></tr>
+          <tr><td>As of</td><td>${esc((m.fetched_at || "").slice(0, 16).replace("T", " "))}</td></tr>
+          <tr><td>Trading days stored</td><td class="num">${PACK.dates.length} (${PACK.dates[0]} → ${PACK.dates[PACK.dates.length - 1]})</td></tr>
+          <tr><td>Latest USD/NGN</td><td class="num">${fmtN(latestFx({}), 2)}</td></tr>
+          <tr><td>Stocks</td><td class="num">${PACK.stocks.length}</td></tr>
+        </tbody></table></div>
+        <button class="btn" id="reset-pack" type="button" ${localStorage.getItem("ngxnyse.pack") ? "" : "disabled"}>Remove loaded pack, go back to the built-in data</button>
+      </div>
+      <div class="card">
+        <h2>Load real public data</h2>
+        <p class="muted" style="margin:0">Browsers cannot read the exchanges' feeds directly, so the desktop app fetches them and exports a data pack. On a computer with the Python app installed:</p>
+        <pre>pip install -e ".[ui]"
+stockselector refresh
+stockselector export-web data-pack.json</pre>
+        <div class="dropzone"><label for="pack-file"><strong>Load a data pack</strong> (JSON). It stays in this browser only.</label><input type="file" id="pack-file" accept="application/json,.json"><span class="small muted" id="pack-msg"></span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Price history</h2><select id="px-symbol">${PACK.stocks.map(s => `<option value="${esc(s.symbol)}">${esc(s.symbol)} · ${esc(s.name)}</option>`).join("")}</select></div>
+      <div class="chart" id="px-chart"></div>
+    </div>`;
+  const draw = () => { const s = PACK.bySymbol[$("#px-symbol").value]; const pts = s.closes.map((c, i) => ({ date: PACK.dates[i], value: c, dd: 0 })).filter(d => isNum(d.value)); $("#px-chart").innerHTML = pts.length > 1 ? lineChart(pts, { currency: s.currency }) : `<p class="muted">No stored price history for ${esc(s.symbol)} yet.</p>`; };
+  $("#px-symbol").addEventListener("change", draw); draw();
+  $("#pack-file").addEventListener("change", async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const txt = await f.text(); const obj = JSON.parse(txt); loadPack(obj); try { localStorage.setItem("ngxnyse.pack", txt); } catch (err) { $("#pack-msg").textContent = "Loaded (too large to remember between visits)."; } STATE.alloc = null; boot(true); $("#pack-msg").textContent = `Loaded ${obj.stocks.length} stocks.`; }
+    catch (err) { $("#pack-msg").textContent = "Could not load: " + err.message; }
+  });
+  $("#reset-pack").addEventListener("click", () => { try { localStorage.removeItem("ngxnyse.pack"); } catch (e) {} loadPack(JSON.parse($("#data-pack").textContent)); STATE.alloc = null; boot(true); });
+}
+
+async function setupDownload(a, p) {
+  const btn = $("#dl-orders"); if (!btn) return;
+  const dl = window.claude && window.claude.use ? await window.claude.use("downloads").catch(() => null) : null;
+  if (!dl || !$("#dl-orders")) return;
+  btn.hidden = false;
+  btn.addEventListener("click", async () => {
+    const head = "symbol,name,exchange,currency,price_local,shares,cost_" + p.currency.toLowerCase() + ",target_weight,actual_weight\n";
+    const body = a.lots.orders.map(o => [o.symbol, JSON.stringify(o.name), o.exchange, o.currency, o.price, o.shares, o.cost.toFixed(2), o.target.toFixed(4), o.actual.toFixed(4)].join(",")).join("\n");
+    try { await dl.save({ filename: "orders.csv", data: head + body }); } catch (err) { /* viewer declined */ }
+  });
+}
+
+// ============================================================ wiring
+function build() {
+  const p = readProfile(); STATE.profile = p;
+  $("#build").disabled = true; $("#build-note").textContent = "Optimising…";
+  setTimeout(() => {
+    try {
+      const rows = scoreUniverse(p), sel = selectStocks(rows, p);
+      STATE.rows = rows; STATE.sel = sel;
+      if (!sel.symbols.length) throw new Error("No eligible stocks for these settings.");
+      const a = allocate(p, rows, sel); STATE.alloc = a;
+      renderStrip(a, p); renderPortfolio(a, p); renderProjection(a, p); renderScreener(rows, sel, p);
+      $("#build-note").textContent = `Built ${new Date().toLocaleTimeString()} · ${sel.symbols.length} picks screened from ${rows.length} stocks.`;
+    } catch (err) { $("#build-note").textContent = "Could not build: " + err.message; console.error(err); }
+    $("#build").disabled = false;
+    try { localStorage.setItem("ngxnyse.profile", JSON.stringify(formState())); } catch (e) {}
+  }, 20);
+}
+
+function formState() { const o = {}; document.querySelectorAll("aside input, aside select").forEach(el => o[el.id] = el.type === "checkbox" ? el.checked : el.value); document.querySelectorAll("aside .seg").forEach(s => o[s.id] = s.querySelector("[aria-pressed=true]").dataset.v); return o; }
+function restoreForm() {
+  let saved = null; try { saved = JSON.parse(localStorage.getItem("ngxnyse.profile") || "null"); } catch (e) {}
+  if (!saved) return;
+  for (const [id, v] of Object.entries(saved)) { const el = document.getElementById(id); if (!el) continue; if (el.classList.contains("seg")) el.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); else if (el.type === "checkbox") el.checked = !!v; else el.value = v; }
+}
+function syncOutputs() {
+  const fmt = { risk: v => v, picks: v => v, "income-yield": v => pct(+v), "ngx-min": v => pct(+v, 0), "ngx-max": v => pct(+v, 0), "max-w": v => pct(+v, 0), "max-sector": v => pct(+v, 0) };
+  for (const [id, f] of Object.entries(fmt)) { const el = $("#" + id); $("#" + id + "-out").textContent = f(el.value); }
+  $("#income-field").hidden = $("#objective [aria-pressed=true]").dataset.v !== "income";
+  $("#target").disabled = !$("#use-target").checked;
+  const ccy = $("#currency [aria-pressed=true]").dataset.v;
+  $("#budget").step = ccy === "NGN" ? 100000 : 500; $("#target").step = $("#budget").step;
+}
+function wire() {
+  document.querySelectorAll(".seg").forEach(seg => seg.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); if (seg.id === "currency") { const toNGN = b.dataset.v === "NGN"; const bud = $("#budget"), tgt = $("#target"), fx = latestFx({}); bud.value = Math.round(toNGN ? bud.value * fx : bud.value / fx); tgt.value = Math.round(toNGN ? tgt.value * fx : tgt.value / fx); } syncOutputs(); }));
+  document.querySelectorAll("aside input").forEach(el => el.addEventListener("input", syncOutputs));
+  $("#ngx-min").addEventListener("input", () => { if (+$("#ngx-min").value > +$("#ngx-max").value) $("#ngx-max").value = $("#ngx-min").value; syncOutputs(); });
+  $("#ngx-max").addEventListener("input", () => { if (+$("#ngx-max").value < +$("#ngx-min").value) $("#ngx-min").value = $("#ngx-max").value; syncOutputs(); });
+  $("#build").addEventListener("click", build);
+  document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+  document.addEventListener("click", e => { const a = e.target.closest("[data-goto]"); if (a) { e.preventDefault(); showTab(a.dataset.goto); } });
+}
+function showTab(name) { document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", t.dataset.tab === name)); document.querySelectorAll(".panel").forEach(p => p.hidden = p.id !== "panel-" + name); }
+
+function boot(rebuild) {
+  renderStatus(); renderData();
+  const p = readProfile();
+  const rows = scoreUniverse(p), sel = selectStocks(rows, p); STATE.rows = rows; STATE.sel = sel;
+  renderScreener(rows, sel, p);
+  if (rebuild || !STATE.alloc) build();
+}
+
+(function start() {
+  let pack = null;
+  try { const saved = localStorage.getItem("ngxnyse.pack"); if (saved) pack = JSON.parse(saved); } catch (e) { pack = null; }
+  if (!pack) pack = JSON.parse($("#data-pack").textContent);
+  loadPack(pack);
+  restoreForm(); syncOutputs(); wire();
+  renderStrip(null); renderPortfolio(null); renderProjection(null);
+  boot(true);
+})();
+})();
+</script>
