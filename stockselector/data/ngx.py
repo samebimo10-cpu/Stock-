@@ -307,9 +307,37 @@ def _sane(price: float, pct: float) -> bool:
     return price == price and price > 0 and not (pct == pct and abs(pct) > MAX_SANE_DAY_MOVE)
 
 
+def build_ngx_board(ticker: pd.DataFrame | None, equities: pd.DataFrame | None,
+                    am: pd.DataFrame | None, as_of: str) -> pd.DataFrame:
+    """Every listed NGX equity with its last price, from whichever feeds answered."""
+    frames = []
+    if equities is not None:
+        e = equities[["price", "pct_change", "market_cap", "name", "sector"]].copy()
+        e["pct_change"] = e["pct_change"].where(e["pct_change"].abs() <= MAX_SANE_DAY_MOVE)
+        frames.append(e)
+    if ticker is not None:
+        t = ticker.copy()
+        t["pct_change"] = t["pct_change"].where(t["pct_change"].abs() <= MAX_SANE_DAY_MOVE)
+        frames.append(t)
+    if am is not None:
+        frames.append(am[["price", "pct_change", "market_cap", "name", "sector", "ytd_change"]])
+    if not frames:
+        return pd.DataFrame()
+    board = frames[0]
+    for extra in frames[1:]:
+        board = board.combine_first(extra)
+    board = board.reset_index().rename(columns={"index": "symbol"})
+    if "symbol" not in board.columns:
+        board = board.rename(columns={board.columns[0]: "symbol"})
+    board["exchange"] = "NGX"
+    board["currency"] = "NGN"
+    board["as_of"] = as_of
+    return board
+
+
 def fetch_ngx(listings: list[Listing], polite_delay: float = 0.3,
-              with_stock_pages: bool = True) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
-    """Return (snapshot_long, fundamentals, warnings) for the NGX universe."""
+              with_stock_pages: bool = True) -> tuple[pd.DataFrame, pd.DataFrame, list[str], pd.DataFrame]:
+    """Return (snapshot_long, fundamentals, warnings, board) for NGX."""
     warnings: list[str] = []
     sources: list[str] = []
 
@@ -405,7 +433,8 @@ def fetch_ngx(listings: list[Listing], polite_delay: float = 0.3,
         "symbol": fundamentals.index.values,
         "close": fundamentals["price"].values,
     }).dropna(subset=["close"])
-    return long, fundamentals, warnings
+    board = build_ngx_board(ticker, equities, am, today)
+    return long, fundamentals, warnings, board
 
 
 def import_history_csv(path: str) -> pd.DataFrame:

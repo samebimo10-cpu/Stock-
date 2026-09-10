@@ -153,6 +153,8 @@ def refresh(
         f = md.fundamentals.loc[syms]
         cov = ", ".join(f"{c} {int(f[c].notna().sum())}" for c in ("price", "market_cap", "pe", "dividend_yield", "high_52w", "ytd_change", "avg_daily_value"))
         console.print(f"{ex}: {len(syms)} symbols, price history median {int(sorted(days)[len(days)//2]) if days else 0} days; coverage: {cov}")
+    counts = md.board.groupby("exchange")["symbol"].count().to_dict() if not md.board.empty else {}
+    console.print("Price board: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
     console.print(f"USD/NGN: {md.latest_fx():,.2f}")
 
 

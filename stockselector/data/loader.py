@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ..universe import Listing, load_universe
-from .base import MarketData, empty_fundamentals
+from .base import MarketData, empty_fundamentals, normalise_board
 from .cache import DiskCache
 from .sample import sample_market_data
 
@@ -50,6 +50,7 @@ def load_market_data(
     warnings: list[str] = []
     price_frames: list[pd.DataFrame] = []
     fund_frames: list[pd.DataFrame] = []
+    board_frames: list[pd.DataFrame] = []
 
     # Optional user-supplied NGX history is merged into the persisted store first.
     if ngx_history_csv:
@@ -57,12 +58,14 @@ def load_market_data(
         cache.append_history("ngx_history", import_history_csv(ngx_history_csv))
 
     for ex in exchanges:
-        prices, funds, w = _load_exchange(ex, listings[ex], cache, mode, ngx_stock_pages)
+        prices, funds, w, board = _load_exchange(ex, listings[ex], cache, mode, ngx_stock_pages)
         warnings.extend(w)
         if prices is not None and not prices.empty:
             price_frames.append(prices)
         if funds is not None and not funds.empty:
             fund_frames.append(funds)
+        if board is not None and not board.empty:
+            board_frames.append(board)
 
     if not fund_frames:
         if mode == "auto":
@@ -75,8 +78,27 @@ def load_market_data(
     fundamentals = pd.concat(fund_frames).pipe(lambda d: d[~d.index.duplicated(keep="first")])
 
     fx = _load_fx(cache, mode, fx_override, warnings, prices.index if not prices.empty else None)
-    return MarketData(prices=prices, fundamentals=fundamentals, fx_usdngn=fx,
-                      warnings=warnings, is_sample=False, fetched_at=datetime.now(timezone.utc))
+    board = pd.concat(board_frames, ignore_index=True) if board_frames else None
+    md = MarketData(prices=prices, fundamentals=fundamentals, fx_usdngn=fx, warnings=warnings,
+                    is_sample=False, fetched_at=datetime.now(timezone.utc), board=board)
+    _fill_board_from_universe(md)
+    return md
+
+
+def _fill_board_from_universe(md: MarketData) -> None:
+    """Make sure every screened stock appears on the board even if the wide feed failed."""
+    f = md.fundamentals
+    rows = pd.DataFrame({
+        "symbol": f.index, "name": f["name"], "exchange": f["exchange"], "sector": f["sector"],
+        "currency": f["currency"], "price": f["price"], "pct_change": np.nan, "market_cap": f["market_cap"],
+        "ytd_change": f["ytd_change"], "as_of": f["as_of"],
+    })
+    board = md.board.set_index("symbol") if not md.board.empty else pd.DataFrame().rename_axis("symbol")
+    merged = board.combine_first(rows.set_index("symbol")) if not board.empty else rows.set_index("symbol")
+    # sector labels from the universe are cleaner than the feeds' where both exist
+    sec = f["sector"].reindex(merged.index)
+    merged["sector"] = sec.where(sec.notna(), merged["sector"])
+    md.board = normalise_board(merged.reset_index())
 
 
 # ----------------------------------------------------------------------------
@@ -85,37 +107,47 @@ def _load_exchange(ex: str, listings: list[Listing], cache: DiskCache, mode: str
     warnings: list[str] = []
     pkey, fkey = f"{ex.lower()}_prices", f"{ex.lower()}_fundamentals"
 
+    bkey = f"{ex.lower()}_board"
+
     def from_cache(allow_stale: bool):
         p = cache.get_frame(pkey, allow_stale=allow_stale)
         f = cache.get_json(fkey, allow_stale=allow_stale)
+        b = cache.get_frame(bkey, allow_stale=True)
+        if b is not None:
+            b = b.reset_index()
         if ex == "NGX":
             hist = cache.read_history("ngx_history")
             if hist is not None and not hist.empty:
                 p = hist if p is None else hist.combine_first(p)
         if f is None:
-            return None, None
+            return None, None, None
         fdf = pd.DataFrame.from_dict(f, orient="index")
-        return (p if p is not None else pd.DataFrame()), fdf
+        return (p if p is not None else pd.DataFrame()), fdf, b
 
     if mode in ("auto", "cache"):
-        p, f = from_cache(allow_stale=(mode == "cache"))
+        p, f, b = from_cache(allow_stale=(mode == "cache"))
         if f is not None:
             wanted = [l.symbol for l in listings]
             f = f[f.index.isin(wanted)]
             if not f.empty:
-                return p, f, warnings
+                return p, f, warnings, b
         if mode == "cache":
             warnings.append(f"{ex}: nothing in cache")
-            return None, None, warnings
+            return None, None, warnings, None
 
     # live
+    board = None
     try:
         if ex == "NYSE":
-            from .nyse import fetch_nyse
+            from .nyse import fetch_nyse, fetch_nyse_board
             prices, funds = fetch_nyse(listings)
+            try:
+                board = fetch_nyse_board()
+            except Exception as exc:
+                warnings.append(f"NYSE: whole-market board unavailable ({exc}); showing the screened universe only")
         elif ex == "NGX":
             from .ngx import fetch_ngx
-            long, funds, w = fetch_ngx(listings, with_stock_pages=ngx_stock_pages)
+            long, funds, w, board = fetch_ngx(listings, with_stock_pages=ngx_stock_pages)
             warnings.extend(w)
             prices = cache.append_history("ngx_history", long)
             hist_days = int(prices.notna().sum().median()) if not prices.empty else 0
@@ -129,14 +161,19 @@ def _load_exchange(ex: str, listings: list[Listing], cache: DiskCache, mode: str
             raise ValueError(f"Unknown exchange {ex}")
         cache.put_frame(pkey, prices)
         cache.put_json(fkey, funds.replace({np.nan: None}).to_dict(orient="index"))
-        return prices, funds, warnings
+        if board is not None and not board.empty:
+            cache.put_frame(bkey, normalise_board(board).set_index("symbol"))
+        else:
+            board = cache.get_frame(bkey, allow_stale=True)
+            board = board.reset_index() if board is not None else None
+        return prices, funds, warnings, board
     except Exception as exc:
         warnings.append(f"{ex}: live fetch failed ({exc}); trying stale cache")
-        p, f = from_cache(allow_stale=True)
+        p, f, b = from_cache(allow_stale=True)
         if f is not None:
             warnings.append(f"{ex}: using stale cached data")
-            return p, f, warnings
-        return None, None, warnings
+            return p, f, warnings, b
+        return None, None, warnings, None
 
 
 def _load_fx(cache: DiskCache, mode: str, override: float | None, warnings: list[str],

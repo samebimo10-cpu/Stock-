@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from .data.base import MarketData
 
@@ -41,7 +42,15 @@ def to_web_pack(md: MarketData, max_days: int = 520) -> dict:
             **{k: _clean(row[k]) for k in _NUM_FIELDS},
             "closes": [_clean(c) for c in closes],
         })
+    board = []
+    for _, r in md.board.iterrows():
+        board.append({"symbol": str(r["symbol"]), "name": None if pd.isna(r["name"]) else str(r["name"]),
+                      "exchange": str(r["exchange"]), "sector": None if pd.isna(r["sector"]) else str(r["sector"]),
+                      "currency": str(r["currency"]), "price": _clean(r["price"]), "pct_change": _clean(r["pct_change"]),
+                      "market_cap": _clean(r["market_cap"]), "ytd_change": _clean(r["ytd_change"]),
+                      "as_of": None if pd.isna(r["as_of"]) else str(r["as_of"])})
     return {
+        "board": board,
         "meta": {
             "is_sample": bool(md.is_sample),
             "fetched_at": md.fetched_at.isoformat(),

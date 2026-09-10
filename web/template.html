@@ -160,6 +160,80 @@ tr.dim td{color:var(--ink-3)}
 code{font-family:var(--font-mono);font-size:12px;background:var(--panel-2);padding:1px 5px;border-radius:3px}
 pre{font-family:var(--font-mono);font-size:12px;background:var(--panel-2);padding:10px 12px;border-radius:4px;overflow-x:auto;margin:0}
 footer{margin-top:24px;font-size:12px;color:var(--ink-3);border-top:1px solid var(--line);padding-top:12px}
+
+/* ---- mode switch */
+.modeseg{display:inline-grid;grid-auto-flow:column;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden}
+.modeseg button{background:var(--panel);border:0;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;color:var(--ink-2)}
+.modeseg button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+.tabs{overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.tab{white-space:nowrap}
+aside .aside-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+aside .aside-head .btn{display:none;padding:4px 10px;font-size:12px}
+aside .goal-summary{display:none;font-size:13px;color:var(--ink-2)}
+body[data-mode="mobile"] .layout{grid-template-columns:1fr;gap:14px}
+body[data-mode="mobile"] aside{position:static}
+body[data-mode="mobile"] aside .aside-head .btn{display:inline-block}
+body[data-mode="mobile"] aside.collapsed > *:not(.aside-head):not(.goal-summary){display:none}
+body[data-mode="mobile"] aside.collapsed .goal-summary{display:block}
+body[data-mode="mobile"] .decision-only{display:none!important}
+body[data-mode="mobile"] .decision-col{display:none}
+body[data-mode="mobile"] .strip{grid-template-columns:repeat(2,1fr)}
+body[data-mode="mobile"] .strip .hero{grid-column:1/-1}
+body[data-mode="mobile"] .strip .tile:nth-child(6){grid-column:1/-1}
+body[data-mode="mobile"] .grid-2{grid-template-columns:1fr}
+body[data-mode="mobile"] .brand .tag{display:none}
+body[data-mode="mobile"] .intro{display:none}
+body[data-mode="mobile"] .card{padding:12px}
+body[data-mode="mobile"] .tile .value{font-size:18px}
+body[data-mode="mobile"] .tile.hero .value{font-size:24px}
+body[data-mode="mobile"] table{font-size:12.5px}
+body[data-mode="mobile"] th,body[data-mode="mobile"] td{padding:6px 6px}
+
+/* ---- prices board */
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.toolbar input[type=search]{flex:1;min-width:160px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:4px;background:var(--panel);color:var(--ink)}
+.toolbar select{padding:7px 8px;border:1px solid var(--line-strong);border-radius:4px;background:var(--panel);color:var(--ink)}
+.chips{display:flex;gap:4px}
+.chip{border:1px solid var(--line-strong);background:var(--panel);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600;color:var(--ink-2);cursor:pointer}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.up{color:var(--good)}.down{color:var(--crit)}
+.mkt{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.mkt .tile{border:1px solid var(--line);border-radius:var(--radius)}
+.mkt .bar{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--panel-2);margin-top:4px}
+.mkt .bar i{display:block;height:100%}
+.star{color:var(--accent);font-weight:700}
+
+/* ---- learn */
+.progress{height:8px;background:var(--panel-2);border-radius:4px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--accent)}
+.lesson{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+.lesson > summary{list-style:none;cursor:pointer;padding:12px 14px;display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center}
+.lesson > summary::-webkit-details-marker{display:none}
+.lesson .no{font-family:var(--font-display);font-weight:700;font-size:18px;color:var(--ink-3)}
+.lesson .lt{font-weight:600}
+.lesson .lm{font-size:12px;color:var(--ink-3)}
+.lesson .status{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid var(--line-strong);color:var(--ink-2);white-space:nowrap}
+.lesson .status.done{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.lesson .lbody{padding:0 14px 14px;display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line)}
+.lesson .lbody p{margin:0;max-width:70ch;line-height:1.55}
+.lesson .lbody p + p{margin-top:8px}
+.lesson .prose{padding-top:12px}
+.keypoints{background:var(--panel-2);border-radius:var(--radius);padding:10px 14px}
+.keypoints ul{margin:4px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.quiz{display:flex;flex-direction:column;gap:10px}
+.quiz fieldset{border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin:0}
+.quiz legend{font-weight:600;padding:0 4px}
+.quiz label{display:flex;gap:8px;align-items:flex-start;padding:4px 0;cursor:pointer}
+.quiz input{accent-color:var(--accent);margin-top:3px}
+.quiz .fb{font-size:13px;margin-top:6px;padding:8px 10px;border-radius:4px;background:var(--panel-2)}
+.quiz .fb.ok{background:var(--accent-soft)}
+.quiz .fb.no{background:var(--crit-bg)}
+.gloss dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0}
+.gloss dt{font-weight:600}
+.gloss dd{margin:0;color:var(--ink-2)}
+@media (max-width:600px){.gloss dl{grid-template-columns:1fr}.gloss dd{margin-bottom:6px}}
+.reading li{margin-bottom:8px}
+.reading ul{margin:0;padding-left:18px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 
@@ -168,12 +242,19 @@ footer{margin-top:24px;font-size:12px;color:var(--ink-3);border-top:1px solid va
     <h1>NGX<span>·</span>NYSE Allocator</h1>
     <span class="tag">Goal-based stock selection across Lagos and New York, from public data.</span>
   </div>
-  <div class="status" id="status"></div>
+  <div class="status" id="status">
+    <div class="modeseg" id="mode" role="group" aria-label="Layout mode" title="Mobile: essentials only. Decision: every table and chart.">
+      <button type="button" data-v="mobile">Mobile</button>
+      <button type="button" data-v="decision" aria-pressed="true">Decision</button>
+    </div>
+    <span id="status-pills"></span>
+  </div>
 </header>
 
 <div class="layout">
-<aside aria-label="Your goals">
-  <h2>Your goals</h2>
+<aside aria-label="Your goals" id="aside">
+  <div class="aside-head"><h2>Your goals</h2><button class="btn" type="button" id="aside-toggle">Edit</button></div>
+  <div class="goal-summary" id="goal-summary"></div>
   <div class="field">
     <label>Objective</label>
     <div class="seg" id="objective" role="group" aria-label="Objective">
@@ -250,15 +331,185 @@ footer{margin-top:24px;font-size:12px;color:var(--ink-3);border-top:1px solid va
     <button class="tab" role="tab" aria-selected="true" data-tab="portfolio" id="tab-portfolio">Portfolio</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="projection" id="tab-projection">Projection</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="screener" id="tab-screener">Screener</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="prices" id="tab-prices">Prices</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="learn" id="tab-learn">Learn</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="data" id="tab-data">Data</button>
   </div>
   <section class="panel" id="panel-portfolio" role="tabpanel"></section>
   <section class="panel" id="panel-projection" role="tabpanel" hidden></section>
   <section class="panel" id="panel-screener" role="tabpanel" hidden></section>
+  <section class="panel" id="panel-prices" role="tabpanel" hidden></section>
+  <section class="panel" id="panel-learn" role="tabpanel" hidden></section>
   <section class="panel" id="panel-data" role="tabpanel" hidden></section>
   <footer>Analytical tool, not investment advice. Figures come from free public sources and can be stale; verify before trading. Expected returns are estimates with wide error bars.</footer>
 </main>
 </div>
+<script>
+window.LESSONS = [
+{ id: "shares", title: "How shares and the two exchanges work", minutes: 6,
+  body: `<p>A share is a slice of ownership in a company. Own 1,000 shares of Zenith Bank and you own a tiny fraction of its branches, loans and profits. You are paid in two ways: the share price can rise (a capital gain when you sell) and the company can hand out part of its profit as a dividend.</p>
+<p><strong>The Nigerian Exchange (NGX)</strong> in Lagos lists about 150 companies, priced in naira. Trading runs Monday to Friday with the main session from 10:00 to 14:30 West Africa Time. Two rules matter to a beginner: a stock may move at most 10% up or down in one day (the daily price limit), and a trade settles three working days later (T+3) through the Central Securities Clearing System, so you need a CSCS account, which your stockbroker opens for you. The main benchmark is the NGX All-Share Index; the NGX 30 tracks the thirty largest names.</p>
+<p><strong>The New York Stock Exchange (NYSE)</strong> lists more than 2,000 companies, priced in US dollars, trading 9:30 to 16:00 Eastern Time. There is no per-stock daily limit, but market-wide circuit breakers pause trading if the S&amp;P 500 falls 7%, 13% or 20% in a day. Trades have settled the next day (T+1) since May 2024. Benchmarks: the S&amp;P 500 and the Dow Jones Industrial Average.</p>
+<p>Order sizes differ too. Some Nigerian brokers ask for minimum quantities; on the NYSE you can buy one share, and many brokers sell fractions. Prices in this app are the last close: NGX after 14:30 Lagos time, NYSE after 16:00 New York time.</p>`,
+  points: ["A share is ownership; you earn from price gains and dividends.", "NGX: naira, 10:00–14:30 WAT, ±10% daily limit, settles T+3 via CSCS.", "NYSE: dollars, 9:30–16:00 ET, circuit breakers instead of per-stock limits, settles T+1.", "Benchmarks: NGX All-Share Index; S&P 500."],
+  quiz: [
+    { q: "How much can an NGX-listed stock move in one trading day?", options: ["At most 5%", "At most 10%", "There is no limit", "At most 20%"], answer: 1, why: "NGX applies a daily price limit of 10% in either direction on individual stocks." },
+    { q: "Which two things can make you money as a shareholder?", options: ["Interest and fees", "Price gains and dividends", "Only dividends", "A fixed coupon every year"], answer: 1, why: "Shareholders benefit from a rising price (capital gain) and from dividends paid out of profits." }
+  ] },
+{ id: "value", title: "Price is what you pay, value is what you get", minutes: 8,
+  body: `<p>Benjamin Graham, whose book <em>The Intelligent Investor</em> (1949) trained Warren Buffett, imagined a manic business partner called Mr Market who offers you a price every day. Some days he is euphoric, some days despairing. You never have to accept his price; you only have to decide whether it is below what the business is worth, leaving a <strong>margin of safety</strong>.</p>
+<p>Three numbers put a price in context. <strong>Market capitalisation</strong> is the price of one share multiplied by all the shares: what the whole company sells for. The <strong>price-to-earnings ratio (P/E)</strong> divides the price by one year's profit per share: a P/E of 10 means you pay ten years of current profit. Flip it over and you get the <strong>earnings yield</strong>: a P/E of 10 is a 10% earnings yield, which you can compare directly with what a treasury bill pays. That comparison is why Nigerian P/Es are structurally lower than American ones: when a naira T-bill pays 18%, a stock has to earn a lot to compete, whereas a US stock competes with a 4.5% bill. <strong>Price-to-book (P/B)</strong> compares the price with the accounting value of the company's net assets and is the usual yardstick for banks and insurers.</p>
+<p>Cheap is not the same as good. A very low P/E can mean the market expects profits to fall (a "value trap"), and a negative P/E means the company is losing money, so the ratio is meaningless. Compare a stock with its own sector and its own country. Buffett's refinement of Graham: "It's far better to buy a wonderful company at a fair price than a fair company at a wonderful price."</p>
+<p>In this app the <em>value</em> factor blends earnings yield and book yield, ranked against the stock's own exchange. NGX earnings data is patchy from free sources, so the factor is often neutral there.</p>`,
+  points: ["Market cap = price × number of shares.", "P/E = years of profit you pay for; earnings yield = 1 ÷ P/E, comparable with a T-bill rate.", "Low P/E is not automatically a bargain; compare within sector and country.", "Buy with a margin of safety."],
+  quiz: [
+    { q: "A stock trades at a P/E of 25. What is its earnings yield?", options: ["25%", "4%", "2.5%", "0.4%"], answer: 1, why: "Earnings yield is 1 ÷ 25 = 4%. Compare that with a US T-bill at about 4.5% or a naira bill near 18%." },
+    { q: "Why are NGX P/E ratios usually lower than NYSE ones?", options: ["Nigerian companies are always worse", "Naira interest rates are much higher, so stocks must offer a higher earnings yield to compete", "The NGX uses a different formula", "Dividends are illegal in Nigeria"], answer: 1, why: "Investors compare a stock's earnings yield with the risk-free rate. With naira T-bills near 18%, stocks must be priced to yield more, which means lower P/Es." }
+  ] },
+{ id: "quality", title: "Quality: the business behind the ticker", minutes: 7,
+  body: `<p>Cheap stocks that stay cheap are common. What separates a bargain from a trap is the quality of the business. Three measures capture most of it.</p>
+<p><strong>Return on equity (ROE)</strong> is profit divided by shareholders' equity: how much the company earns on the money owners have in it. Buffett looks for high and steady ROE achieved without heavy borrowing. <strong>Profit margin</strong> is profit divided by sales; a fat, stable margin usually means pricing power. <strong>Debt-to-equity</strong> shows leverage: debt magnifies good years and bad ones, and a company that cannot roll over its loans can go to zero even when its products are fine. Banks are leveraged by design, so judge them against other banks, not against a cement maker.</p>
+<p>Behind good numbers there is usually a <strong>moat</strong>, Buffett's word for a durable advantage: a brand people pay up for (Nestlé, Coca-Cola), a network that grows more useful as it grows (MTN, Visa), scale that makes you the low-cost producer (Dangote Cement), switching costs, or a licence others cannot get. Ask "why can't a rich competitor copy this?" If you cannot answer, the margin will not last.</p>
+<p>Red flags: profits that never turn into cash, repeated share issues that dilute you, big deals with the founder's other companies, and auditors who qualify their opinion. Academic work agrees that quality pays: Fama and French added a profitability factor to their model in 2015 after finding that more profitable firms earned higher returns.</p>
+<p>In this app <em>quality</em> is ROE plus margin minus leverage. Free NGX sources rarely publish these, so most Nigerian names score neutral on quality until you add data.</p>`,
+  points: ["ROE, profit margin and leverage describe how good and how safe a business is.", "Judge banks against banks; leverage is their business model.", "Look for a moat you can explain in one sentence.", "Cash that never arrives is a warning sign."],
+  quiz: [
+    { q: "Return on equity is:", options: ["Share price divided by book value", "Profit divided by shareholders' equity", "Dividend divided by price", "Sales divided by debt"], answer: 1, why: "ROE measures the profit earned on the owners' capital." },
+    { q: "Why does high debt make a stock riskier?", options: ["Interest is tax-free", "It magnifies both gains and losses, and refinancing can fail in a crisis", "Lenders always take over the company", "It lowers the share count"], answer: 1, why: "Leverage amplifies outcomes; a business that cannot refinance its loans can fail even if its products are fine." }
+  ] },
+{ id: "growth", title: "Growth, momentum and knowing what you own", minutes: 7,
+  body: `<p>Peter Lynch ran Fidelity's Magellan fund for thirteen years at 29% a year and wrote <em>One Up on Wall Street</em> to explain how ordinary investors can spot growth: invest in what you understand, notice products people actually buy, and sort companies into types (slow growers, stalwarts, fast growers, cyclicals, turnarounds, asset plays) because each type deserves a different price. His shortcut for growth stocks, the <strong>PEG ratio</strong>, divides the P/E by the growth rate: a P/E of 20 with 20% growth is a PEG of 1, fair; a P/E of 40 with 10% growth is a PEG of 4, expensive. Philip Fisher's <em>scuttlebutt</em> method adds the human step: ask customers, suppliers and competitors what they think.</p>
+<p><strong>Momentum</strong> is different: it is the observation that stocks which rose over the past six to twelve months tend to keep rising for a few months more. Jegadeesh and Titman documented it in 1993 and it has held up in most markets since. The standard measure is the return over the past twelve months excluding the most recent month, because the very latest month tends to reverse. Momentum can be fierce on the NGX, where few analysts follow stocks and liquidity is thin, and it can crash at turning points, as in 2009. Over three to five years the opposite tends to happen: big winners fade and big losers recover, which is why long-term investors pair momentum with value.</p>
+<p>In this app the <em>momentum</em> factor uses the 12-month-minus-1 and 6-month returns; where NGX history is still short it uses the year-to-date change published by the exchange.</p>`,
+  points: ["Understand the business; classify it before you price it.", "PEG = P/E ÷ growth rate; around 1 is fair.", "Momentum: last 6–12 months (skipping the latest month) tends to persist for months, then reverse over years.", "Momentum is powerful but crashes at turning points."],
+  quiz: [
+    { q: "A company grows profits 15% a year and trades at a P/E of 30. Its PEG ratio is:", options: ["0.5", "2", "15", "45"], answer: 1, why: "PEG = 30 ÷ 15 = 2, which Lynch would call expensive." },
+    { q: "Why does the standard momentum measure skip the most recent month?", options: ["Data is unavailable", "The most recent month tends to reverse in the short term", "Exchanges forbid it", "Dividends are paid monthly"], answer: 1, why: "Short-term reversal means last month's move is a weak guide; the 12-1 month convention avoids it." }
+  ] },
+{ id: "income", title: "Dividends and income", minutes: 7,
+  body: `<p>The <strong>dividend yield</strong> is the annual dividend divided by the price: a ₦100 stock paying ₦8 yields 8%. The <strong>payout ratio</strong> is dividends divided by profit; above 100% the company is paying out more than it earns, which cannot last. A yield that looks too good usually means the market expects a cut: the classic dividend trap.</p>
+<p>Nigerian large caps are generous payers: banks such as Zenith and GTCO, MTN Nigeria, and Seplat, which declares its dividend in US dollars. In the US the "Dividend Aristocrats" (Coca-Cola, Procter &amp; Gamble, Johnson &amp; Johnson among them) have raised their dividend for at least 25 consecutive years. Reinvesting dividends is where compounding comes from: over long periods roughly half of total stock returns has come from reinvested dividends.</p>
+<p>Taxes are deducted before you see the money. Nigeria withholds 10% on dividends paid to individuals, and that is the final tax. The United States withholds 30% on dividends paid to residents of countries without a tax treaty, and Nigeria has none, so a Nigerian holder of a US stock keeps 70% of each dividend. Your broker will ask you to sign Form W-8BEN, which certifies that you are not a US person; without a treaty it does not lower the rate. Capital gains on US stocks are not taxed by the US for non-residents.</p>
+<p>Watch the calendar: a company declares a dividend, sets a qualification date (on the NGX, the "closure of register"), and pays weeks later. You must own the shares before the qualification date. In Nigeria, register an e-dividend mandate with your bank details, otherwise dividends pile up unclaimed, a problem worth hundreds of billions of naira.</p>
+<p>In this app the <em>income</em> objective gives the dividend factor 35% of the score and asks the optimiser for the highest portfolio yield your risk level allows.</p>`,
+  points: ["Yield = dividend ÷ price; payout ratio above 100% is a warning.", "Nigeria withholds 10% on dividends; the US withholds 30% for Nigerian residents (no treaty).", "Reinvested dividends drive long-run compounding.", "Register an e-dividend mandate so dividends reach your bank."],
+  quiz: [
+    { q: "A US company pays a $1 dividend to a Nigerian resident. How much arrives?", options: ["$1.00", "$0.90", "$0.70", "$0.85"], answer: 2, why: "The US withholds 30% for residents of non-treaty countries; Nigeria has no treaty, so $0.70 arrives." },
+    { q: "A stock's payout ratio is 140%. What does that tell you?", options: ["The dividend is very safe", "The company pays out more than it earns, so the dividend is at risk", "The share price will rise 40%", "Nothing; payout ratios are irrelevant"], answer: 1, why: "Paying more than you earn drains reserves or borrows; such dividends are usually cut." }
+  ] },
+{ id: "risk", title: "Risk and diversification", minutes: 8,
+  body: `<p>Harry Markowitz showed in 1952 that a portfolio's risk depends not only on how risky each holding is but on how they move together. Combine assets that do not rise and fall in step and the portfolio's swings shrink while its expected return does not. Diversification is the only free lunch in investing, and it works across companies, sectors, countries and currencies.</p>
+<p>The everyday measure of risk is <strong>volatility</strong>, the standard deviation of yearly returns: a stock with 30% volatility typically ends a year 30% above or below what you expected. What investors actually feel is <strong>drawdown</strong>, the fall from a previous peak. The S&amp;P 500 fell 57% in 2007–09; the NGX All-Share Index fell about 70% from its 2008 peak and took years to recover. Ask yourself whether you would sell at the bottom of a move like that, because that is what turns a temporary loss into a permanent one. The <strong>Sharpe ratio</strong> divides return above cash by volatility; it tells you how much you are paid per unit of risk.</p>
+<p>Practical rules that fall out of the theory: no single stock above 10–15% of the portfolio, no sector above a third, fifteen to thirty stocks capture most of the benefit (beyond that, extra names add little), and rebalance about once a year so winners do not quietly become half your money. Do not invest money you will need within three to five years; that belongs in T-bills or a savings account.</p>
+<p>In this app your risk level sets a volatility ceiling, per-stock and per-sector caps are enforced, and the optimiser can hold cash when equities alone would breach the ceiling.</p>`,
+  points: ["Risk in a portfolio depends on correlations, not just on each stock.", "Volatility is the usual measure; drawdown is what you feel.", "Cap each stock at 10–15% and each sector at about a third; 15–30 stocks is plenty.", "Money needed within 3–5 years should not be in stocks."],
+  quiz: [
+    { q: "Why can two risky stocks make a less risky portfolio?", options: ["Because fees are lower", "Because if they do not move together, their swings partly cancel", "Because brokers guarantee it", "They cannot"], answer: 1, why: "That is Markowitz's insight: low correlation reduces portfolio volatility without reducing expected return." },
+    { q: "Which figure tells you how far a portfolio fell from its peak?", options: ["Sharpe ratio", "Drawdown", "P/E", "Beta"], answer: 1, why: "Drawdown measures the decline from the previous high; it is the pain investors actually experience." }
+  ] },
+{ id: "fx", title: "Naira, dollar and inflation", minutes: 7,
+  body: `<p>A return only means something after you say which currency and after inflation. A stock that rose 40% in naira in a year when the naira lost 40% against the dollar made a dollar investor nothing, and in a year of 25% Nigerian inflation the naira investor's purchasing power barely moved. Always separate <strong>nominal</strong> (the number on the screen) from <strong>real</strong> (what it buys).</p>
+<p>The naira has devalued in steps: 2016, then the 2023 float that took the official rate from around ₦460 to ₦750 per dollar and later past ₦1,500, before stabilising. For a Nigerian holding a US stock, the naira return is roughly the dollar return plus the naira's depreciation; for a dollar investor holding an NGX stock, it is the naira return minus it. That cuts both ways, which is why a mix of the two markets diversifies currency risk as well as company risk.</p>
+<p>Interest rates and currencies are linked. Economists' rule of thumb, <strong>uncovered interest parity</strong>, says the currency with the higher interest rate is expected to depreciate by roughly the rate gap. So an 18% naira T-bill is not free money compared with a 4.5% dollar bill: the market expects the naira to lose about the difference over time. Sometimes it loses less and you win; sometimes far more.</p>
+<p>A practical hedge: hold some dollar assets if your future spending is dollar-linked (school fees abroad, imported goods, travel), and some naira assets if it is not. This app converts everything into your chosen base currency, uses the rate gap as the expected currency drift, and includes currency swings in the risk of foreign holdings.</p>`,
+  points: ["Judge returns in one currency and after inflation.", "Naira return of a US stock ≈ dollar return + naira depreciation.", "High interest rates come with expected depreciation (interest parity).", "Match currencies to what you will spend on."],
+  quiz: [
+    { q: "A US stock rose 10% in dollars while the naira fell from ₦1,000 to ₦1,200 per dollar. Roughly what was the naira return?", options: ["About 10%", "About 32%", "About −10%", "About 0%"], answer: 1, why: "1.10 × 1.20 = 1.32, so about 32% in naira: the dollar gain plus the naira's depreciation." },
+    { q: "What does uncovered interest parity suggest about a currency with much higher interest rates?", options: ["It should appreciate", "It is expected to depreciate by roughly the rate gap", "Its stocks are safer", "Nothing"], answer: 1, why: "The higher rate compensates for expected depreciation; it is not a free lunch." }
+  ] },
+{ id: "costs", title: "Costs, index funds and keeping it simple", minutes: 6,
+  body: `<p>John Bogle founded Vanguard and launched the first index fund for the public in 1976 on one idea: you cannot control the market's return, but you can control what you pay, and costs compound against you just as returns compound for you. Paying 2% a year instead of 0.2% over thirty years gives up roughly 40% of your final wealth.</p>
+<p>The cheapest diversified exposure to American stocks is an S&amp;P 500 ETF (exchange-traded fund) such as SPY or VOO, which trade on NYSE Arca with expense ratios around 0.03% and hold all 500 companies. Nigeria has a handful of ETFs that track the NGX 30, such as the Stanbic IBTC ETF 30 and the Vetiva Griffin 30, but they trade thinly, so check the spread before you buy. Owning a broad index fund plus a few well-chosen stocks is a sensible structure for most people; this app helps with the "few stocks" part.</p>
+<p>Know your trading costs. On the NGX a purchase carries broker commission (capped at 1.35%) plus SEC, NGX and CSCS fees and stamp duty, roughly 1.5–2% each way; confirm your broker's schedule. Many US brokers charge no commission, but watch the currency conversion spread (often 1–3%), transfer fees and inactivity fees. The bid-ask spread, the gap between the price to buy and to sell, is another cost, and it is wide on thinly traded NGX small caps, which is why this app screens on liquidity.</p>
+<p>The cheapest trade is the one you do not make. Investors who trade most earn least, a result Barber and Odean documented across tens of thousands of brokerage accounts.</p>`,
+  points: ["Costs compound; 2% a year versus 0.2% costs about 40% of final wealth over 30 years.", "Index ETFs (S&P 500; NGX 30) are the cheap core of a portfolio.", "Nigerian trading costs run about 1.5–2% per side; US costs hide in currency spreads.", "Trade less."],
+  quiz: [
+    { q: "Roughly what do NGX purchase costs (commission plus fees) add up to?", options: ["About 0.1%", "About 1.5–2%", "About 10%", "Nothing"], answer: 1, why: "Broker commission of up to 1.35% plus SEC, NGX and CSCS fees and stamp duty totals around 1.5–2% each way." },
+    { q: "What is the bid-ask spread?", options: ["The annual fee of a fund", "The gap between the price to buy and the price to sell", "A dividend tax", "The daily price limit"], answer: 1, why: "You buy at the ask and sell at the bid; the gap is a cost, large on thinly traded stocks." }
+  ] },
+{ id: "behaviour", title: "Your own worst enemy: behaviour", minutes: 7,
+  body: `<p>Daniel Kahneman and Amos Tversky showed that people feel a loss about twice as strongly as an equal gain. In investing that becomes the <strong>disposition effect</strong>: selling winners too early to lock in the good feeling and holding losers too long to avoid admitting the loss, the exact opposite of what momentum says to do. <strong>Overconfidence</strong> makes people trade too much; Barber and Odean found that the most active individual investors earned about a third less per year than the least active. <strong>Herding</strong> and fear of missing out built the 2008 NGX bubble, when bank shares were bought on borrowed money, and the 2021 meme-stock frenzy in the US. <strong>Recency</strong> makes the last two years feel like the future, and <strong>anchoring</strong> makes your purchase price feel like the stock's true value, though the market has no idea what you paid.</p>
+<p>Howard Marks's <em>The Most Important Thing</em> adds two habits: think about cycles (the best deals appear when everyone is fearful, the worst when everyone is confident) and practise second-level thinking (not "this is a good company" but "is it a better company than the price already assumes?").</p>
+<p>Defences that work: write an investment policy and follow it (your goal profile in this app is a start), invest a fixed amount every month regardless of headlines, rebalance on a schedule rather than on emotion, ignore tips from people who benefit if you buy, keep a one-line journal of why you made each decision, and look at your portfolio less often. Checking daily shows you a loss on roughly half of all days; checking yearly shows you a gain most years.</p>`,
+  points: ["Losses hurt twice as much as gains; that bias makes you sell winners and keep losers.", "Overtrading and herding are the costly habits; both are curable with rules.", "Write a plan, automate contributions, rebalance on a schedule.", "Check the portfolio less often."],
+  quiz: [
+    { q: "The disposition effect is the tendency to:", options: ["Buy index funds", "Sell winners early and hold losers too long", "Diversify too much", "Ignore dividends"], answer: 1, why: "Loss aversion makes realising a loss painful and locking in a gain pleasant, so investors do the opposite of what evidence suggests." },
+    { q: "Which habit did Barber and Odean find reduced returns the most?", options: ["Holding cash", "Trading frequently", "Buying dividend stocks", "Reading annual reports"], answer: 1, why: "Their study of brokerage accounts found that the most active traders earned substantially less." }
+  ] },
+{ id: "practice", title: "Getting started in practice", minutes: 8,
+  body: `<p><strong>Buying on the NGX.</strong> Choose a stockbroker registered with the Securities and Exchange Commission of Nigeria (both the SEC and NGX publish lists of licensed dealing members). Opening an account needs your BVN, a valid ID, a passport photograph and bank details; the broker opens your CSCS account, which is where your shares are actually recorded. Fund the account by transfer, then place an order: a <em>market</em> order buys at the best available price, a <em>limit</em> order only up to a price you set, which is wiser for thinly traded names. You will receive a contract note; keep it. Register an e-dividend mandate immediately so dividends are paid straight into your bank.</p>
+<p><strong>Buying on the NYSE from Nigeria.</strong> Several Nigerian fintech apps and international brokers accept Nigerian residents for US stocks. You fund in dollars, either from a domiciliary account or by converting inside the app (compare the rate with the market rate; the spread is a real cost). You will sign Form W-8BEN online. Most offer fractional shares, so a ₦50,000 budget can still hold a slice of a $500 stock. Check withdrawal fees and how long transfers take before you deposit.</p>
+<p><strong>Taxes and records.</strong> Nigerian dividends are taxed 10% at source. Rules on capital gains from selling shares changed with the Nigeria Tax Act 2025, in force from 2026, so check the current thresholds with a tax adviser or the Federal Inland Revenue Service. The US does not tax non-residents' capital gains on stocks but withholds 30% on dividends. Keep contract notes, dividend advices and statements; name a next of kin on every account.</p>
+<p><strong>Your first plan.</strong> Decide the amount you will not need for five years, split it between a broad index fund and a handful of stocks chosen for a reason you can write down, invest a fixed amount monthly, and review once a quarter with this app rather than every day.</p>`,
+  points: ["NGX: SEC-registered broker, CSCS account, e-dividend mandate, prefer limit orders.", "NYSE from Nigeria: fund in dollars, sign W-8BEN, fractional shares help small budgets.", "Taxes: 10% on Nigerian dividends, 30% US withholding; check current capital-gains rules.", "Invest a fixed amount monthly; review quarterly."],
+  quiz: [
+    { q: "Where are your NGX shares actually recorded?", options: ["At the company's head office", "In your CSCS account", "At the Central Bank", "In your bank account"], answer: 1, why: "The Central Securities Clearing System holds Nigerian shares electronically; your broker opens the account for you." },
+    { q: "For a thinly traded stock, which order type protects you from overpaying?", options: ["Market order", "Limit order", "Stop order", "Any order"], answer: 1, why: "A limit order only executes up to the price you set; a market order takes whatever is available." }
+  ] },
+{ id: "engine", title: "How this app decides", minutes: 6,
+  body: `<p>The app is a disciplined version of what the earlier lessons describe. Every stock in its universe gets six <strong>factor scores</strong>: value (earnings and book yield), quality (return on equity, margin, leverage), momentum (6- and 12-month returns), low volatility (volatility and drawdown), dividend (yield) and liquidity (traded value and size). Each score is a z-score against the stock's own exchange, so a Nigerian bank is compared with other NGX names, not with Apple.</p>
+<p>Your <strong>objective</strong> sets the weights: growth leans on momentum and quality; income on dividends and stability; preservation on low volatility and quality; balanced spreads them. Stocks that fail a liquidity floor are dropped, then the best eight (or the number you choose) per exchange are picked with a limit on how many can come from one sector.</p>
+<p>The <strong>allocator</strong> then estimates each pick's expected return (history shrunk towards a sector prior, tilted by its score, plus the currency drift from the interest-rate gap) and how the picks move together (a shrunk correlation matrix, with structural guesses where history is short). It solves for the weights that best serve your goal within the rules: a volatility ceiling set by your risk level, per-stock and per-sector caps, your NGX/NYSE range, a cash sleeve, and a required return if you set a target. Weights become whole-share orders inside your budget, and four thousand simulated futures produce the projection band and the chance of reaching your target.</p>
+<p><strong>Limits to keep in mind.</strong> Free NGX sources do not publish earnings or book values, so Nigerian quality and value scores are often neutral; NGX price history only starts accumulating from the day the daily job began, so early volatility estimates are proxies; expected returns have wide error bars by nature. Use the output as a starting point for your own judgement, not a substitute for it.</p>`,
+  points: ["Six factors, scored within each exchange, weighted by your objective.", "The optimiser respects your risk ceiling, caps, market split and target.", "Orders are whole shares; the projection is a simulation, not a promise.", "NGX data gaps make some scores neutral for now."],
+  quiz: [
+    { q: "Why are factor scores computed within each exchange separately?", options: ["To save computing time", "Because NGX and NYSE stocks live in different rate and growth regimes, so peers must be compared with peers", "Because the exchanges require it", "They are not"], answer: 1, why: "A P/E of 8 is ordinary in Lagos and cheap in New York; ranking within the exchange keeps the comparison fair." },
+    { q: "What does the 'chance of reaching target' figure come from?", options: ["A guarantee from the exchange", "Thousands of simulated paths using the mix's expected return and volatility", "Last year's return repeated", "Analyst forecasts"], answer: 1, why: "It is a Monte Carlo estimate: the share of simulated futures that end above your target." }
+  ] }
+];
+window.GLOSSARY = [
+  ["Share (stock, equity)", "A unit of ownership in a company."],
+  ["Market capitalisation", "Share price × number of shares: the value of the whole company."],
+  ["P/E ratio", "Price divided by earnings per share; years of profit you pay for."],
+  ["Earnings yield", "Earnings per share divided by price (1 ÷ P/E); comparable with an interest rate."],
+  ["P/B ratio", "Price divided by book value per share; the usual yardstick for banks."],
+  ["Return on equity (ROE)", "Profit divided by shareholders' equity."],
+  ["Profit margin", "Profit divided by sales."],
+  ["Debt-to-equity", "Borrowings divided by shareholders' equity; leverage."],
+  ["Dividend yield", "Annual dividend divided by price."],
+  ["Payout ratio", "Dividends divided by profit."],
+  ["Closure of register", "NGX term for the date by which you must own shares to receive a declared dividend."],
+  ["e-dividend mandate", "Instruction lodged in Nigeria so dividends are paid directly to your bank account."],
+  ["CSCS", "Central Securities Clearing System: the depository that records Nigerian shareholdings."],
+  ["Settlement (T+1, T+3)", "The day a trade is completed: one business day after on the NYSE, three on the NGX."],
+  ["Daily price limit", "Maximum move allowed in one NGX session: 10% either way."],
+  ["Circuit breaker", "Market-wide trading pause on the NYSE after a 7%, 13% or 20% fall in the S&P 500."],
+  ["Volatility", "Standard deviation of returns; the size of typical swings, usually quoted per year."],
+  ["Drawdown", "The fall from a previous peak to a trough."],
+  ["Sharpe ratio", "Return above the cash rate divided by volatility."],
+  ["Correlation", "How closely two assets move together, from −1 to +1."],
+  ["Diversification", "Spreading money across holdings that do not move together to reduce risk."],
+  ["Rebalancing", "Selling what has grown and buying what has shrunk to restore target weights."],
+  ["Momentum", "The tendency of recent winners to keep winning for a few months."],
+  ["Value trap", "A stock that looks cheap because its business is deteriorating."],
+  ["Moat", "A durable competitive advantage that protects a company's profits."],
+  ["ETF", "Exchange-traded fund: a basket of stocks that trades like a single share."],
+  ["Bid-ask spread", "The gap between the best price to buy and the best price to sell."],
+  ["Limit order", "An order that executes only at your price or better."],
+  ["W-8BEN", "US tax form certifying that an investor is not a US person."],
+  ["Withholding tax", "Tax deducted from a dividend before it is paid: 10% in Nigeria, 30% from the US for Nigerian residents."],
+  ["Uncovered interest parity", "The idea that a high-interest currency is expected to depreciate by about the rate gap."],
+  ["Real return", "Return after subtracting inflation."],
+  ["Monte Carlo simulation", "Estimating outcomes by generating thousands of random future paths."],
+  ["Z-score", "How many standard deviations a value sits from the average of its group."]
+];
+window.READING = [
+  ["Benjamin Graham", "The Intelligent Investor (1949; revised editions with Jason Zweig's commentary)", "The foundation of value investing: Mr Market and margin of safety."],
+  ["Warren Buffett", "Berkshire Hathaway shareholder letters (free at berkshirehathaway.com)", "Plain-language lessons on quality, moats and temperament, one year at a time."],
+  ["Peter Lynch", "One Up on Wall Street (1989)", "How an amateur can spot growth companies and classify what they own."],
+  ["John C. Bogle", "The Little Book of Common Sense Investing (2007)", "Why costs matter and how index funds win by default."],
+  ["Howard Marks", "The Most Important Thing (2011)", "Risk, cycles and second-level thinking."],
+  ["Daniel Kahneman", "Thinking, Fast and Slow (2011)", "The psychology behind every investing mistake in Lesson 9."],
+  ["Burton Malkiel", "A Random Walk Down Wall Street (1973, updated regularly)", "A tour of what works, what does not, and why markets are hard to beat."],
+  ["Harry Markowitz", "Portfolio Selection, Journal of Finance (1952)", "The paper that made diversification a science."],
+  ["Eugene Fama & Kenneth French", "The Cross-Section of Expected Stock Returns (1992); A Five-Factor Asset Pricing Model (2015)", "The academic case for value, size, profitability and investment factors."],
+  ["Narasimhan Jegadeesh & Sheridan Titman", "Returns to Buying Winners and Selling Losers (1993)", "The original momentum evidence."],
+  ["Brad Barber & Terrance Odean", "Trading Is Hazardous to Your Wealth (2000)", "Why frequent traders underperform."],
+  ["NGX Group and SEC Nigeria", "ngxgroup.com (market data, listed companies, rules) and sec.gov.ng (investor education, licensed operators)", "Primary sources for Nigerian market rules and broker checks."],
+  ["US Securities and Exchange Commission", "investor.gov", "Free, neutral investor education from the US regulator."]
+];
+</script>
+
 <script id="data-pack" type="application/json">__DATA_PACK__</script>
 <script>
 (() => {
@@ -335,6 +586,7 @@ function loadPack(obj) {
   let last = NaNv; for (let i = 0; i < obj.fx_usdngn.length; i++) { if (isNum(obj.fx_usdngn[i])) last = obj.fx_usdngn[i]; else obj.fx_usdngn[i] = last; }
   for (let i = obj.fx_usdngn.length - 1; i >= 0; i--) { if (isNum(obj.fx_usdngn[i])) last = obj.fx_usdngn[i]; else obj.fx_usdngn[i] = last; }
   obj.bySymbol = Object.fromEntries(obj.stocks.map(s => [s.symbol, s]));
+  obj.board = Array.isArray(obj.board) && obj.board.length ? obj.board.filter(b => b && b.symbol && isNum(b.price)) : obj.stocks.map(s => ({ symbol: s.symbol, name: s.name, exchange: s.exchange, sector: s.sector, currency: s.currency, price: s.price, pct_change: null, market_cap: s.market_cap, ytd_change: s.ytd_change ?? null, as_of: null }));
   PACK = obj;
   return obj;
 }
@@ -747,7 +999,7 @@ const zbar = z => { const v = clamp(z, -2.5, 2.5) / 2.5 * 50; return `<span clas
 let STATE = { rows: null, sel: null, alloc: null, profile: null };
 
 function renderStatus() {
-  const m = PACK.meta || {}; const el = $("#status"); const b = $("#banner");
+  const m = PACK.meta || {}; const el = $("#status-pills"); const b = $("#banner");
   const n = PACK.stocks.length, ngx = PACK.stocks.filter(s => s.exchange === "NGX").length;
   el.innerHTML = m.is_sample
     ? `<span class="pill warn"><span class="dot"></span>Sample data</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`
@@ -801,7 +1053,7 @@ function renderPortfolio(a, p) {
   </ul></div>`;
   el.innerHTML = plain + `
     <div class="grid-2">
-      <div class="card">
+      <div class="card decision-only">
         <div class="card-head"><h2>Target weights</h2><div class="legend"><span style="--c:var(--ngx)">NGX</span><span style="--c:var(--nyse)">NYSE</span><span style="--c:var(--cash)">Cash</span></div></div>
         <div class="chart" id="weights-chart">${weightsChart(a, p)}</div>
         <div class="small muted">Split: ${Object.entries(split).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${pct(v, 0)}`).join(" · ")}</div>
@@ -809,11 +1061,11 @@ function renderPortfolio(a, p) {
       <div class="card">
         <div class="card-head"><h2>How this mix was built</h2></div>
         <div class="notes"><ul>${a.notes.map(n => `<li>${esc(n)}</li>`).join("")}${a.sel.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>
-        <h3>By sector</h3>
-        <div class="tscroll"><table><thead><tr><th>Sector</th><th class="r">Weight</th></tr></thead><tbody>${secRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${pct(v)}</td></tr>`).join("")}</tbody></table></div>
+        <h3 class="decision-only">By sector</h3>
+        <div class="tscroll decision-only"><table><thead><tr><th>Sector</th><th class="r">Weight</th></tr></thead><tbody>${secRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${pct(v)}</td></tr>`).join("")}</tbody></table></div>
       </div>
     </div>
-    <div class="card">
+    <div class="card decision-only">
       <div class="card-head"><h2>Holdings</h2><span class="small muted">Expected return and volatility are annual, in ${ccy}. Risk contribution is each holding's share of portfolio variance.</span></div>
       <div class="tscroll"><table><thead><tr><th>Symbol</th><th>Name</th><th>Sector</th><th class="r">Weight</th><th class="r">Exp. return</th><th class="r">Volatility</th><th class="r">Div. yield</th><th class="r">Risk contrib.</th></tr></thead><tbody>${wRows}</tbody></table></div>
     </div>
@@ -822,7 +1074,7 @@ function renderPortfolio(a, p) {
       <div class="tscroll"><table><thead><tr><th>Symbol</th><th>Exchange</th><th class="r">Price</th><th class="r">Shares</th><th class="r">Cost (${ccy})</th><th class="r">Target</th><th class="r">Actual</th></tr></thead><tbody>${oRows}</tbody></table></div>
       <div class="small muted">Invested ${money(a.lots.invested, ccy)} · cash left ${money(a.lots.cash, ccy)} (of which ${money(a.lots.sleeve, ccy)} is the deliberate cash sleeve).</div>
     </div>
-    ${bt ? `<div class="card"><div class="card-head"><h2>If you had held this mix</h2><span class="small muted">${bt[0].date} → ${bt[bt.length - 1].date}: ${spct(bt[bt.length - 1].value / bt[0].value - 1)} total, worst drawdown ${pct(Math.min(...bt.map(d => d.dd)))}. Past performance is not a forecast.</span></div><div class="chart" id="bt-chart">${lineChart(bt, p)}</div></div>` : ""}`;
+    ${bt ? `<div class="card decision-only"><div class="card-head"><h2>If you had held this mix</h2><span class="small muted">${bt[0].date} → ${bt[bt.length - 1].date}: ${spct(bt[bt.length - 1].value / bt[0].value - 1)} total, worst drawdown ${pct(Math.min(...bt.map(d => d.dd)))}. Past performance is not a forecast.</span></div><div class="chart" id="bt-chart">${lineChart(bt, p)}</div></div>` : ""}`;
   attachTips($("#weights-chart"), a, p);
   if (bt) attachTips($("#bt-chart"), a, p);
   setupDownload(a, p);
@@ -856,8 +1108,8 @@ function renderScreener(rows, sel, p) {
     const g = rows.filter(r => r.exchange === ex);
     if (!g.length) return "";
     return `<div class="card"><div class="card-head"><h2>${ex}</h2><span class="small muted">${g.length} stocks ranked by the ${p.objective} composite. Highlighted rows are the current picks.</span></div>
-      <div class="tscroll"><table><thead><tr><th class="r">#</th><th>Symbol</th><th>Name</th><th>Sector</th><th class="r">Score</th><th>Value</th><th>Quality</th><th>Momentum</th><th>Low vol</th><th>Dividend</th><th>Liquidity</th><th class="r">P/E</th><th class="r">Yield</th><th class="r">12m</th><th class="r">Vol</th><th class="r">Mkt cap</th></tr></thead><tbody>
-      ${g.map(r => `<tr class="${picked.has(r.symbol) ? "pick" : ""}${r.eligible ? "" : " dim"}"><td class="r">${r.rank}</td><td class="sym">${esc(r.symbol)}${r.proxy ? " <span title='estimated from year-to-date change / 52-week range' class='muted'>*</span>" : ""}</td><td>${esc(r.name)}</td><td>${esc(r.sector)}</td><td class="r">${r.composite.toFixed(2)}</td><td>${zbar(r.value)}</td><td>${zbar(r.quality)}</td><td>${zbar(r.momentum)}</td><td>${zbar(r.low_vol)}</td><td>${zbar(r.dividend)}</td><td>${zbar(r.liquidity)}</td><td class="r">${isNum(PACK.bySymbol[r.symbol].pe) ? PACK.bySymbol[r.symbol].pe.toFixed(1) : "–"}</td><td class="r">${pct(r.dividend_yield)}</td><td class="r">${spct(r.mom12)}</td><td class="r">${pct(r.vol, 0)}</td><td class="r">${compact(PACK.bySymbol[r.symbol].market_cap, r.currency === "NGN" ? "NGN" : "USD")}</td></tr>`).join("")}
+      <div class="tscroll"><table><thead><tr><th class="r">#</th><th>Symbol</th><th>Name</th><th>Sector</th><th class="r">Score</th><th class="decision-col">Value</th><th class="decision-col">Quality</th><th class="decision-col">Momentum</th><th class="decision-col">Low vol</th><th class="decision-col">Dividend</th><th class="decision-col">Liquidity</th><th class="r decision-col">P/E</th><th class="r">Yield</th><th class="r">12m</th><th class="r decision-col">Vol</th><th class="r decision-col">Mkt cap</th></tr></thead><tbody>
+      ${g.map(r => `<tr class="${picked.has(r.symbol) ? "pick" : ""}${r.eligible ? "" : " dim"}"><td class="r">${r.rank}</td><td class="sym">${esc(r.symbol)}${r.proxy ? " <span title='estimated from year-to-date change / 52-week range' class='muted'>*</span>" : ""}</td><td>${esc(r.name)}</td><td>${esc(r.sector)}</td><td class="r">${r.composite.toFixed(2)}</td><td class="decision-col">${zbar(r.value)}</td><td class="decision-col">${zbar(r.quality)}</td><td class="decision-col">${zbar(r.momentum)}</td><td class="decision-col">${zbar(r.low_vol)}</td><td class="decision-col">${zbar(r.dividend)}</td><td class="decision-col">${zbar(r.liquidity)}</td><td class="r decision-col">${isNum(PACK.bySymbol[r.symbol].pe) ? PACK.bySymbol[r.symbol].pe.toFixed(1) : "–"}</td><td class="r">${pct(r.dividend_yield)}</td><td class="r">${spct(r.mom12)}</td><td class="r decision-col">${pct(r.vol, 0)}</td><td class="r decision-col">${compact(PACK.bySymbol[r.symbol].market_cap, r.currency === "NGN" ? "NGN" : "USD")}</td></tr>`).join("")}
       </tbody></table></div></div>`;
   };
   el.innerHTML = `<div class="card"><p class="muted" style="margin:0">Each factor is a z-score against the stock's own exchange: the bar sits right of centre when the stock beats its peers. Greyed rows fail the liquidity floor. <span class="num">*</span> marks price factors estimated from the year-to-date change or 52-week range (short stored history).</p></div>` + table("NGX") + table("NYSE");
@@ -901,6 +1153,111 @@ stockselector export-web data-pack.json</pre>
   $("#reset-pack").addEventListener("click", () => { try { localStorage.removeItem("ngxnyse.pack"); } catch (e) {} loadPack(JSON.parse($("#data-pack").textContent)); STATE.alloc = null; boot(true); });
 }
 
+// ============================================================ prices board
+const BOARD_UI = { q: "", ex: "ALL", sort: "symbol", shown: 100 };
+function renderBoard() {
+  const el = $("#panel-prices");
+  const board = PACK.board, screened = new Set(PACK.stocks.map(s => s.symbol));
+  const exs = ["NGX", "NYSE"].filter(ex => board.some(b => b.exchange === ex));
+  const summary = exs.map(ex => {
+    const rows = board.filter(b => b.exchange === ex); const withChg = rows.filter(b => isNum(b.pct_change));
+    const up = withChg.filter(b => b.pct_change > 0).length, down = withChg.filter(b => b.pct_change < 0).length, flat = withChg.length - up - down;
+    const asof = rows.map(b => b.as_of).filter(Boolean).sort().pop() || (PACK.meta.fetched_at || "").slice(0, 10);
+    const tot = Math.max(1, withChg.length);
+    return `<div class="tile"><span class="label">${ex} · ${rows.length} listed stocks · as of ${esc(asof)}</span><span class="value" style="font-size:16px"><span class="up">▲ ${up}</span> &nbsp; <span class="down">▼ ${down}</span> &nbsp; <span class="muted">– ${flat}</span></span><span class="bar" aria-hidden="true"><i style="width:${up / tot * 100}%;background:var(--good)"></i><i style="width:${flat / tot * 100}%;background:var(--line-strong)"></i><i style="width:${down / tot * 100}%;background:var(--crit)"></i></span><span class="sub">advancing / declining / unchanged on the last session</span></div>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="mkt">${summary}</div>
+    <div class="card">
+      <div class="toolbar">
+        <input type="search" id="board-q" placeholder="Search symbol or company" value="${esc(BOARD_UI.q)}" aria-label="Search">
+        <div class="chips" role="group" aria-label="Exchange">${["ALL", ...exs].map(x => `<button class="chip" type="button" data-ex="${x}" aria-pressed="${BOARD_UI.ex === x}">${x === "ALL" ? "All" : x}</button>`).join("")}</div>
+        <select id="board-sort" aria-label="Sort">
+          ${[["symbol", "Symbol A–Z"], ["name", "Name A–Z"], ["chg_desc", "Biggest gainers"], ["chg_asc", "Biggest losers"], ["mcap_desc", "Largest companies"], ["ytd_desc", "Best this year"], ["price_desc", "Highest price"]].map(([v, l]) => `<option value="${v}" ${BOARD_UI.sort === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </div>
+      <div class="tscroll"><table><thead><tr><th>Symbol</th><th>Company</th><th class="decision-col">Sector</th><th class="r">Price</th><th class="r">Day</th><th class="r decision-col">Market cap</th><th class="r decision-col">This year</th></tr></thead><tbody id="board-body"></tbody></table></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="small muted" id="board-count"></span><button class="btn" type="button" id="board-more">Show 100 more</button></div>
+      <p class="small muted" style="margin:0">Last close from the NGX Group price feed and african-markets.com (NGX) and Yahoo Finance (NYSE). <span class="star">★</span> marks stocks in the screened universe. Data can be delayed or incomplete; confirm with your broker before trading.</p>
+    </div>`;
+  const draw = () => {
+    const q = BOARD_UI.q.trim().toUpperCase();
+    let rows = board.filter(b => (BOARD_UI.ex === "ALL" || b.exchange === BOARD_UI.ex) && (!q || b.symbol.includes(q) || (b.name || "").toUpperCase().includes(q)));
+    const key = { symbol: (a, b) => a.symbol.localeCompare(b.symbol), name: (a, b) => (a.name || a.symbol).localeCompare(b.name || b.symbol),
+      chg_desc: (a, b) => (isNum(b.pct_change) ? b.pct_change : -1e9) - (isNum(a.pct_change) ? a.pct_change : -1e9),
+      chg_asc: (a, b) => (isNum(a.pct_change) ? a.pct_change : 1e9) - (isNum(b.pct_change) ? b.pct_change : 1e9),
+      mcap_desc: (a, b) => (mcapUSD(b)) - (mcapUSD(a)), ytd_desc: (a, b) => (isNum(b.ytd_change) ? b.ytd_change : -1e9) - (isNum(a.ytd_change) ? a.ytd_change : -1e9),
+      price_desc: (a, b) => b.price - a.price }[BOARD_UI.sort];
+    rows.sort(key);
+    const show = rows.slice(0, BOARD_UI.shown);
+    $("#board-body").innerHTML = show.map(b => `<tr><td class="sym"><span class="ex ${b.exchange}"></span>${esc(b.symbol)}${screened.has(b.symbol) ? ` <span class="star" title="in the screened universe">★</span>` : ""}</td><td>${esc(b.name || "")}</td><td class="decision-col">${esc(b.sector || "")}</td><td class="r">${b.currency === "NGN" ? "₦" : "$"}${fmtN(b.price, 2)}</td><td class="r ${isNum(b.pct_change) ? (b.pct_change > 0 ? "up" : b.pct_change < 0 ? "down" : "") : ""}">${isNum(b.pct_change) ? (b.pct_change > 0 ? "▲ " : b.pct_change < 0 ? "▼ " : "") + Math.abs(b.pct_change).toFixed(2) + "%" : "–"}</td><td class="r decision-col">${compact(b.market_cap, b.currency)}</td><td class="r decision-col">${isNum(b.ytd_change) ? spct(b.ytd_change) : "–"}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No stocks match.</td></tr>`;
+    $("#board-count").textContent = `Showing ${show.length} of ${rows.length}`;
+    $("#board-more").hidden = show.length >= rows.length;
+  };
+  const mcapUSD = b => { if (!isNum(b.market_cap)) return -1; return b.currency === "NGN" ? b.market_cap / latestFx({}) : b.market_cap; };
+  $("#board-q").addEventListener("input", e => { BOARD_UI.q = e.target.value; BOARD_UI.shown = 100; draw(); });
+  el.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => { BOARD_UI.ex = c.dataset.ex; BOARD_UI.shown = 100; el.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === c)); draw(); }));
+  $("#board-sort").addEventListener("change", e => { BOARD_UI.sort = e.target.value; BOARD_UI.shown = 100; draw(); });
+  $("#board-more").addEventListener("click", () => { BOARD_UI.shown += 100; draw(); });
+  draw();
+}
+
+// ============================================================ learn
+function learnState() { try { return JSON.parse(localStorage.getItem("ngxnyse.learn") || "{}"); } catch (e) { return {}; } }
+function saveLearn(st) { try { localStorage.setItem("ngxnyse.learn", JSON.stringify(st)); } catch (e) {} }
+function renderLearn() {
+  const el = $("#panel-learn"), L = window.LESSONS || [], st = learnState();
+  const done = L.filter(l => st[l.id] && st[l.id].passed).length, read = L.filter(l => st[l.id] && (st[l.id].read || st[l.id].passed)).length;
+  const lesson = (l, i) => {
+    const s = st[l.id] || {}; const status = s.passed ? `<span class="status done">Quiz passed</span>` : s.read ? `<span class="status">Read</span>` : `<span class="status">Not started</span>`;
+    return `<details class="lesson" id="lesson-${l.id}"><summary><span class="no">${String(i + 1).padStart(2, "0")}</span><span><span class="lt">${esc(l.title)}</span><br><span class="lm">${l.minutes} min read · ${l.quiz.length} questions</span></span>${status}</summary>
+      <div class="lbody"><div class="prose">${l.body}</div>
+      <div class="keypoints"><strong>Key points</strong><ul>${l.points.map(p => `<li>${esc(p)}</li>`).join("")}</ul></div>
+      <form class="quiz" data-lesson="${l.id}"><strong>Check yourself</strong>
+        ${l.quiz.map((q, qi) => `<fieldset><legend>${esc(q.q)}</legend>${q.options.map((o, oi) => `<label><input type="radio" name="${l.id}-${qi}" value="${oi}" id="${l.id}-${qi}-${oi}"><span>${esc(o)}</span></label>`).join("")}<div class="fb" hidden></div></fieldset>`).join("")}
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" type="submit">Check answers</button><button class="btn" type="button" data-read="${l.id}">Mark as read</button></div>
+      </form></div></details>`;
+  };
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>Learn to invest</h2><span class="small muted">${read} of ${L.length} lessons read · ${done} quizzes passed</span></div>
+      <div class="progress" role="progressbar" aria-valuenow="${done}" aria-valuemin="0" aria-valuemax="${L.length}"><i style="width:${L.length ? done / L.length * 100 : 0}%"></i></div>
+      <p class="muted" style="margin:0;max-width:70ch">A short course in the order a beginner needs it: how the markets work, how to judge a company, how to manage risk, currency and costs, the mistakes everyone makes, and how to start in Lagos and New York. Each lesson ends with two questions. The ideas come from the standard literature listed at the end; the Nigerian specifics from NGX and SEC Nigeria rules as of 2026.</p>
+    </div>
+    ${L.map(lesson).join("")}
+    <div class="card gloss"><div class="card-head"><h2>Glossary</h2><input type="search" id="gloss-q" placeholder="Filter terms" aria-label="Filter glossary" style="padding:6px 10px;border:1px solid var(--line-strong);border-radius:4px;background:var(--panel);color:var(--ink)"></div><dl id="gloss-list"></dl></div>
+    <div class="card reading"><h2>Reading list</h2><ul>${(window.READING || []).map(([a, t, w]) => `<li><strong>${esc(a)}</strong>, <em>${esc(t)}</em>. ${esc(w)}</li>`).join("")}</ul></div>`;
+  const drawGloss = () => { const q = ($("#gloss-q").value || "").toLowerCase(); $("#gloss-list").innerHTML = (window.GLOSSARY || []).filter(([t, d]) => !q || t.toLowerCase().includes(q) || d.toLowerCase().includes(q)).map(([t, d]) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`).join(""); };
+  $("#gloss-q").addEventListener("input", drawGloss); drawGloss();
+  el.querySelectorAll("form.quiz").forEach(f => {
+    f.addEventListener("submit", e => {
+      e.preventDefault(); const l = L.find(x => x.id === f.dataset.lesson); let all = true;
+      l.quiz.forEach((q, qi) => { const sel = f.querySelector(`input[name="${l.id}-${qi}"]:checked`); const fb = f.querySelectorAll(".fb")[qi]; fb.hidden = false;
+        if (!sel) { all = false; fb.className = "fb"; fb.textContent = "Pick an answer."; return; }
+        const ok = +sel.value === q.answer; all = all && ok; fb.className = "fb " + (ok ? "ok" : "no"); fb.textContent = (ok ? "Correct. " : `Not quite: the answer is "${q.options[q.answer]}". `) + q.why; });
+      const s = learnState(); s[l.id] = { ...(s[l.id] || {}), read: true, passed: (s[l.id] && s[l.id].passed) || all }; saveLearn(s);
+      const d = $("#lesson-" + l.id).querySelector(".status"); if (all) { d.className = "status done"; d.textContent = "Quiz passed"; } else if (d.textContent === "Not started") d.textContent = "Read";
+      updateLearnHeader();
+    });
+    f.querySelector("[data-read]").addEventListener("click", e => { const id = e.target.dataset.read; const s = learnState(); s[id] = { ...(s[id] || {}), read: true }; saveLearn(s); const d = $("#lesson-" + id).querySelector(".status"); if (!d.classList.contains("done")) d.textContent = "Read"; updateLearnHeader(); });
+  });
+  function updateLearnHeader() { const s = learnState(); const d = L.filter(l => s[l.id] && s[l.id].passed).length, r = L.filter(l => s[l.id] && (s[l.id].read || s[l.id].passed)).length; el.querySelector(".card-head .small").textContent = `${r} of ${L.length} lessons read · ${d} quizzes passed`; el.querySelector(".progress i").style.width = (L.length ? d / L.length * 100 : 0) + "%"; }
+}
+
+// ============================================================ layout mode
+function setMode(mode, remember = true) {
+  document.body.dataset.mode = mode;
+  $("#mode").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === mode));
+  if (remember) { try { localStorage.setItem("ngxnyse.mode", mode); } catch (e) {} }
+  if (mode === "mobile" && STATE.alloc) collapseAside(true);
+  if (mode !== "mobile") collapseAside(false);
+}
+function collapseAside(collapsed) {
+  const a = $("#aside"); a.classList.toggle("collapsed", collapsed);
+  $("#aside-toggle").textContent = collapsed ? "Edit" : "Done";
+  if (collapsed) { const p = readProfile(); $("#goal-summary").textContent = `${p.objective[0].toUpperCase() + p.objective.slice(1)} · risk ${p.risk}/5 · ${money(p.budget, p.currency)} · ${p.horizon} years${p.target ? " · target " + compact(p.target, p.currency) : ""}`; }
+}
+
 async function setupDownload(a, p) {
   const btn = $("#dl-orders"); if (!btn) return;
   const dl = window.claude && window.claude.use ? await window.claude.use("downloads").catch(() => null) : null;
@@ -925,6 +1282,7 @@ function build() {
       const a = allocate(p, rows, sel); STATE.alloc = a;
       renderStrip(a, p); renderPortfolio(a, p); renderProjection(a, p); renderScreener(rows, sel, p);
       $("#build-note").textContent = `Built ${new Date().toLocaleTimeString()} · ${sel.symbols.length} picks screened from ${rows.length} stocks.`;
+      if (document.body.dataset.mode === "mobile") { collapseAside(true); showTab("portfolio"); window.scrollTo({ top: $("#strip").offsetTop - 8, behavior: "smooth" }); }
     } catch (err) { $("#build-note").textContent = "Could not build: " + err.message; console.error(err); }
     $("#build").disabled = false;
     try { localStorage.setItem("ngxnyse.profile", JSON.stringify(formState())); } catch (e) {}
@@ -951,13 +1309,15 @@ function wire() {
   $("#ngx-min").addEventListener("input", () => { if (+$("#ngx-min").value > +$("#ngx-max").value) $("#ngx-max").value = $("#ngx-min").value; syncOutputs(); });
   $("#ngx-max").addEventListener("input", () => { if (+$("#ngx-max").value < +$("#ngx-min").value) $("#ngx-min").value = $("#ngx-max").value; syncOutputs(); });
   $("#build").addEventListener("click", build);
+  $("#mode").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setMode(b.dataset.v); });
+  $("#aside-toggle").addEventListener("click", () => collapseAside(!$("#aside").classList.contains("collapsed")));
   document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
   document.addEventListener("click", e => { const a = e.target.closest("[data-goto]"); if (a) { e.preventDefault(); showTab(a.dataset.goto); } });
 }
 function showTab(name) { document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", t.dataset.tab === name)); document.querySelectorAll(".panel").forEach(p => p.hidden = p.id !== "panel-" + name); }
 
 function boot(rebuild) {
-  renderStatus(); renderData();
+  renderStatus(); renderData(); renderBoard(); renderLearn();
   const p = readProfile();
   const rows = scoreUniverse(p), sel = selectStocks(rows, p); STATE.rows = rows; STATE.sel = sel;
   renderScreener(rows, sel, p);
@@ -970,6 +1330,8 @@ function boot(rebuild) {
   if (!pack) pack = JSON.parse($("#data-pack").textContent);
   loadPack(pack);
   restoreForm(); syncOutputs(); wire();
+  let mode = null; try { mode = localStorage.getItem("ngxnyse.mode"); } catch (e) {}
+  setMode(mode || (window.innerWidth < 760 ? "mobile" : "decision"), false);
   renderStrip(null); renderPortfolio(null); renderProjection(null);
   boot(true);
 })();

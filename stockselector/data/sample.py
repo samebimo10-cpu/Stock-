@@ -127,6 +127,13 @@ def sample_market_data(exchanges: tuple[str, ...] = ("NGX", "NYSE"), days: int =
     prices = _simulate_panel(listings, days, seed)
     fx = _simulate_fx(prices.index, seed + 1)
     fundamentals = _fundamentals(listings, prices)
+    last, prev = prices.iloc[-1], prices.iloc[-2]
+    board = pd.DataFrame({
+        "symbol": fundamentals.index, "name": fundamentals["name"], "exchange": fundamentals["exchange"],
+        "sector": fundamentals["sector"], "currency": fundamentals["currency"], "price": fundamentals["price"],
+        "pct_change": [(last[s] / prev[s] - 1) * 100 for s in fundamentals.index],
+        "market_cap": fundamentals["market_cap"], "ytd_change": np.nan, "as_of": fundamentals["as_of"],
+    })
     return MarketData(
         prices=prices,
         fundamentals=fundamentals,
@@ -134,4 +141,5 @@ def sample_market_data(exchanges: tuple[str, ...] = ("NGX", "NYSE"), days: int =
         warnings=["SAMPLE DATA: synthetic prices and fundamentals, not live market quotes."],
         is_sample=True,
         fetched_at=datetime.now(timezone.utc),
+        board=board,
     )

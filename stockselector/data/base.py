@@ -37,6 +37,25 @@ def normalise_fundamentals(df: pd.DataFrame) -> pd.DataFrame:
     return df[FUNDAMENTAL_COLUMNS]
 
 
+BOARD_COLUMNS = ["symbol", "name", "exchange", "sector", "currency", "price", "pct_change", "market_cap", "ytd_change", "as_of"]
+
+
+def normalise_board(df: pd.DataFrame | None) -> pd.DataFrame:
+    """Whole-market price board: one row per listed stock, canonical columns."""
+    if df is None or df.empty:
+        return pd.DataFrame(columns=BOARD_COLUMNS)
+    df = df.copy()
+    df = df.reset_index() if "symbol" not in df.columns else df.reset_index(drop=True)
+    for col in BOARD_COLUMNS:
+        if col not in df.columns:
+            df[col] = np.nan
+    for col in ("price", "pct_change", "market_cap", "ytd_change"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["symbol"] = df["symbol"].astype(str).str.upper().str.strip()
+    df = df[BOARD_COLUMNS].drop_duplicates("symbol").dropna(subset=["price"])
+    return df.sort_values(["exchange", "symbol"]).reset_index(drop=True)
+
+
 @dataclass
 class MarketData:
     """Everything the engine needs, in one object.
@@ -52,9 +71,12 @@ class MarketData:
     warnings: list[str] = field(default_factory=list)
     is_sample: bool = False
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    #: Whole-market price board (every listed stock, not only the screened universe).
+    board: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=BOARD_COLUMNS))
 
     def __post_init__(self) -> None:
         self.fundamentals = normalise_fundamentals(self.fundamentals)
+        self.board = normalise_board(self.board)
         self.prices = self.prices.sort_index()
         self.prices.index = pd.to_datetime(self.prices.index)
         self.prices.columns = [str(c).upper() for c in self.prices.columns]
@@ -77,6 +99,7 @@ class MarketData:
             warnings=list(self.warnings),
             is_sample=self.is_sample,
             fetched_at=self.fetched_at,
+            board=self.board,
         )
 
     def history_days(self, symbol: str) -> int:

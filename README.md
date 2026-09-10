@@ -18,6 +18,18 @@ web app* and press *Run workflow*.
 > This is an analytical tool, not investment advice. Prices and fundamentals from free public sources
 > can be stale or incomplete; check them before trading.
 
+## What is on the page
+
+* **Portfolio / Projection / Screener**: the goal-based selector and allocator described below.
+* **Prices**: every listed stock on NGX and NYSE with last price, day change, market cap and year-to-date
+  move, searchable and sortable (NGX from the NGX Group feed and african-markets.com; NYSE from the
+  official NYSE symbol directory and Yahoo Finance).
+* **Learn**: an eleven-lesson course on stock investing for the US and Nigerian markets (value, quality,
+  momentum, income, risk, currency, costs, behaviour, practical steps, and how the app works), each with
+  a two-question quiz, plus a glossary and reading list. Progress is remembered in the browser.
+* **Mobile / Decision** switch in the header: Mobile shows the essentials in one column (auto-selected on
+  phones); Decision shows every table and chart.
+
 ## What it does
 
 1. **Screens** every stock on each exchange with six factors, each z-scored *within its own exchange*:

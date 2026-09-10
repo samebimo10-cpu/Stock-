@@ -120,6 +120,7 @@ def fetch_fundamentals(listings: list[Listing], prices: pd.DataFrame | None = No
 
 
 def fetch_nyse(listings: list[Listing], period: str = "2y") -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Prices and fundamentals for the screened universe."""
     symbols = [l.symbol for l in listings]
     prices = fetch_prices(symbols, period=period)
     fundamentals = fetch_fundamentals(listings, prices)
@@ -136,3 +137,70 @@ def fetch_nyse(listings: list[Listing], period: str = "2y") -> tuple[pd.DataFram
                 if pd.isna(fundamentals.at[sym, "price"]):
                     fundamentals.at[sym, "price"] = float(s.iloc[-1])
     return prices, fundamentals
+
+
+# ----------------------------------------------------------------------------
+# Whole-market board
+# ----------------------------------------------------------------------------
+#: Nasdaq Trader's public symbol directory; the "otherlisted" file covers NYSE,
+#: NYSE American and NYSE Arca. Exchange code "N" is the New York Stock Exchange.
+OTHER_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
+BOARD_BUDGET = 480          # seconds for the batched price download
+BOARD_CHUNK = 250
+
+
+def fetch_nyse_symbols() -> pd.DataFrame:
+    """All NYSE-listed common stocks: symbol, name (ETFs and test issues excluded)."""
+    import io
+
+    import requests
+
+    txt = requests.get(OTHER_LISTED_URL, timeout=30, headers={"User-Agent": "stockselector/0.1"}).text
+    df = pd.read_csv(io.StringIO(txt), sep="|")
+    df = df[df.columns[:8]]
+    df.columns = ["act_symbol", "name", "exchange", "cqs_symbol", "etf", "lot", "test", "nasdaq_symbol"][: len(df.columns)]
+    df = df[(df["exchange"] == "N") & (df["etf"] != "Y") & (df["test"] != "Y")]
+    df = df[df["act_symbol"].astype(str).str.fullmatch(r"[A-Z]{1,5}")]  # skip warrants, units, preferreds
+    out = pd.DataFrame({"symbol": df["act_symbol"].astype(str).str.upper(),
+                        "name": df["name"].astype(str).str.replace(r"\s+Common Stock$", "", regex=True)})
+    return out.drop_duplicates("symbol").reset_index(drop=True)
+
+
+def fetch_nyse_board(symbols: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Latest close and day change for every NYSE-listed stock (time-boxed)."""
+    import yfinance as yf
+
+    symbols = fetch_nyse_symbols() if symbols is None else symbols
+    started = time.monotonic()
+    rows = []
+    syms = list(symbols["symbol"])
+    for i in range(0, len(syms), BOARD_CHUNK):
+        if time.monotonic() - started > BOARD_BUDGET:
+            log.warning("NYSE board: time budget hit after %d of %d symbols", i, len(syms))
+            break
+        chunk = syms[i:i + BOARD_CHUNK]
+        try:
+            raw = yf.download(chunk, period="5d", interval="1d", auto_adjust=False, progress=False,
+                              group_by="column", threads=True)
+        except Exception as exc:  # pragma: no cover - network dependent
+            log.warning("NYSE board chunk failed: %s", exc)
+            continue
+        if raw is None or raw.empty:
+            continue
+        close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]].rename(columns={"Close": chunk[0]})
+        for sym in close.columns:
+            s = close[sym].dropna()
+            if s.empty:
+                continue
+            last = float(s.iloc[-1])
+            prev = float(s.iloc[-2]) if len(s) > 1 else np.nan
+            rows.append({"symbol": str(sym).upper(), "price": last,
+                         "pct_change": (last / prev - 1) * 100 if prev == prev and prev else np.nan,
+                         "as_of": pd.Timestamp(s.index[-1]).strftime("%Y-%m-%d")})
+    board = pd.DataFrame(rows)
+    if board.empty:
+        raise RuntimeError("NYSE board: no prices downloaded")
+    board = board.merge(symbols, on="symbol", how="left")
+    board["exchange"] = "NYSE"
+    board["currency"] = "USD"
+    return board
