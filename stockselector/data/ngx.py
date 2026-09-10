@@ -95,14 +95,22 @@ def fetch_ngx_snapshot() -> pd.DataFrame:
             if not sym:
                 continue
             sym = str(sym).upper().strip()
+            ttype = str(_pick(r, "TickerType", "TICKER_TYPE") or "").upper()
+            if table == "ticker" and ttype and ttype != "EQUITIES":
+                continue  # indices, bonds and ETPs share the ticker table
+            # The ``ticker`` table publishes the close as ``Value``; the (older)
+            # ``equities`` table used ``Value`` for naira traded.
+            price_keys = ("Value", "CLOSING_PRICE", "ClosePrice") if table == "ticker" else \
+                ("CLOSING_PRICE", "ClosePrice", "CLOSE_PRICE", "LAST_PRICE", "PRICE", "Close")
+            value_keys = () if table == "ticker" else ("VALUE", "Value", "TOTAL_VALUE", "TURNOVER")
             rows[sym] = {
-                "price": _num(_pick(r, "CLOSING_PRICE", "ClosePrice", "CLOSE_PRICE", "LAST_PRICE", "PRICE", "Close")),
+                "price": _num(_pick(r, *price_keys)),
                 "prev_close": _num(_pick(r, "PREV_CLOSING_PRICE", "PrevClosePrice", "PREVIOUS_CLOSE", "PrevClose")),
                 "pct_change": _num(_pick(r, "PERCENT_CHANGE", "PercentChange", "PercChange", "PCT_CHANGE", "CHANGE_PERCENT", "PricePercentChange")),
                 "name": _pick(r, "Company2", "Company", "SECURITY_NAME", "CompanyName", "NAME"),
                 "sector": _pick(r, "Sector", "SECTOR", "SectorName"),
                 "volume": _num(_pick(r, "VOLUME", "Volume", "TOTAL_VOLUME")),
-                "value": _num(_pick(r, "VALUE", "Value", "TOTAL_VALUE", "TURNOVER")),
+                "value": _num(_pick(r, *value_keys)) if value_keys else np.nan,
                 "market_cap": _num(_pick(r, "MARKET_CAP", "MarketCap", "MKT_CAP", "MARKET_CAPITALIZATION")),
                 "trade_date": _pick(r, "TRADE_DATE", "LAST_TRADE_DATE", "TradeDate", "DATE", "AS_OF"),
             }

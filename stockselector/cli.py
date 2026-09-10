@@ -178,11 +178,15 @@ def export_web(
 
 
 @app.command("probe-ngx")
-def probe_ngx(url: list[str] = typer.Option(None, "--url", help="Extra URLs to try")):
+def probe_ngx(url: list[str] = typer.Option(None, "--url", help="Extra URLs to try"),
+              deep: bool = typer.Option(False, "--deep", help="Print table layouts of the HTML sources")):
     """Diagnose the public NGX endpoints (prints raw field names and statuses)."""
-    from .data.ngx_probe import probe
+    from .data.ngx_probe import deep_probe, probe
 
-    probe(url or [])
+    if deep:
+        deep_probe()
+    else:
+        probe(url or [])
 
 
 @app.command("init-goals")

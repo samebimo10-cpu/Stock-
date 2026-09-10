@@ -44,6 +44,89 @@ def _dns(host: str) -> str:
         return f"DNS failed: {exc}"
 
 
+def _rows_text(html: str, max_rows: int = 40, needle: str | None = None) -> list[str]:
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for tr in soup.find_all("tr"):
+        cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+        links = [a.get("href") for a in tr.find_all("a", href=True)]
+        text = " | ".join(cells)
+        if needle is None or needle.lower() in text.lower():
+            out.append(text[:300] + (f"   -> {links[0]}" if links else ""))
+        if len(out) >= max_rows:
+            break
+    return out
+
+
+def deep_probe(timeout: int = 25) -> None:
+    """Print table layouts of the reachable HTML sources so a parser can be written."""
+    hdr = {"User-Agent": USER_AGENT, "Accept": "*/*", "Accept-Encoding": "gzip, deflate"}
+    print("== african-markets listed companies: header rows and Dangote/MTN rows")
+    base = "https://www.african-markets.com"
+    try:
+        r = requests.get(base + "/en/stock-markets/ngse/listed-companies", headers=hdr, timeout=timeout)
+        print("status", r.status_code, "bytes", len(r.content))
+        for line in _rows_text(r.text, 6):
+            print("  ", line)
+        hits = _rows_text(r.text, 6, "DANGOTE") + _rows_text(r.text, 4, "MTN")
+        for line in hits:
+            print("  ", line)
+        link = None
+        for line in hits:
+            if "-> " in line:
+                link = line.split("-> ")[-1].strip()
+                break
+        if link:
+            url = link if link.startswith("http") else base + link
+            print("\n== company page:", url)
+            r2 = requests.get(url, headers=hdr, timeout=timeout)
+            print("status", r2.status_code, "bytes", len(r2.content))
+            for line in _rows_text(r2.text, 60):
+                print("  ", line)
+            import re
+            txt = " ".join(r2.text.split())
+            for key in ("P/E", "Dividend", "52", "Market Cap", "Shares"):
+                m = re.search(re.escape(key), txt)
+                if m:
+                    print(f"  ctx[{key}]:", txt[max(0, m.start() - 150): m.start() + 250].replace("<", "‹"))
+    except Exception as exc:
+        print("african-markets failed:", exc)
+
+    print("\n== ngxgroup price-list page (brotli aware): doclib links + script hints")
+    try:
+        r = requests.get("https://ngxgroup.com/exchange/data/equities-price-list/",
+                         headers={**hdr, "Accept-Encoding": "gzip, deflate, br"}, timeout=timeout)
+        print("status", r.status_code, "encoding", r.headers.get("content-encoding"), "bytes", len(r.content))
+        body = r.text
+        import re
+        for m in sorted(set(re.findall(r"https?://doclib\.ngxgroup\.com[^\"' <>\\]+", body)))[:30]:
+            print("  doclib link:", m)
+        for m in sorted(set(re.findall(r"statistics/[A-Za-z0-9_\-]+", body)))[:30]:
+            print("  statistics path:", m)
+        for m in re.findall(r"[A-Za-z0-9_./-]+\.js", body)[:40]:
+            if "ngx" in m.lower() or "price" in m.lower() or "stat" in m.lower():
+                print("  script:", m)
+    except Exception as exc:
+        print("ngxgroup page failed:", exc)
+
+    print("\n== NGX ticker feed: full row count and non-equity ticker types")
+    try:
+        r = requests.get("https://doclib.ngxgroup.com/REST/api/statistics/ticker/?$top=2000&$skip=0&$orderby=SYMBOL",
+                         headers=hdr, timeout=timeout)
+        data = r.json()
+        types = {}
+        for row in data:
+            types[row.get("TickerType")] = types.get(row.get("TickerType"), 0) + 1
+        print("rows", len(data), "types", types)
+        print("sample keys:", sorted({k for row in data[:50] for k in row.keys()}))
+        for sym in ("DANGCEM", "MTNN", "GTCO", "ZENITHBANK", "SEPLAT", "AIRTELAFRI", "BUAFOODS", "TOTALENERGIES", "FIRSTHOLDCO", "NB"):
+            hit = [row for row in data if str(row.get("SYMBOL", "")).strip().upper() == sym]
+            print("  ", sym, hit[0] if hit else "NOT FOUND")
+    except Exception as exc:
+        print("ticker feed failed:", exc)
+
+
 def probe(extra_urls: list[str] | None = None, timeout: int = 20) -> None:
     print("== DNS")
     for h in HOSTS:
