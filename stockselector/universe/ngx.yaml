@@ -14,22 +14,22 @@ stocks:
   - {symbol: ZENITHBANK,   name: Zenith Bank,                    sector: Financial Services}
   - {symbol: ACCESSCORP,   name: Access Holdings,                sector: Financial Services}
   - {symbol: UBA,          name: United Bank for Africa,         sector: Financial Services}
-  - {symbol: FIRSTHOLDCO,  name: First HoldCo,                   sector: Financial Services}
+  - {symbol: FIRSTHOLDCO,  name: First HoldCo,                   sector: Financial Services, aliases: [FBNH]}
   - {symbol: STANBIC,      name: Stanbic IBTC Holdings,          sector: Financial Services}
   - {symbol: FIDELITYBK,   name: Fidelity Bank,                  sector: Financial Services}
   - {symbol: FCMB,         name: FCMB Group,                     sector: Financial Services}
-  - {symbol: STERLINGNG,   name: Sterling Financial Holdings,    sector: Financial Services}
+  - {symbol: STERLINGNG,   name: Sterling Financial Holdings,    sector: Financial Services, aliases: [STERLNBANK]}
   - {symbol: WEMABANK,     name: Wema Bank,                      sector: Financial Services}
   - {symbol: ETI,          name: Ecobank Transnational,          sector: Financial Services}
   - {symbol: JAIZBANK,     name: Jaiz Bank,                      sector: Financial Services}
   - {symbol: UCAP,         name: United Capital,                 sector: Financial Services}
   - {symbol: CUSTODIAN,    name: Custodian Investment,           sector: Financial Services}
-  - {symbol: AXAMANSARD,   name: AXA Mansard Insurance,          sector: Financial Services}
+  - {symbol: AXAMANSARD,   name: AXA Mansard Insurance,          sector: Financial Services, aliases: [MANSARD]}
   - {symbol: VFDGROUP,     name: VFD Group,                      sector: Financial Services}
   - {symbol: SEPLAT,       name: Seplat Energy,                  sector: Oil & Gas}
   - {symbol: ARADEL,       name: Aradel Holdings,                sector: Oil & Gas}
   - {symbol: OANDO,        name: Oando,                          sector: Oil & Gas}
-  - {symbol: TOTALENERGIES, name: TotalEnergies Marketing Nigeria, sector: Oil & Gas}
+  - {symbol: TOTALENERGIES, name: TotalEnergies Marketing Nigeria, sector: Oil & Gas, aliases: [TOTAL]}
   - {symbol: CONOIL,       name: Conoil,                         sector: Oil & Gas}
   - {symbol: ETERNA,       name: Eterna,                         sector: Oil & Gas}
   - {symbol: MRS,          name: MRS Oil Nigeria,                sector: Oil & Gas}
@@ -48,7 +48,7 @@ stocks:
   - {symbol: OKOMUOIL,     name: Okomu Oil Palm,                 sector: Agriculture}
   - {symbol: LIVESTOCK,    name: Livestock Feeds,                sector: Agriculture}
   - {symbol: GEREGU,       name: Geregu Power,                   sector: Utilities}
-  - {symbol: TRANSPOWER,   name: Transcorp Power,                sector: Utilities}
+  - {symbol: TRANSPOWER,   name: Transcorp Power,                sector: Utilities, aliases: [TRANSCOPOWER]}
   - {symbol: TRANSCORP,    name: Transnational Corporation,      sector: Conglomerates}
   - {symbol: JBERGER,      name: Julius Berger Nigeria,          sector: Construction/Real Estate}
   - {symbol: NAHCO,        name: Nigerian Aviation Handling,     sector: Services}

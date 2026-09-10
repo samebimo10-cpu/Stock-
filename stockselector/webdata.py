@@ -10,7 +10,7 @@ import numpy as np
 from .data.base import MarketData
 
 _NUM_FIELDS = ["price", "market_cap", "pe", "pb", "roe", "profit_margin", "debt_to_equity",
-               "dividend_yield", "avg_daily_value", "high_52w", "low_52w"]
+               "dividend_yield", "avg_daily_value", "high_52w", "low_52w", "ytd_change"]
 
 
 def _clean(v):

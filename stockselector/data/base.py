@@ -10,7 +10,7 @@ import pandas as pd
 FUNDAMENTAL_COLUMNS = [
     "name", "exchange", "sector", "currency", "price", "market_cap",
     "pe", "pb", "roe", "profit_margin", "debt_to_equity", "dividend_yield",
-    "avg_daily_value", "high_52w", "low_52w", "source", "as_of",
+    "avg_daily_value", "high_52w", "low_52w", "ytd_change", "source", "as_of",
 ]
 
 
@@ -27,7 +27,7 @@ def normalise_fundamentals(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = np.nan
     numeric = ["price", "market_cap", "pe", "pb", "roe", "profit_margin",
-               "debt_to_equity", "dividend_yield", "avg_daily_value", "high_52w", "low_52w"]
+               "debt_to_equity", "dividend_yield", "avg_daily_value", "high_52w", "low_52w", "ytd_change"]
     for col in numeric:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     for col in ("name", "exchange", "sector", "currency", "source", "as_of"):

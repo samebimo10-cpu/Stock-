@@ -16,6 +16,12 @@ class Listing:
     sector: str
     exchange: str
     currency: str
+    #: Alternative codes other data sources may use for the same stock.
+    aliases: tuple[str, ...] = ()
+
+    @property
+    def codes(self) -> tuple[str, ...]:
+        return (self.symbol, *self.aliases)
 
 
 def load_universe(exchange: str, path: str | Path | None = None) -> list[Listing]:
@@ -36,5 +42,6 @@ def load_universe(exchange: str, path: str | Path | None = None) -> list[Listing
         if sym in seen:
             continue
         seen.add(sym)
-        out.append(Listing(sym, str(row.get("name", sym)), str(row.get("sector", "Unknown")), ex, ccy))
+        aliases = tuple(str(a).upper().strip() for a in (row.get("aliases") or []))
+        out.append(Listing(sym, str(row.get("name", sym)), str(row.get("sector", "Unknown")), ex, ccy, aliases))
     return out

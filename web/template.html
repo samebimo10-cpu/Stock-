@@ -374,11 +374,13 @@ function rawMetrics(stock) {
     const w = c.slice(-L12); let peak = -Infinity, mdd = 0; for (const v of w) { peak = Math.max(peak, v); mdd = Math.min(mdd, v / peak - 1); }
     r.mdd = mdd;
   } else {
-    const hi = stock.high_52w, lo = stock.low_52w, px = stock.price;
-    if (isNum(hi) && isNum(lo) && isNum(px) && hi > 0 && lo > 0 && hi >= lo) {
+    const hi = stock.high_52w, lo = stock.low_52w, px = stock.price, ytd = stock.ytd_change;
+    const hasRange = isNum(hi) && isNum(lo) && isNum(px) && hi > 0 && lo > 0 && hi >= lo;
+    if (isNum(ytd)) { r.proxy = true; r.mom12 = ytd; r.mom6 = hasRange ? px / hi - 1 : ytd / 2; }
+    if (hasRange) {
       r.proxy = true;
       const pos = hi > lo ? (px - lo) / (hi - lo) : .5;
-      r.mom12 = pos * 2 - 1; r.mom6 = px / hi - 1;
+      if (!isNum(ytd)) { r.mom12 = pos * 2 - 1; r.mom6 = px / hi - 1; }
       r.vol = Math.log(hi / lo) / (2 * Math.sqrt(Math.log(2)));
       r.mdd = px / hi - 1;
     }
@@ -855,10 +857,10 @@ function renderScreener(rows, sel, p) {
     if (!g.length) return "";
     return `<div class="card"><div class="card-head"><h2>${ex}</h2><span class="small muted">${g.length} stocks ranked by the ${p.objective} composite. Highlighted rows are the current picks.</span></div>
       <div class="tscroll"><table><thead><tr><th class="r">#</th><th>Symbol</th><th>Name</th><th>Sector</th><th class="r">Score</th><th>Value</th><th>Quality</th><th>Momentum</th><th>Low vol</th><th>Dividend</th><th>Liquidity</th><th class="r">P/E</th><th class="r">Yield</th><th class="r">12m</th><th class="r">Vol</th><th class="r">Mkt cap</th></tr></thead><tbody>
-      ${g.map(r => `<tr class="${picked.has(r.symbol) ? "pick" : ""}${r.eligible ? "" : " dim"}"><td class="r">${r.rank}</td><td class="sym">${esc(r.symbol)}${r.proxy ? " <span title='52-week range proxy' class='muted'>*</span>" : ""}</td><td>${esc(r.name)}</td><td>${esc(r.sector)}</td><td class="r">${r.composite.toFixed(2)}</td><td>${zbar(r.value)}</td><td>${zbar(r.quality)}</td><td>${zbar(r.momentum)}</td><td>${zbar(r.low_vol)}</td><td>${zbar(r.dividend)}</td><td>${zbar(r.liquidity)}</td><td class="r">${isNum(PACK.bySymbol[r.symbol].pe) ? PACK.bySymbol[r.symbol].pe.toFixed(1) : "–"}</td><td class="r">${pct(r.dividend_yield)}</td><td class="r">${spct(r.mom12)}</td><td class="r">${pct(r.vol, 0)}</td><td class="r">${compact(PACK.bySymbol[r.symbol].market_cap, r.currency === "NGN" ? "NGN" : "USD")}</td></tr>`).join("")}
+      ${g.map(r => `<tr class="${picked.has(r.symbol) ? "pick" : ""}${r.eligible ? "" : " dim"}"><td class="r">${r.rank}</td><td class="sym">${esc(r.symbol)}${r.proxy ? " <span title='estimated from year-to-date change / 52-week range' class='muted'>*</span>" : ""}</td><td>${esc(r.name)}</td><td>${esc(r.sector)}</td><td class="r">${r.composite.toFixed(2)}</td><td>${zbar(r.value)}</td><td>${zbar(r.quality)}</td><td>${zbar(r.momentum)}</td><td>${zbar(r.low_vol)}</td><td>${zbar(r.dividend)}</td><td>${zbar(r.liquidity)}</td><td class="r">${isNum(PACK.bySymbol[r.symbol].pe) ? PACK.bySymbol[r.symbol].pe.toFixed(1) : "–"}</td><td class="r">${pct(r.dividend_yield)}</td><td class="r">${spct(r.mom12)}</td><td class="r">${pct(r.vol, 0)}</td><td class="r">${compact(PACK.bySymbol[r.symbol].market_cap, r.currency === "NGN" ? "NGN" : "USD")}</td></tr>`).join("")}
       </tbody></table></div></div>`;
   };
-  el.innerHTML = `<div class="card"><p class="muted" style="margin:0">Each factor is a z-score against the stock's own exchange: the bar sits right of centre when the stock beats its peers. Greyed rows fail the liquidity floor. <span class="num">*</span> marks price factors estimated from the 52-week range.</p></div>` + table("NGX") + table("NYSE");
+  el.innerHTML = `<div class="card"><p class="muted" style="margin:0">Each factor is a z-score against the stock's own exchange: the bar sits right of centre when the stock beats its peers. Greyed rows fail the liquidity floor. <span class="num">*</span> marks price factors estimated from the year-to-date change or 52-week range (short stored history).</p></div>` + table("NGX") + table("NYSE");
 }
 
 function renderData() {

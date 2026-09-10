@@ -77,13 +77,21 @@ def raw_metrics(md: MarketData) -> pd.DataFrame:
             w = s.tail(_LOOKBACK_12M)
             mdd[sym] = float((w / w.cummax() - 1).min())
         else:
-            # Range proxies from the 52-week high/low published by the exchange boards.
+            # Proxies from the year-to-date change and the 52-week high/low that the
+            # public boards publish, used until enough daily closes are stored.
             hi, lo, px = f.at[sym, "high_52w"], f.at[sym, "low_52w"], f.at[sym, "price"]
-            if hi == hi and lo == lo and px == px and hi > 0 and lo > 0 and hi >= lo:
+            ytd = f.at[sym, "ytd_change"] if "ytd_change" in f.columns else np.nan
+            has_range = hi == hi and lo == lo and px == px and hi > 0 and lo > 0 and hi >= lo
+            if ytd == ytd:
+                proxy[sym] = True
+                mom12[sym] = float(ytd)
+                mom6[sym] = float(px / hi - 1) if has_range else float(ytd) / 2
+            if has_range:
                 proxy[sym] = True
                 pos = (px - lo) / (hi - lo) if hi > lo else 0.5     # 0 = at low, 1 = at high
-                mom12[sym] = pos * 2 - 1                               # map to [-1, 1]
-                mom6[sym] = px / hi - 1                                # distance from high
+                if ytd != ytd:
+                    mom12[sym] = pos * 2 - 1                           # map to [-1, 1]
+                    mom6[sym] = px / hi - 1                            # distance from high
                 # Parkinson range estimator over ~1 year: sigma ≈ ln(H/L) / (2 sqrt(ln 2))
                 vol[sym] = float(np.log(hi / lo) / (2 * np.sqrt(np.log(2))))
                 mdd[sym] = float(px / hi - 1)

@@ -78,7 +78,7 @@ def deep_probe(timeout: int = 25) -> None:
                 link = line.split("-> ")[-1].strip()
                 break
         if link:
-            url = link if link.startswith("http") else base + link
+            url = link if link.startswith("http") else base + "/en/stock-markets/ngse/" + link.lstrip("/")
             print("\n== company page:", url)
             r2 = requests.get(url, headers=hdr, timeout=timeout)
             print("status", r2.status_code, "bytes", len(r2.content))
