@@ -34,7 +34,7 @@ jobs:
       - name: Fetch live public data (NGX + NYSE + USD/NGN)
         timeout-minutes: 25
         run: |
-          stockselector refresh --cache-dir data/cache \
+          stockselector -v refresh --cache-dir data/cache \
             || echo "::warning::Live refresh failed; the page will be built from the last good data."
 
       - name: Build the web app with the freshest data available
@@ -49,13 +49,22 @@ jobs:
           git commit -m "Update market data $(date -u +%Y-%m-%d)" || echo "No data changes"
           git push
 
-      - name: Enable GitHub Pages if needed
+      # Publishing needs GitHub Pages switched on once: repository Settings -> Pages ->
+      # "Build and deployment" -> Source: "GitHub Actions". Until then these steps are skipped.
+      - name: Check whether GitHub Pages is enabled
+        id: pages
+        continue-on-error: true
         uses: actions/configure-pages@v5
         with:
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: web
-      - id: deploy
+      - if: steps.pages.outcome == 'success'
+        id: deploy
         uses: actions/deploy-pages@v4
-      - run: echo "Published to ${{ steps.deploy.outputs.page_url }}"
+      - if: steps.pages.outcome == 'success'
+        run: echo "Published to ${{ steps.deploy.outputs.page_url }}"
+      - if: steps.pages.outcome != 'success'
+        run: echo "::warning::GitHub Pages is not enabled yet. Open Settings -> Pages and set Source to 'GitHub Actions', then re-run this workflow."

@@ -27,12 +27,23 @@ def _first(info: dict, *keys, default=np.nan):
 
 
 def _as_fraction(value) -> float:
-    """Yahoo sometimes reports yields/margins in percent, sometimes as fractions."""
+    """Ratios Yahoo reports as fractions (ROE, margins); guard against percent."""
     try:
         v = float(value)
     except (TypeError, ValueError):
         return np.nan
-    return v / 100.0 if abs(v) > 1.0 else v
+    return v / 100.0 if abs(v) > 1.5 else v
+
+
+def _dividend_yield(info: dict) -> float:
+    """Yahoo's ``dividendYield`` is a percent (1.69 = 1.69%); ``trailingAnnualDividendYield`` is a fraction."""
+    tr = info.get("trailingAnnualDividendYield")
+    if tr is not None and tr == tr:
+        return float(tr)
+    dy = info.get("dividendYield")
+    if dy is None or dy != dy:
+        return 0.0
+    return float(dy) / 100.0
 
 
 def fetch_prices(symbols: list[str], period: str = "2y") -> pd.DataFrame:
@@ -87,7 +98,7 @@ def fetch_fundamentals(listings: list[Listing], prices: pd.DataFrame | None = No
             "roe": _as_fraction(_first(info, "returnOnEquity")),
             "profit_margin": _as_fraction(_first(info, "profitMargins")),
             "debt_to_equity": (float(de) / 100.0) if de == de and de is not None else np.nan,
-            "dividend_yield": _as_fraction(_first(info, "dividendYield", "trailingAnnualDividendYield", default=0.0)),
+            "dividend_yield": _dividend_yield(info),
             "avg_daily_value": float(avg_vol) * float(price) if avg_vol == avg_vol and price == price else np.nan,
             "high_52w": _first(info, "fiftyTwoWeekHigh"),
             "low_52w": _first(info, "fiftyTwoWeekLow"),

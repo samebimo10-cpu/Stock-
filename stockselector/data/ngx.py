@@ -330,8 +330,10 @@ def fetch_ngx(listings: list[Listing], polite_delay: float = 0.3,
         kw = attempt("kwayisi", fetch_kwayisi_board)
         if kw is None:
             raise RuntimeError("No public NGX price source reachable: " + "; ".join(warnings))
-    if equities is not None and "_keys" in equities.columns and equities["price"].isna().all():
-        warnings.append("NGX equities feed fields not recognised: " + str(equities["_keys"].iloc[0]))
+    if equities is not None and "_keys" in equities.columns:
+        log.info("NGX equities feed fields: %s", equities["_keys"].iloc[0])
+        if equities["price"].isna().all():
+            warnings.append("NGX equities feed fields not recognised: " + str(equities["_keys"].iloc[0]))
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows = {}

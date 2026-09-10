@@ -792,7 +792,7 @@ function renderPortfolio(a, p) {
   const bt = a.bt;
   const buys = a.lots.orders.filter(o => o.shares > 0);
   const byEx = ex => buys.filter(o => o.exchange === ex);
-  const listEx = (ex, label) => { const os = byEx(ex); if (!os.length) return ""; return `<li><strong>${money(sum(os.map(o => o.cost)), ccy)}</strong> in ${os.length} ${label} ${os.length === 1 ? "stock" : "stocks"}: ${os.map(o => `${fmtN(o.shares)} shares of ${esc(o.symbol)}`).join(", ")}.</li>`; };
+  const listEx = (ex, label) => { const os = byEx(ex); if (!os.length) return ""; return `<li><strong>${money(sum(os.map(o => o.cost)), ccy)}</strong> in ${os.length} ${label} ${os.length === 1 ? "stock" : "stocks"}: ${os.map(o => `${fmtN(o.shares)} ${o.shares === 1 ? "share" : "shares"} of ${esc(o.symbol)}`).join(", ")}.</li>`; };
   const plain = `<div class="card plan"><h2>Your plan in plain words</h2><ul>
     ${listEx("NGX", "Nigerian (NGX)")}${listEx("NYSE", "American (NYSE)")}
     <li>Keep <strong>${money(a.lots.cash, ccy)}</strong> as cash${a.lots.sleeve > 0 ? " (part of it deliberately, in treasury bills)" : ""}.</li>

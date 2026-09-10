@@ -46,7 +46,7 @@ def to_web_pack(md: MarketData, max_days: int = 520) -> dict:
             "is_sample": bool(md.is_sample),
             "fetched_at": md.fetched_at.isoformat(),
             "warnings": list(md.warnings),
-            "sources": sorted({str(s) for s in md.fundamentals["source"].dropna().unique()}),
+            "sources": sorted({str(s) for s in md.fundamentals["source"].dropna().unique() if str(s) not in ("none", "nan")}),
         },
         "dates": dates,
         "fx_usdngn": [_clean(v) for v in fx.tolist()],

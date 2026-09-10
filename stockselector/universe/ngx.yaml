@@ -40,7 +40,6 @@ stocks:
   - {symbol: BUAFOODS,     name: BUA Foods,                      sector: Consumer Goods}
   - {symbol: DANGSUGAR,    name: Dangote Sugar Refinery,         sector: Consumer Goods}
   - {symbol: NASCON,       name: NASCON Allied Industries,       sector: Consumer Goods}
-  - {symbol: FLOURMILL,    name: Flour Mills of Nigeria,         sector: Consumer Goods}
   - {symbol: UNILEVER,     name: Unilever Nigeria,               sector: Consumer Goods}
   - {symbol: CADBURY,      name: Cadbury Nigeria,                sector: Consumer Goods}
   - {symbol: VITAFOAM,     name: Vitafoam Nigeria,               sector: Consumer Goods}
