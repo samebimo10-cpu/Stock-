@@ -6,6 +6,15 @@ stock in a configurable universe with a transparent multi-factor model, then bui
 matches *your* goals: growth, income, balance or capital preservation, a risk level, a horizon, a
 target amount, a currency, and how much you want at home versus abroad.
 
+## Just want to use it?
+
+Open the web app: **https://samebimo10-cpu.github.io/Stock-/**
+
+Nothing to install. A job in this repository (`.github/workflows/update-data.yml`) fetches public NGX,
+NYSE and USD/NGN data every weekday at 21:30 UTC (22:30 Lagos time), rebuilds the page and publishes
+it. To refresh sooner, open the **Actions** tab on GitHub, pick *Update market data and publish the
+web app* and press *Run workflow*.
+
 > This is an analytical tool, not investment advice. Prices and fundamentals from free public sources
 > can be stale or incomplete; check them before trading.
 
