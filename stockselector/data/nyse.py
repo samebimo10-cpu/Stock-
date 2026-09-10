@@ -35,15 +35,25 @@ def _as_fraction(value) -> float:
     return v / 100.0 if abs(v) > 1.5 else v
 
 
+#: No large-cap yields more than this; anything above is a currency or data glitch.
+MAX_SANE_YIELD = 0.20
+
+
 def _dividend_yield(info: dict) -> float:
-    """Yahoo's ``dividendYield`` is a percent (1.69 = 1.69%); ``trailingAnnualDividendYield`` is a fraction."""
+    """Yahoo's ``dividendYield`` is a percent (1.69 = 1.69%) and is computed in the
+    quote currency; ``trailingAnnualDividendYield`` is a fraction but, for ADRs,
+    divides a home-currency dividend by the dollar price. Prefer the former."""
+    candidates = []
+    dy = info.get("dividendYield")
+    if dy is not None and dy == dy:
+        candidates.append(float(dy) / 100.0)
     tr = info.get("trailingAnnualDividendYield")
     if tr is not None and tr == tr:
-        return float(tr)
-    dy = info.get("dividendYield")
-    if dy is None or dy != dy:
-        return 0.0
-    return float(dy) / 100.0
+        candidates.append(float(tr))
+    for v in candidates:
+        if 0.0 <= v <= MAX_SANE_YIELD:
+            return v
+    return 0.0 if not candidates else np.nan
 
 
 def fetch_prices(symbols: list[str], period: str = "2y") -> pd.DataFrame:
