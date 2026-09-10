@@ -1,0 +1,59 @@
+name: Update market data and publish the web app
+# Runs every weekday evening after both markets close (NGX 14:30 UTC, NYSE 20:00 UTC),
+# fetches public NGX and NYSE data, rebuilds web/index.html and publishes it to GitHub Pages.
+on:
+  schedule:
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+  push:
+    branches: [claude/stock-selector-allocator-app-8lic01, main]
+    paths-ignore: ["data/cache/**", "web/index.html", "web/data-pack.json"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update-and-publish:
+    runs-on: ubuntu-latest
+    env:
+      STOCKSELECTOR_CACHE: data/cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+
+      - name: Fetch live public data (NGX + NYSE + USD/NGN)
+        run: |
+          stockselector refresh --cache-dir data/cache \
+            || echo "::warning::Live refresh failed; the page will be built from the last good data."
+
+      - name: Build the web app with the freshest data available
+        run: stockselector export-web web/data-pack.json --mode auto --cache-dir data/cache --build
+
+      - name: Save the data back to the repository (keeps NGX price history growing)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/cache web/index.html web/data-pack.json
+          git commit -m "Update market data $(date -u +%Y-%m-%d)" || echo "No data changes"
+          git push
+
+      - name: Enable GitHub Pages if needed
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4
+      - run: echo "Published to ${{ steps.deploy.outputs.page_url }}"

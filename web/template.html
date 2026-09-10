@@ -93,6 +93,10 @@ main{display:flex;flex-direction:column;gap:18px;min-width:0}
 .banner{padding:10px 12px;border-radius:var(--radius);font-size:13px;display:flex;gap:10px;align-items:flex-start}
 .banner.warn{background:var(--warn-bg)}
 .banner.crit{background:var(--crit-bg)}
+.banner.live{background:var(--accent-soft)}
+.banner details{display:inline}.banner summary{cursor:pointer;color:var(--accent)}
+.intro ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+#banner{display:flex;flex-direction:column;gap:12px}#banner:empty{display:none}
 .banner strong{font-weight:600}
 .strip{display:grid;grid-template-columns:1.6fr repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 @media (max-width:1100px){.strip{grid-template-columns:repeat(3,1fr)}.strip .hero{grid-column:1/-1}}
@@ -118,6 +122,7 @@ main{display:flex;flex-direction:column;gap:18px;min-width:0}
 .notes li{list-style:none;padding-left:14px;position:relative}
 .notes li::before{content:"";position:absolute;left:0;top:.55em;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .notes ul{margin:0;padding:0}
+.plan ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
 
 /* ---- tables */
 .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -745,9 +750,10 @@ function renderStatus() {
   el.innerHTML = m.is_sample
     ? `<span class="pill warn"><span class="dot"></span>Sample data</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`
     : `<span class="pill"><span class="dot"></span>Data ${esc((m.fetched_at || "").slice(0, 10))}</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`;
-  b.innerHTML = m.is_sample
-    ? `<div class="banner warn"><strong>Sample data.</strong><span>The figures on this page are synthetic and illustrative, not live quotes. To run it on real public data, export a data pack from the desktop app (<code>stockselector export-web</code>) and load it on the <a href="#" data-goto="data">Data</a> tab.</span></div>`
-    : (m.warnings && m.warnings.length ? `<div class="banner warn"><span>${m.warnings.map(esc).join("<br>")}</span></div>` : "");
+  const intro = `<div class="card intro"><h2>Three steps</h2><ol><li><strong>Tell it your goal</strong> on the left: what you want (growth, income, a balance, or keeping your money safe), how much risk you can stomach, how much you are investing and for how long.</li><li><strong>Press Build portfolio.</strong> It ranks every stock on both exchanges, picks the best for your goal, and decides how much to put in each.</li><li><strong>Read the plan.</strong> The Portfolio tab tells you exactly how many shares of what to buy and what to expect.</li></ol></div>`;
+  b.innerHTML = (m.is_sample
+    ? `<div class="banner warn"><strong>Practice data.</strong><span>These prices are made up for practice, not real quotes. The live version of this page, updated every weekday from NGX and NYSE, is the one to use for real decisions.</span></div>`
+    : `<div class="banner live"><strong>Live public data.</strong><span>Updated ${esc((m.fetched_at || "").slice(0, 10))} from ${esc((m.sources || []).join(", "))}. Prices refresh every weekday evening after both markets close.${m.warnings && m.warnings.length ? " <details><summary>Data notes</summary>" + m.warnings.map(esc).join("<br>") + "</details>" : ""}</span></div>`) + intro;
 }
 
 function renderStrip(a, p) {
@@ -760,9 +766,9 @@ function renderStrip(a, p) {
     : `<div class="tile"><span class="label">Chance of a loss at horizon</span><span class="value ${a.proj.probLoss <= .15 ? "ok" : a.proj.probLoss > .35 ? "bad" : ""}">${pct(a.proj.probLoss, 0)}</span><span class="sub">ending below ${compact(p.budget, ccy)}</span></div>`;
   el.innerHTML = `
     <div class="tile hero"><span class="label">Projected median value in ${p.horizon} years</span><span class="value">${money(a.proj.p50[last], ccy)}</span><span class="sub">from ${money(p.budget, ccy)} · 10th–90th pct ${compact(a.proj.p10[last], ccy)} – ${compact(a.proj.p90[last], ccy)}</span></div>
-    <div class="tile"><span class="label">Expected return</span><span class="value">${pct(a.res.expectedReturn)}</span><span class="sub">per year, in ${ccy}</span></div>
-    <div class="tile"><span class="label">Volatility</span><span class="value ${a.res.volatility <= p.maxVol + 1e-3 ? "" : "bad"}">${pct(a.res.volatility)}</span><span class="sub">ceiling ${pct(p.maxVol, 0)} at risk ${p.risk}/5</span></div>
-    <div class="tile"><span class="label">Sharpe ratio</span><span class="value">${isNum(sharpe) ? sharpe.toFixed(2) : "–"}</span><span class="sub">over ${pct(p.cashRate)} cash</span></div>
+    <div class="tile"><span class="label">Expected growth</span><span class="value">${pct(a.res.expectedReturn)}</span><span class="sub">per year, in ${ccy}</span></div>
+    <div class="tile"><span class="label">Typical yearly swing</span><span class="value ${a.res.volatility <= p.maxVol + 1e-3 ? "" : "bad"}">${pct(a.res.volatility)}</span><span class="sub">your limit ${pct(p.maxVol, 0)} at risk ${p.risk}/5</span></div>
+    <div class="tile"><span class="label">Return per unit of risk</span><span class="value">${isNum(sharpe) ? sharpe.toFixed(2) : "–"}</span><span class="sub">Sharpe ratio, above ${pct(p.cashRate)} cash</span></div>
     <div class="tile"><span class="label">Dividend yield</span><span class="value">${pct(a.yieldW)}</span><span class="sub">${money(a.yieldW * p.budget, ccy)} a year</span></div>
     ${goal}`;
 }
@@ -782,7 +788,16 @@ function renderPortfolio(a, p) {
   const oRows = a.lots.orders.map(o => `<tr class="${o.shares === 0 ? "dim" : ""}"><td class="sym"><span class="ex ${o.exchange}"></span>${esc(o.symbol)}</td><td>${o.exchange}</td><td class="r">${fmtN(o.price, 2)} ${o.currency}</td><td class="r">${fmtN(o.shares)}</td><td class="r">${fmtN(o.cost)}</td><td class="r">${pct(o.target)}</td><td class="r">${pct(o.actual)}</td></tr>`).join("")
     + `<tr><td class="sym"><span class="ex CASH"></span>CASH</td><td>–</td><td class="r">–</td><td class="r">–</td><td class="r">${fmtN(a.lots.cash)}</td><td class="r">${pct(a.lots.sleeve / p.budget)}</td><td class="r">${pct(a.lots.cash / p.budget)}</td></tr>`;
   const bt = a.bt;
-  el.innerHTML = `
+  const buys = a.lots.orders.filter(o => o.shares > 0);
+  const byEx = ex => buys.filter(o => o.exchange === ex);
+  const listEx = (ex, label) => { const os = byEx(ex); if (!os.length) return ""; return `<li><strong>${money(sum(os.map(o => o.cost)), ccy)}</strong> in ${os.length} ${label} ${os.length === 1 ? "stock" : "stocks"}: ${os.map(o => `${fmtN(o.shares)} shares of ${esc(o.symbol)}`).join(", ")}.</li>`; };
+  const plain = `<div class="card plan"><h2>Your plan in plain words</h2><ul>
+    ${listEx("NGX", "Nigerian (NGX)")}${listEx("NYSE", "American (NYSE)")}
+    <li>Keep <strong>${money(a.lots.cash, ccy)}</strong> as cash${a.lots.sleeve > 0 ? " (part of it deliberately, in treasury bills)" : ""}.</li>
+    <li>Over ${p.horizon} years this mix is expected to grow ${money(p.budget, ccy)} to about <strong>${money(a.proj.p50[a.proj.p50.length - 1], ccy)}</strong>. In a bad stretch it could be ${money(a.proj.p10[a.proj.p10.length - 1], ccy)}; in a good one ${money(a.proj.p90[a.proj.p90.length - 1], ccy)}.${a.proj.probTarget != null ? ` The chance of reaching your ${money(p.target, ccy)} target is about <strong>${pct(a.proj.probTarget, 0)}</strong>.` : ""}</li>
+    <li>Expect the value to swing about <strong>${pct(a.res.volatility, 0)}</strong> up or down in a typical year. That is ${a.res.volatility <= p.maxVol + 1e-3 ? "within" : "above"} the limit for risk level ${p.risk}.</li>
+  </ul></div>`;
+  el.innerHTML = plain + `
     <div class="grid-2">
       <div class="card">
         <div class="card-head"><h2>Target weights</h2><div class="legend"><span style="--c:var(--ngx)">NGX</span><span style="--c:var(--nyse)">NYSE</span><span style="--c:var(--cash)">Cash</span></div></div>
@@ -862,8 +877,8 @@ function renderData() {
         <button class="btn" id="reset-pack" type="button" ${localStorage.getItem("ngxnyse.pack") ? "" : "disabled"}>Remove loaded pack, go back to the built-in data</button>
       </div>
       <div class="card">
-        <h2>Load real public data</h2>
-        <p class="muted" style="margin:0">Browsers cannot read the exchanges' feeds directly, so the desktop app fetches them and exports a data pack. On a computer with the Python app installed:</p>
+        <h2>Where the data comes from</h2>
+        <p class="muted" style="margin:0">NYSE prices and company figures come from Yahoo Finance; NGX prices, market values and yields come from the NGX Group price feed and the public NGX board at afx.kwayisi.org; the naira rate comes from Yahoo Finance. A job in the GitHub repository fetches them every weekday evening and republishes this page. Advanced: you can also load your own data pack, made with the desktop app:</p>
         <pre>pip install -e ".[ui]"
 stockselector refresh
 stockselector export-web data-pack.json</pre>
