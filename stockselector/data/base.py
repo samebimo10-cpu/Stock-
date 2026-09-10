@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -52,8 +54,27 @@ def normalise_board(df: pd.DataFrame | None) -> pd.DataFrame:
     for col in ("price", "pct_change", "market_cap", "ytd_change"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["symbol"] = df["symbol"].astype(str).str.upper().str.strip()
+    df["name"] = df["name"].map(_clean_security_name)
+    same = df["name"].notna() & (df["name"].astype(str).str.upper().str.strip() == df["symbol"])
+    df.loc[same, "name"] = np.nan
     df = df[BOARD_COLUMNS].drop_duplicates("symbol").dropna(subset=["price"])
     return df.sort_values(["exchange", "symbol"]).reset_index(drop=True)
+
+
+_NAME_SUFFIXES = re.compile(
+    r"\s*(?:-|,)?\s*(?:(?:Class [A-C] )?(?:Common|Ordinary) (?:Stock|Shares)|Shares of Beneficial Interest|"
+    r"American Depositary Shares?(?:[, ].*)?|Depositary Shares?(?:[, ].*)?|\(?each representing.*\)?|"
+    r"Common Shares of Beneficial Interest|Limited Partnership Units|Units.*)\s*$", re.IGNORECASE)
+
+
+def _clean_security_name(name) -> object:
+    if name is None or (isinstance(name, float) and np.isnan(name)):
+        return np.nan
+    text = str(name).strip()
+    if not text or text.lower() == "nan":
+        return np.nan
+    cleaned = _NAME_SUFFIXES.sub("", text).strip(" ,-")
+    return cleaned or text
 
 
 @dataclass
