@@ -32,11 +32,13 @@ jobs:
       - run: pip install -e .
 
       - name: Fetch live public data (NGX + NYSE + USD/NGN)
+        timeout-minutes: 25
         run: |
           stockselector refresh --cache-dir data/cache \
             || echo "::warning::Live refresh failed; the page will be built from the last good data."
 
       - name: Build the web app with the freshest data available
+        if: always()
         run: stockselector export-web web/data-pack.json --mode auto --cache-dir data/cache --build
 
       - name: Save the data back to the repository (keeps NGX price history growing)

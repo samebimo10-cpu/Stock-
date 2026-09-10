@@ -35,7 +35,9 @@ NGX_STATS_URL = "https://doclib.ngxgroup.com/REST/api/statistics/{table}/?$top=1
 KWAYISI_BOARD_URL = "https://afx.kwayisi.org/ngx/"
 KWAYISI_STOCK_URL = "https://afx.kwayisi.org/ngx/{symbol}.html"
 USER_AGENT = "stockselector/0.1 (+https://github.com/; public-data research tool)"
-TIMEOUT = 30
+TIMEOUT = 15
+#: Wall-clock budget for the optional per-stock valuation pages (seconds).
+STOCK_PAGE_BUDGET = 240
 
 
 def _get(url: str, **kw) -> requests.Response:
@@ -239,6 +241,9 @@ def fetch_ngx(listings: list[Listing], polite_delay: float = 0.4,
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows = {}
+    pages_started = time.monotonic()
+    consecutive_failures = 0
+    pages_skipped = 0
     for lst in listings:
         sym = lst.symbol
         price = np.nan
@@ -261,12 +266,16 @@ def fetch_ngx(listings: list[Listing], polite_delay: float = 0.4,
             if value != value and vol == vol and price == price:
                 value = float(vol) * float(price)
         facts: dict = {}
-        if with_stock_pages:
+        if with_stock_pages and consecutive_failures < 3 and (time.monotonic() - pages_started) < STOCK_PAGE_BUDGET:
             try:
                 facts = fetch_kwayisi_stock(sym)
+                consecutive_failures = 0
                 time.sleep(polite_delay)
             except Exception as exc:
+                consecutive_failures += 1
                 log.debug("kwayisi page failed for %s: %s", sym, exc)
+        elif with_stock_pages:
+            pages_skipped += 1
         if market_cap != market_cap:
             market_cap = facts.get("market_cap", np.nan)
         pe = facts.get("pe", np.nan)
@@ -293,6 +302,9 @@ def fetch_ngx(listings: list[Listing], polite_delay: float = 0.4,
             "as_of": trade_date,
         }
     fundamentals = normalise_fundamentals(pd.DataFrame.from_dict(rows, orient="index"))
+    if pages_skipped:
+        warnings.append(f"NGX: valuation pages skipped for {pages_skipped} stocks (source slow or unavailable); "
+                        "P/E and yield are blank for them this run.")
     missing = [s for s in symbols if pd.isna(fundamentals.at[s, "price"])]
     if missing:
         warnings.append(f"No NGX price for: {', '.join(missing)}")

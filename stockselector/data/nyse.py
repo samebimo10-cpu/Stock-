@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -11,6 +12,10 @@ from ..universe import Listing
 from .base import normalise_fundamentals
 
 log = logging.getLogger(__name__)
+
+#: Wall-clock budget for per-ticker fundamentals calls (seconds). Yahoo throttles
+#: bursts; past the budget the remaining tickers get price-derived fields only.
+FUNDAMENTALS_BUDGET = 360
 
 
 def _first(info: dict, *keys, default=np.nan):
@@ -52,12 +57,18 @@ def fetch_fundamentals(listings: list[Listing], prices: pd.DataFrame | None = No
 
     rows = {}
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    started = time.monotonic()
+    throttled = False
     for lst in listings:
         info: dict = {}
-        try:
-            info = yf.Ticker(lst.symbol).get_info() or {}
-        except Exception as exc:  # pragma: no cover - network dependent
-            log.warning("yfinance info failed for %s: %s", lst.symbol, exc)
+        if not throttled and (time.monotonic() - started) < FUNDAMENTALS_BUDGET:
+            try:
+                info = yf.Ticker(lst.symbol).get_info() or {}
+            except Exception as exc:  # pragma: no cover - network dependent
+                log.warning("yfinance info failed for %s: %s", lst.symbol, exc)
+                if "rate" in str(exc).lower() or "too many" in str(exc).lower():
+                    throttled = True
+                    log.warning("Yahoo is throttling; remaining tickers get price-derived fields only")
         price = _first(info, "currentPrice", "regularMarketPrice", "previousClose")
         if (price is None or price != price) and prices is not None and lst.symbol in prices.columns:
             s = prices[lst.symbol].dropna()
