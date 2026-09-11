@@ -1,5 +1,10 @@
 # Stock Selector & Allocator — NGX + NYSE
 
+> **This repository also holds [DouValue Farm Manager](douvalue/README.md)** — an offline-first
+> farm management, crop-clinic and forecasting app for DouValue Farm in Port Harcourt
+> (bell pepper, chili and habanero). It is a separate application under `douvalue/` and
+> shares no code with the stock tool below.
+
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every
 stock in a configurable universe with a transparent multi-factor model, then builds a portfolio that
