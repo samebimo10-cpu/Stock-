@@ -49,6 +49,12 @@ jobs:
           git commit -m "Update market data $(date -u +%Y-%m-%d)" || echo "No data changes"
           git push
 
+      # Pages serves one site per repository, so the stock app and the farm app are
+      # combined into a single tree before deploying. Deploying either on its own
+      # would replace the other rather than sit beside it.
+      - name: Assemble the site (stock app at the root, farm app under /farm/)
+        run: ./scripts/assemble_site.sh _site
+
       # Publishing needs GitHub Pages switched on once: repository Settings -> Pages ->
       # "Build and deployment" -> Source: "GitHub Actions". Until then these steps are skipped.
       - name: Check whether GitHub Pages is enabled
@@ -60,11 +66,11 @@ jobs:
       - if: steps.pages.outcome == 'success'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
       - if: steps.pages.outcome == 'success'
         id: deploy
         uses: actions/deploy-pages@v4
       - if: steps.pages.outcome == 'success'
-        run: echo "Published to ${{ steps.deploy.outputs.page_url }}"
+        run: echo "Published ${{ steps.deploy.outputs.page_url }} and ${{ steps.deploy.outputs.page_url }}farm/"
       - if: steps.pages.outcome != 'success'
         run: echo "::warning::GitHub Pages is not enabled yet. Open Settings -> Pages and set Source to 'GitHub Actions', then re-run this workflow."

@@ -1,0 +1,54 @@
+name: Publish the web apps to GitHub Pages
+# Publishes DouValue Farm Manager (and the stock app alongside it) whenever the
+# farm app changes.
+#
+# The market-data workflow already deploys on its own schedule and after every
+# data refresh, so this one only watches the farm app. Both deploy the same
+# combined site, and both sit in the "pages" concurrency group so they queue
+# rather than race.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/stock-selector-allocator-app-8lic01, main]
+    paths:
+      - "douvalue/web/**"
+      - "scripts/assemble_site.sh"
+      - ".github/workflows/publish-site.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: ./scripts/assemble_site.sh _site
+
+      # Publishing needs GitHub Pages switched on once: repository Settings -> Pages ->
+      # "Build and deployment" -> Source: "GitHub Actions". Until then these steps are skipped.
+      - name: Check whether GitHub Pages is enabled
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - if: steps.pages.outcome == 'success'
+        id: deploy
+        uses: actions/deploy-pages@v4
+      - if: steps.pages.outcome == 'success'
+        run: echo "Farm app published to ${{ steps.deploy.outputs.page_url }}farm/"
+      - if: steps.pages.outcome != 'success'
+        run: echo "::warning::GitHub Pages is not enabled yet. Open Settings -> Pages and set Source to 'GitHub Actions', then re-run this workflow."

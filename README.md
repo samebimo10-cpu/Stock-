@@ -4,6 +4,8 @@
 > farm management, crop-clinic and forecasting app for DouValue Farm in Port Harcourt
 > (bell pepper, chili and habanero). It is a separate application under `douvalue/` and
 > shares no code with the stock tool below.
+>
+> Open it at **https://samebimo10-cpu.github.io/Stock-/farm/**
 
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every
