@@ -41,13 +41,33 @@ jobs:
         if: always()
         run: stockselector export-web web/data-pack.json --mode auto --cache-dir data/cache --build
 
+      # Saving the data back must never stop the site being published. This run
+      # takes about five minutes fetching prices, and anything merged in that
+      # window makes the push a fast-forward failure. Rebase onto whatever
+      # landed and try again; if it still will not go, warn and carry on,
+      # because the next run regenerates the data anyway and a stale deploy is
+      # far worse than a missed commit.
       - name: Save the data back to the repository (keeps NGX price history growing)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A data/cache web/index.html web/data-pack.json
-          git commit -m "Update market data $(date -u +%Y-%m-%d)" || echo "No data changes"
-          git push
+          git commit -m "Update market data $(date -u +%Y-%m-%d)" || {
+            echo "No data changes to save"
+            exit 0
+          }
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Data saved on attempt $attempt"
+              exit 0
+            fi
+            echo "Push rejected; someone merged while this run was fetching prices. Rebasing."
+            git pull --rebase origin "$GITHUB_REF_NAME" || break
+            sleep 5
+          done
+          echo "::warning::Could not save the refreshed data back to the repository. \
+          The site is still published with it, and the next run will try again."
+          exit 0
 
       # Pages serves one site per repository, so the stock app and the farm app are
       # combined into a single tree before deploying. Deploying either on its own
