@@ -3,8 +3,16 @@
 
 import { can, ROLES } from '../store.js';
 import { getLang, LANGS, setLang, t } from '../i18n.js';
-import { badge, button, closeSheet, empty, esc, initials, readForm, sheetOpen, toast } from './kit.js';
+import {
+  badge, button, closeSheet, confirmSheet, empty, esc, field, initials, input,
+  note, openSheet, readForm, sheetOpen, toast,
+} from './kit.js';
+import {
+  getAuth, getStatus, joinFarm, onStatus, readJoinLink, signOutDevice,
+  statusLine, syncNow, verifyPin,
+} from '../sync.js';
 import { isoDate } from '../util.js';
+import { getMeta, setMeta } from '../db.js';
 
 const routes = new Map();
 let ctx = null;
@@ -51,25 +59,41 @@ export async function hashPin(pin, salt = 'douvalue') {
 let pending = { personId: null, pin: '' };
 
 function loginScreen(state) {
+  const linked = getAuth();
+
+  // A phone enrolled against the server belongs to one person. That is the
+  // point: their PIN is useless on anybody else's handset, and nobody can pick
+  // a different name off this one and work under it.
+  if (linked) {
+    const me = state.people[linked.memberId]
+      || { id: linked.memberId, name: linked.name, role: linked.role };
+    return pinScreen(me, `Signed in on this phone as ${ROLES[me.role]?.name || me.role}`);
+  }
+
   const people = Object.values(state.people).filter((p) => p.active !== false);
-  if (!people.length) return firstRunScreen();
+  if (!people.length) return firstRunScreen(state);
 
   if (!pending.personId) {
-    return `<div class="card"><h1>${esc(state.settings.farmName)}</h1>`
-      + `<p>${esc(t('login.who'))}</p><div class="people-grid">`
+    return brandMark(state)
+      + `<div class="card"><h2>${esc(t('login.who'))}</h2><div class="people-grid">`
       + people.map((p) => `<div class="person-tile" data-act="pick-person" data-id="${esc(p.id)}">`
         + `<div class="av">${esc(initials(p.name))}</div><b>${esc(p.name)}</b>`
         + `<small>${esc(ROLES[p.role]?.name || p.role)}</small></div>`).join('')
       + '</div></div>';
   }
 
-  const person = state.people[pending.personId];
+  return pinScreen(state.people[pending.personId], null);
+}
+
+function pinScreen(person, subtitle) {
+  if (!person) return '<div class="card"><p>That account is not on this phone.</p></div>';
+  const linked = getAuth();
   const dots = [0, 1, 2, 3].map((i) => `<span class="${i < pending.pin.length ? 'on' : ''}"></span>`).join('');
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'back', '0', 'ok'];
   return `<div class="card"><div class="row"><div class="av" style="width:44px;height:44px;border-radius:50%;`
-    + `background:var(--green-100);color:var(--green-900);display:grid;place-items:center;font-weight:800">`
+    + `background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:800">`
     + `${esc(initials(person.name))}</div><div class="grow"><b>${esc(person.name)}</b><br>`
-    + `<small>${esc(ROLES[person.role]?.name || '')}</small></div></div>`
+    + `<small>${esc(subtitle || ROLES[person.role]?.name || '')}</small></div></div>`
     + `<p style="margin-top:12px">${esc(t('login.pin'))}</p>`
     + `<div class="pin-dots">${dots}</div>`
     + '<div class="pin-pad">'
@@ -79,26 +103,100 @@ function loginScreen(state) {
       return `<button type="button" data-act="pin-key" data-key="${k}">${k}</button>`;
     }).join('')
     + '</div>'
-    + `<div style="margin-top:14px">${button(t('login.back'), 'pin-cancel', { cls: 'btn-ghost btn-block' })}</div>`
+    + (linked
+      ? `<div style="margin-top:14px">${button('Sign this phone out of the farm', 'device-signout', { cls: 'btn-ghost btn-block btn-sm' })}</div>`
+      : `<div style="margin-top:14px">${button(t('login.back'), 'pin-cancel', { cls: 'btn-ghost btn-block' })}</div>`)
     + '</div>';
 }
 
-function firstRunScreen() {
-  return '<div class="card"><h1>Set up DouValue Farm</h1>'
-    + '<p>Nobody is registered on this phone yet. Create the manager account first. '
-    + 'Everyone else can be added afterwards, from the People screen.</p>'
+/** The company mark, shown on the screens people see before they are signed in. */
+function brandMark(state) {
+  return '<div class="brandmark">'
+    + '<picture><source srcset="img/logo.webp" type="image/webp"><img src="img/logo.jpg" alt="DouValue Farms Limited" width="502" height="518"></picture>'
+    + `<p class="brandmark-where">${esc(state?.settings?.location || 'Port Harcourt, Rivers State')}</p>`
+    + '</div>';
+}
+
+function firstRunScreen(state) {
+  return brandMark(state)
+    + '<div class="card"><h1>Set up the farm</h1>'
+    + '<p>This phone has no accounts yet. The first account is the <b>CEO</b>, the owner of the '
+    + 'farm. From there you appoint the farm manager, and the manager takes on supervisors and '
+    + 'farm hands.</p>'
     + '<form data-act="first-run">'
-    + '<div class="field"><label>Your name</label><input name="name" required placeholder="e.g. Ada Briggs"></div>'
+    + '<div class="field"><label>Your name</label>'
+    + '<input name="name" required placeholder="e.g. Ebimo Sam" autocomplete="name"></div>'
     + '<div class="field"><label>Choose a 4-digit PIN</label>'
     + '<input name="pin" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="0000">'
-    + '<div class="hint">You will type this to sign in. Do not use 1234.</div></div>'
-    + '<div class="field"><label>Farm name</label><input name="farmName" value="DouValue Farm"></div>'
-    + '<button class="btn-block btn-lg" type="submit">Create manager account</button>'
+    + '<div class="hint">You type this to sign in. Do not use 1234 or your year of birth.</div></div>'
+    + '<div class="field"><label>Farm name</label><input name="farmName" value="DouValue Farms Limited"></div>'
+    + '<button class="btn-block btn-lg" type="submit">Create the CEO account</button>'
     + '</form>'
-    + '<p style="margin-top:16px"><small>Everything stays on this phone until you export or sync it. '
-    + 'No account, no data bundle needed.</small></p>'
-    + '<div style="margin-top:8px">' + button('Load a sample farm to look around', 'load-sample', { cls: 'btn-ghost btn-block' }) + '</div>'
+    + '<p style="margin-top:16px"><small>Records are kept on this phone and work with no network. '
+    + 'Once you are in, set up Sync under Settings and every phone on the farm stays in step '
+    + 'automatically whenever it finds signal.</small></p>'
+    + '</div>'
+    + '<div class="card tight">'
+    + '<b>Joining a farm that already exists?</b>'
+    + '<p><small>If the CEO has already set this farm up on another phone, paste the join code '
+    + 'they gave you instead of creating a new farm.</small></p>'
+    + button('Join with a code', 'open-join', { cls: 'btn-ghost btn-block' })
+    + '</div>'
+    + '<div class="card tight">'
+    + button('Load a sample farm to look around', 'load-sample', { cls: 'btn-quiet btn-block' })
+    + '<p style="margin:8px 0 0"><small>Fills the app with an example farm so you can see how it '
+    + 'works. Erase it from Settings before you start recording real work.</small></p>'
     + '</div>';
+}
+
+/**
+ * What someone sees when they tap the link the CEO sent them.
+ *
+ * Two things to type, both short, both handed over by someone they know: the
+ * code (already filled in from the link) and the password. Then they pick their
+ * own PIN and never type anything longer again.
+ */
+function joinScreen(state) {
+  const fromLink = readJoinLink();
+  const linked = getAuth();
+
+  if (linked) {
+    return brandMark(state)
+      + `<div class="card"><h1>Already joined</h1>`
+      + `<p>This phone is signed in as <b>${esc(linked.name)}</b> on `
+      + `<b>${esc(linked.farmName)}</b>.</p>`
+      + button('Go to the farm', 'go', { cls: 'btn-block btn-lg', data: { to: '#/today' } })
+      + `<div style="margin-top:10px">${button('Sign this phone out', 'device-signout', { cls: 'btn-ghost btn-block' })}</div>`
+      + '</div>';
+  }
+
+  return brandMark(state)
+    + '<div class="card"><h1>Join the farm</h1>'
+    + '<p>The CEO creates your account and sends you a link and a password. '
+    + 'Enter them once, choose a PIN you will remember, and this phone is yours.</p>'
+    + '<form data-act="do-join">'
+    + field('Farm server', input('url', {
+      value: fromLink ? fromLink.url : '', required: true, placeholder: 'https://your-farm.deno.dev' }),
+      fromLink ? 'Filled in from the link you tapped.' : 'The address the CEO gave you.')
+    + field('Farm', input('farmId', { value: fromLink ? fromLink.farmId : '', required: true }))
+    + field('Join code', input('joinCode', {
+      value: fromLink ? fromLink.joinCode : '', required: true, placeholder: 'ABC123' }))
+    + field('Password you were given', input('joinPassword', { required: true, placeholder: 'XYZ789' }),
+      'Six letters and numbers. It works once, then it is dead.')
+    + field('Choose your PIN', input('pin', {
+      type: 'password', required: true, inputmode: 'numeric', placeholder: '0000' }),
+      'Four digits or more. This is what you type every day from now on.')
+    + field('Type the PIN again', input('pin2', { type: 'password', inputmode: 'numeric', placeholder: '0000' }))
+    + '<button class="btn-block btn-lg" type="submit">Join</button>'
+    + '</form>'
+    + note('info', 'Why two things?',
+      '<small>The code says which account, the password proves it is you. Neither works twice, '
+      + 'and neither works on a phone that was not invited. If the code is refused, ask the CEO '
+      + 'to send a new one.</small>')
+    + '</div>'
+    + (Object.keys(state.people).length
+      ? `<div class="card tight">${button('Back', 'go', { cls: 'btn-ghost btn-block', data: { to: '#/today' } })}</div>`
+      : '');
 }
 
 // --- Chrome ---------------------------------------------------------------
@@ -117,16 +215,18 @@ function tabsFor(user) {
 
 function chrome(user, state, body) {
   const lang = getLang();
-  const online = navigator.onLine;
   const tabs = tabsFor(user);
   const here = routeKey();
-  return `<header class="topbar">`
+  const sync = statusLine();
+  return '<header class="topbar">'
+    + '<img class="topbar-mark" src="img/mark.jpg" alt="" width="256" height="256">'
     + `<div class="brand">${esc(state.settings.farmName)}<small>${esc(state.settings.location)}</small></div>`
     + '<div class="spacer"></div>'
     + `<button data-act="toggle-lang" title="Language">${lang === 'pcm' ? 'Pidgin' : 'English'}</button>`
     + `<button data-act="open-account" title="Account">${esc(initials(user.name))}</button>`
     + '</header>'
-    + (online ? '' : `<div class="offline-flag">${esc(t('common.offline'))}</div>`)
+    + `<div class="syncbar ${esc(sync.tone)}" data-act="sync-now" role="status">`
+    + `<span class="dot"></span><span>${esc(sync.text)}</span></div>`
     + `<main>${body}</main>`
     + '<nav class="tabbar">' + tabs.map((tab) => `<a href="${tab.hash}" class="${here === tab.hash ? 'on' : ''}">`
       + `<span class="ic">${tab.icon}</span>${esc(t(tab.key))}</a>`).join('') + '</nav>';
@@ -139,6 +239,7 @@ export function render() {
   const state = ctx.store.state;
   const user = ctx.store.user;
 
+  if (routeKey() === '#/join') { root.innerHTML = joinScreen(state); return; }
   if (!user) { root.innerHTML = loginScreen(state); return; }
 
   const key = routeKey();
@@ -172,7 +273,8 @@ function accountSheet() {
   const state = ctx.store.state;
   const role = ROLES[user.role];
   return `<h2>${esc(user.name)}</h2><p>${badge(role?.name || user.role)} <small>${esc(role?.blurb || '')}</small></p>`
-    + `<p><small>Signed in on this phone. ${esc(state.log.length)} records stored.</small></p>`
+    + `<p><small>Signed in on this phone. ${esc(state.log.length)} records stored. `
+    + `${esc(statusLine().text)}.</small></p>`
     + '<div class="field"><label>Language</label>'
     + Object.entries(LANGS).map(([code, name]) => `<button class="chip ${getLang() === code ? 'on' : ''}" `
       + `data-act="set-lang" data-lang="${code}">${esc(name)}</button>`).join(' ')
@@ -192,9 +294,34 @@ const shellActions = {
   'pin-back': () => { pending.pin = pending.pin.slice(0, -1); render(); },
   'pin-cancel': () => { pending = { personId: null, pin: '' }; render(); },
   'pin-ok': async (c) => {
+    const linked = getAuth();
+    const pin = pending.pin;
+
+    if (linked) {
+      // The PIN is checked against what this device stored when it was enrolled,
+      // so signing in still works with no network. The token is what the server
+      // actually trusts, and it is checked on the next exchange.
+      const stored = await getMeta('devicePin', null);
+      const hash = await hashPin(pin, linked.memberId);
+      if (!stored || stored !== hash) {
+        pending.pin = '';
+        toast(t('login.wrong'), true);
+        render();
+        return;
+      }
+      pending = { personId: null, pin: '' };
+      const person = c.store.state.people[linked.memberId]
+        || { id: linked.memberId, name: linked.name, role: linked.role, active: true };
+      c.store.setUser(person);
+      sessionStorage.setItem('douvalue.user', person.id);
+      navigate(ROLES[person.role]?.home || '#/today');
+      render();
+      return;
+    }
+
     const person = c.store.state.people[pending.personId];
     if (!person) { pending = { personId: null, pin: '' }; render(); return; }
-    const hash = await hashPin(pending.pin);
+    const hash = await hashPin(pin);
     if (person.pinHash && person.pinHash !== hash) {
       pending.pin = '';
       toast(t('login.wrong'), true);
@@ -207,17 +334,34 @@ const shellActions = {
     navigate(ROLES[person.role]?.home || '#/today');
     render();
   },
+
+  'device-signout': async (c) => {
+    const ok = await confirmSheet('Sign this phone out?',
+      'This phone stops sending and receiving, and whoever uses it next will need a fresh '
+      + 'invite from the CEO. Records already on the server stay there.', 'Sign out');
+    if (!ok) return;
+    await signOutDevice();
+    await setMeta('devicePin', null);
+    sessionStorage.removeItem('douvalue.user');
+    c.store.setUser(null);
+    pending = { personId: null, pin: '' };
+    toast('This phone is signed out');
+    render();
+  },
   'first-run': async (c, el) => {
     const data = readForm(el);
     if (!/^\d{4}$/.test(String(data.pin || ''))) { toast('PIN must be exactly 4 digits', true); return; }
-    const id = 'person_manager';
+    if (!String(data.name || '').trim()) { toast('Enter your name', true); return; }
+    const id = 'person_ceo';
     await c.store.dispatchMany([
-      { type: 'settings.update', payload: { farmName: data.farmName || 'DouValue Farm' } },
-      { type: 'person.upsert', payload: { id, name: data.name, role: 'manager', pinHash: await hashPin(data.pin), dailyRate: 0 } },
+      { type: 'settings.update', payload: { farmName: data.farmName || 'DouValue Farms Limited' } },
+      { type: 'person.upsert', payload: {
+        id, name: String(data.name).trim(), role: 'ceo', pinHash: await hashPin(data.pin), dailyRate: 0 } },
     ]);
     c.store.setUser(c.store.state.people[id]);
     sessionStorage.setItem('douvalue.user', id);
     navigate('#/dashboard');
+    toast('CEO account created. Next: add your farm manager under People.');
   },
   'load-sample': async (c) => {
     const { seedSampleFarm } = await import('../sample.js');
@@ -247,6 +391,55 @@ const shellActions = {
     pending = { personId: null, pin: '' };
     render();
   },
+  'sync-now': async () => {
+    const s = getStatus();
+    if (!s.configured) {
+      toast('Sync is not set up yet. The CEO can switch it on under Settings.');
+      return;
+    }
+    toast('Syncing…');
+    const result = await syncNow();
+    toast(result.ok
+      ? `Up to date. Sent ${result.sent}, received ${result.received}.`
+      : `Could not sync: ${result.reason}`, !result.ok);
+  },
+
+  'open-join': () => { navigate('#/join'); },
+
+  'do-join': async (c, form) => {
+    const data = readForm(form);
+    const pin = String(data.pin || '');
+    if (!/^\d{4,12}$/.test(pin)) { toast('Your PIN must be at least 4 digits', true); return; }
+    if (pin !== String(data.pin2 || '')) { toast('The two PINs do not match', true); return; }
+
+    toast('Joining…');
+    try {
+      const result = await joinFarm({
+        url: data.url, farmId: data.farmId,
+        joinCode: String(data.joinCode || '').trim().toUpperCase(),
+        joinPassword: String(data.joinPassword || '').trim().toUpperCase(),
+        pin,
+      });
+      // The PIN also unlocks this phone with no network, so it is kept here as a
+      // digest alongside the token the server actually trusts.
+      await setMeta('devicePin', await hashPin(pin, result.member.id));
+      const sync = await syncNow();
+      await c.store.reload();
+      const person = c.store.state.people[result.member.id] || {
+        id: result.member.id, name: result.member.name, role: result.member.role, active: true,
+      };
+      c.store.setUser(person);
+      sessionStorage.setItem('douvalue.user', person.id);
+      navigate(ROLES[person.role]?.home || '#/today');
+      toast(sync.ok
+        ? `Welcome, ${person.name}. Pulled down ${sync.received} records.`
+        : `Welcome, ${person.name}. The first sync will retry on its own.`);
+      render();
+    } catch (err) {
+      toast(err.message || 'Could not join', true);
+    }
+  },
+
   'go': (c, el) => navigate(el.dataset.to),
   'back': () => history.back(),
   'print': () => window.print(),
@@ -311,6 +504,7 @@ export async function startShell(store) {
   });
 
   window.addEventListener('hashchange', () => { closeSheet(); render(); });
+  onStatus(() => { if (ctx && ctx.store.user) render(); });
   window.addEventListener('online', render);
   window.addEventListener('offline', render);
   store.subscribe(() => render());
