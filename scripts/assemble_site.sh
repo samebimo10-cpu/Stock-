@@ -34,6 +34,15 @@ if [ -d "$root/douvalue/web" ]; then
   mkdir -p "$out/farm"
   cp -R "$root/douvalue/web/." "$out/farm/"
   echo "Farm app   -> $(find "$out/farm" -type f | wc -l | tr -d ' ') files under /farm/"
+  # The sync server is published alongside the app, as .js so Deno will accept
+  # it as a module, plus a page that tells the farm exactly what to paste and
+  # where. Copying 600 lines off a phone is not a setup step anyone completes.
+  if [ -f "$root/douvalue/server/deno-sync.ts" ]; then
+    mkdir -p "$out/farm/server"
+    cp "$root/douvalue/server/deno-sync.ts" "$out/farm/server/deno-entry.js"
+    cp "$root/douvalue/server/page/index.html" "$out/farm/server/index.html"
+    echo "Sync server -> /farm/server/ (one-line import and setup page)"
+  fi
 else
   echo "::warning::douvalue/web is missing, so the farm app was not published."
 fi
