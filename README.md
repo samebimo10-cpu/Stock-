@@ -7,6 +7,11 @@
 >
 > Open it at **https://samebimo10-cpu.github.io/Stock-/farm/**
 
+> **Also in this repository: [Crypto trading system engineering specification](crypto/README.md)** —
+> a build specification (documentation, not code) for an institutional-grade crypto trading system,
+> covering data, features, strategy, portfolio, risk, execution and observability, with the cost-model
+> and validation arithmetic worked out. It is unrelated to the stock tool below.
+
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every
 stock in a configurable universe with a transparent multi-factor model, then builds a portfolio that
