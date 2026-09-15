@@ -58,6 +58,9 @@ button,input,select{font:inherit;color:inherit}
 .pill.warn{background:var(--warn-bg);border-color:transparent;color:var(--ink)}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
 .pill.warn .dot{background:var(--warn)}
+.pill button{border:0;background:none;color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:0}
+.pill button:disabled{color:var(--ink-3);cursor:default}
+#refresh-note{font-size:12px;color:var(--ink-2)}
 
 /* ---- layout */
 .layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:22px;align-items:start}
@@ -1001,13 +1004,55 @@ let STATE = { rows: null, sel: null, alloc: null, profile: null };
 function renderStatus() {
   const m = PACK.meta || {}; const el = $("#status-pills"); const b = $("#banner");
   const n = PACK.stocks.length, ngx = PACK.stocks.filter(s => s.exchange === "NGX").length;
-  el.innerHTML = m.is_sample
-    ? `<span class="pill warn"><span class="dot"></span>Sample data</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`
-    : `<span class="pill"><span class="dot"></span>Data ${esc((m.fetched_at || "").slice(0, 10))}</span><span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`;
+  el.innerHTML = (m.is_sample
+    ? `<span class="pill warn"><span class="dot"></span>Sample data</span>`
+    : `<span class="pill"><span class="dot"></span>Prices ${esc(prettyDate(m.fetched_at))}</span>`)
+    + `<span class="pill">${n} stocks · ${ngx} NGX · ${n - ngx} NYSE</span>`
+    + `<span class="pill"><button type="button" id="refresh-data">Check for new prices</button></span>`
+    + `<span id="refresh-note" hidden></span>`;
+  $("#refresh-data").addEventListener("click", () => checkForNewData(true));
   const intro = `<div class="card intro"><h2>Three steps</h2><ol><li><strong>Tell it your goal</strong> on the left: what you want (growth, income, a balance, or keeping your money safe), how much risk you can stomach, how much you are investing and for how long.</li><li><strong>Press Build portfolio.</strong> It ranks every stock on both exchanges, picks the best for your goal, and decides how much to put in each.</li><li><strong>Read the plan.</strong> The Portfolio tab tells you exactly how many shares of what to buy and what to expect.</li></ol></div>`;
   b.innerHTML = (m.is_sample
     ? `<div class="banner warn"><strong>Practice data.</strong><span>These prices are made up for practice, not real quotes. The live version of this page, updated every weekday from NGX and NYSE, is the one to use for real decisions.</span></div>`
     : `<div class="banner live"><strong>Live public data.</strong><span>Updated ${esc((m.fetched_at || "").slice(0, 10))} from ${esc((m.sources || []).join(", "))}. Prices refresh every weekday evening after both markets close.${m.warnings && m.warnings.length ? " <details><summary>Data notes</summary>" + m.warnings.map(esc).join("<br>") + "</details>" : ""}</span></div>`) + intro;
+}
+
+function prettyDate(iso) {
+  const d = new Date(iso || "");
+  return isNaN(d) ? String(iso || "").slice(0, 10)
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Browsers, and phones especially, happily serve a cached copy of this page for
+// days. The page therefore checks a few-byte version file on every load and
+// pulls the new prices in by itself, so what you see is never quietly stale.
+let CHECKING = false;
+function refreshNote(text) { const el = $("#refresh-note"); if (el) { el.textContent = text; el.hidden = false; } }
+async function checkForNewData(manual) {
+  if (CHECKING) return;
+  CHECKING = true;
+  const btn = $("#refresh-data"); if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+  try {
+    let custom = null; try { custom = localStorage.getItem("ngxnyse.pack"); } catch (e) {}
+    if (custom && !manual) return;                       // they loaded their own data on purpose
+    const bust = "?v=" + Date.now(), opts = { cache: "no-store" };
+    const vres = await fetch("version.json" + bust, opts);
+    if (!vres.ok) throw new Error("HTTP " + vres.status);
+    const theirs = ((await vres.json()) || {}).fetched_at || "";
+    const ours = (PACK.meta || {}).fetched_at || "";
+    if (!theirs || !(theirs > ours)) { if (manual) refreshNote(`Already the latest prices (${prettyDate(ours)}).`); return; }
+    const pres = await fetch("data-pack.json" + bust, opts);
+    if (!pres.ok) throw new Error("HTTP " + pres.status);
+    loadPack(await pres.json());
+    STATE.alloc = null;
+    boot(true);
+    refreshNote(`Updated to ${prettyDate(theirs)} prices.`);
+  } catch (err) {
+    if (manual) refreshNote("Could not check just now. You may be offline, or looking at a saved copy of this page.");
+  } finally {
+    CHECKING = false;
+    const b = $("#refresh-data"); if (b) { b.disabled = false; b.textContent = "Check for new prices"; }
+  }
 }
 
 function renderStrip(a, p) {
@@ -1334,6 +1379,7 @@ function boot(rebuild) {
   setMode(mode || (window.innerWidth < 760 ? "mobile" : "decision"), false);
   renderStrip(null); renderPortfolio(null); renderProjection(null);
   boot(true);
+  setTimeout(() => checkForNewData(false), 1200);
 })();
 })();
 </script>
