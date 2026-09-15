@@ -23,14 +23,16 @@ from tradesys.pipeline import DecisionRecorder
 
 
 def run_session(events) -> DecisionRecorder:
-    pipeline, adapter, recorder = build_pipeline()
+    pipeline, adapters, recorder = build_pipeline()
 
     async def drive():
         for event in events:
-            adapter.now = event.emitted_at
+            for venue in adapters.values():
+                venue.apply_market_event(event)
             await pipeline.on_market_event(event)
-            for fill in adapter.step():
-                pipeline.on_fill(fill)
+            for venue in adapters.values():
+                for fill in venue.step():
+                    pipeline.on_fill(fill)
 
     asyncio.run(drive())
     return recorder
@@ -61,7 +63,7 @@ def test_divergence_is_detected_when_a_parameter_changes():
     events = build_events()
     baseline = run_session(events)
 
-    pipeline, adapter, recorder = build_pipeline()
+    pipeline, adapters, recorder = build_pipeline()
     # Size, not the entry threshold. The funding z-score does not exist until
     # the rate distribution has some variance, so the first computable z is
     # far above every candidate threshold and moving the threshold changes
@@ -70,10 +72,12 @@ def test_divergence_is_detected_when_a_parameter_changes():
 
     async def drive():
         for event in events:
-            adapter.now = event.emitted_at
+            for venue in adapters.values():
+                venue.apply_market_event(event)
             await pipeline.on_market_event(event)
-            for fill in adapter.step():
-                pipeline.on_fill(fill)
+            for venue in adapters.values():
+                for fill in venue.step():
+                    pipeline.on_fill(fill)
 
     asyncio.run(drive())
     assert baseline.diff(recorder), "changing a strategy parameter went undetected"

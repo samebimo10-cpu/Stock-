@@ -50,16 +50,55 @@ class ExecutionResult:
 class Executor:
     """Owns the venue handle and every order machine."""
 
-    def __init__(self, adapter: VenueAdapter, filters: Optional[Mapping[str, SymbolFilter]] = None,
+    def __init__(self, adapters, filters: Optional[Mapping[str, SymbolFilter]] = None,
                  clock=now_ns) -> None:
-        self.adapter = adapter
+        """``adapters`` is one adapter, or a mapping of venue name to adapter.
+
+        Routing by venue is what makes a hedged position expressible at all: the
+        two legs of a basis trade live on different venues, and an executor that
+        holds one adapter can only ever trade one of them. The same routing is
+        what cross-venue arbitrage needs.
+        """
+        if hasattr(adapters, "place"):
+            self.adapters: Dict[str, VenueAdapter] = {getattr(adapters, "name", "default"): adapters}
+            self._default = adapters
+        else:
+            self.adapters = dict(adapters)
+            if not self.adapters:
+                raise ValueError("an executor needs at least one venue adapter")
+            self._default = next(iter(self.adapters.values()))
         self.filters: Dict[str, SymbolFilter] = dict(filters or {})
         self.clock = clock
         self.machines: Dict[str, OrderMachine] = {}
         self._intent_sequence: Dict[str, int] = {}
         self.reconciliation_clean = True
+        #: Per-venue filters, when venues disagree about the same symbol. Falls
+        #: back to :attr:`filters` when a venue has no entry of its own.
+        self.venue_filters: Dict[str, Dict[str, SymbolFilter]] = {}
         #: Set when reconciliation finds an unknown position. Blocks everything.
         self.halted_reason: Optional[str] = None
+
+    @property
+    def adapter(self) -> VenueAdapter:
+        """The single adapter, for callers that only ever had one.
+
+        Ambiguous once more than one venue is attached, so it returns the first
+        and callers that route should use :meth:`adapter_for` instead.
+        """
+        return self._default
+
+    def adapter_for(self, venue: str) -> VenueAdapter:
+        try:
+            return self.adapters[venue]
+        except KeyError:
+            if len(self.adapters) == 1:
+                return self._default
+            raise KeyError(
+                f"no adapter for venue {venue!r}; attached: {sorted(self.adapters)}"
+            ) from None
+
+    def filters_for(self, venue: str) -> Dict[str, SymbolFilter]:
+        return self.venue_filters.get(venue) or self.filters
 
     # -- intent construction ---------------------------------------------
 
@@ -79,7 +118,7 @@ class Executor:
         self._intent_sequence[key] = seq + 1
         coid = client_order_id(strategy_id, symbol, seq)
 
-        f = self.filters.get(symbol)
+        f = self.filters_for(venue).get(symbol)
         if f is not None:
             quantity, price = FilterRounder(f).prepare(quantity, price, side, last_price)
 
@@ -148,7 +187,7 @@ class Executor:
         machine.on_sent(now)
 
         try:
-            ack = await self.adapter.place(sized)
+            ack = await self.adapter_for(sized.venue).place(sized)
         except UnknownState as e:
             # The request went out. The order may exist. This is the whole
             # reason QUERY is a state.
@@ -177,7 +216,8 @@ class Executor:
         if machine.status != OrderStatus.QUERY:
             return machine
         try:
-            state = await self.adapter.query_order(client_order_id_, machine.intent.symbol)
+            state = await self.adapter_for(machine.intent.venue).query_order(
+                client_order_id_, machine.intent.symbol)
         except OrderNotFound:
             machine.on_not_found(self.clock())
             return machine
@@ -192,7 +232,8 @@ class Executor:
         if machine is None or machine.is_terminal:
             return False
         try:
-            await self.adapter.cancel(client_order_id_, machine.intent.symbol)
+            await self.adapter_for(machine.intent.venue).cancel(
+                client_order_id_, machine.intent.symbol)
         except CancelRejected:
             # It may already have filled. Ask, do not assume.
             await self.resolve_unknown_or_query(machine)

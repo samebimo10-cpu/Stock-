@@ -225,6 +225,11 @@ class Signal(Envelope):
     valid_until: Nanos = 0
     confidence: Decimal = Decimal(1)
     rationale: Mapping[str, Decimal] = field(default_factory=dict)
+    #: Ties the legs of one multi-leg trade together. Empty for a single-leg
+    #: signal. Legs sharing a group are filled or unwound as a unit - never
+    #: left half done, which is the exposure nobody sized for.
+    leg_group: str = ""
+    leg_role: str = "single"        # single | primary | hedge
 
     def is_valid_at(self, ts: Nanos) -> bool:
         return ts < self.valid_until
@@ -237,6 +242,9 @@ class TargetPosition(Envelope):
     target: Decimal = Decimal(0)            # post-netting, post-allocation
     contributions: Mapping[StrategyId, Decimal] = field(default_factory=dict)
     allocation_version: int = 0
+    leg_group: str = ""
+    leg_role: str = "single"
+    urgency: str = "normal"
 
 
 @dataclass(frozen=True)

@@ -274,6 +274,11 @@ def cmd_selfcheck(args) -> int:
     return 0
 
 
+def books_maker(pipeline):
+    ratio = pipeline.books.maker_ratio()
+    return "n/a" if ratio is None else f"{ratio:.0%}"
+
+
 def cmd_demo(args) -> int:
     from .demo import build_cycling_events, build_pipeline
     from .research.backtest import Backtester, cost_impact
@@ -281,12 +286,13 @@ def cmd_demo(args) -> int:
 
     events = build_cycling_events()
     registry = TrialRegistry()
-    pipeline, adapter, recorder = build_pipeline()
-    bt = Backtester(pipeline, adapter, registry, "funding_carry",
+    pipeline, adapters, recorder = build_pipeline()
+    bt = Backtester(pipeline, adapters, registry, "funding_carry",
                     pipeline.strategies[0].parameters())
     result = asyncio.run(bt.run(events, "synthetic", "synthetic"))
 
-    print("Funding carry through the live pipeline, against the simulator.\n")
+    print("Hedged funding carry through the live pipeline, against two simulated")
+    print("venues: a perpetual and a spot book.\n")
     for label, value in (
         ("events replayed", result.events),
         ("signals", result.signals),
@@ -295,6 +301,9 @@ def cmd_demo(args) -> int:
         ("orders of unknown state", result.unknown),
         ("fills", result.fills),
         ("decisions recorded", len(recorder)),
+        ("leg groups completed", pipeline.unwinder.completed_count),
+        ("leg groups broken", pipeline.unwinder.broken_count),
+        ("maker share of fills", books_maker(pipeline)),
     ):
         print(f"  {label:<26} {value}")
 
@@ -315,8 +324,16 @@ def cmd_demo(args) -> int:
         print(f"\n  Strategy {sid}")
         print(f"    {'gross':<24} {led.gross_pnl}")
         print(f"    {'net':<24} {led.net_pnl}")
+        gate = "" if ratio is None else ("  PASS" if led.passes_cost_gate else "  FAIL")
         print(f"    {'cost ratio':<24} "
-              f"{'n/a (gross not positive)' if ratio is None else f'{ratio:.1%}'}")
+              f"{'n/a (gross not positive)' if ratio is None else f'{ratio:.1%}'}"
+              f"{gate}  (gate: below 40%)")
+        if ratio is not None and not led.passes_cost_gate:
+            print("      Costs take most of the carry. At tier-0 fees, crossing the")
+            print("      spread on the hedge leg is expensive relative to what funding")
+            print("      pays, which is the arithmetic in Annex B section 4 arriving")
+            print("      with a hedge attached. A maker entry path on both legs is")
+            print("      worth more here than any signal improvement.")
 
     modelled = result.modelled_costs
     if modelled:
@@ -343,9 +360,10 @@ def cmd_demo(args) -> int:
 
     print(f"\n  Trials registered: {registry.count()}. The costless run counts too -")
     print("  it informed the search, so it belongs in the deflated Sharpe denominator.")
-    print("\n  Note: this demo trades only the perpetual leg. Real carry is hedged")
-    print("  against spot, so the price movement above would largely cancel. The")
-    print("  profit and loss here demonstrates the pipeline, not the strategy.")
+    print("\n  The two legs are equal and opposite, so the book is delta-neutral")
+    print("  while a position is open and what remains is the funding. The hedge")
+    print("  leg crosses the spread deliberately: a resting bid does not get hit")
+    print("  in a rising market, and a hedge that does not fill is not a hedge.")
     return 0
 
 

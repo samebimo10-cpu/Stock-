@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .adapters.sim import SimAdapter
 from .core.events import (
@@ -38,6 +38,11 @@ START = 1_700_000_000_000_000_000
 FUNDING_INTERVAL_NS = 8 * 3600 * 1_000_000_000
 
 SYMBOL = "BTCUSDT"
+#: Two venues, because a basis trade is two legs on two venues. Spot and
+#: perpetual are separate APIs at every real exchange, and a demo that pretends
+#: otherwise cannot exercise the hedge or the unwinder.
+PERP_VENUE = "sim-perp"
+SPOT_VENUE = "sim-spot"
 FILTERS = {SYMBOL: SymbolFilter(SYMBOL, dec("0.01"), dec("0.00001"), dec("10"))}
 
 
@@ -92,55 +97,121 @@ _FALLBACK_LIMITS = {
 }
 
 
-def build_events(periods: int = 45, spike_after: int = 40,
-                 quiet_rate: str = "0.0001", spike_rate: str = "0.0009") -> List[MarketEvent]:
-    """A deterministic session of book snapshots and funding settlements.
+def _emit(schedule: List[str], quiet_rate: str, spike_rate: str,
+          seed: int, drift: bool, depth: str) -> List[MarketEvent]:
+    """Emit one two-venue scenario from a phase schedule.
 
-    The funding z-score needs thirty observations *with some variance* before
-    it exists at all, so the quiet stretch is part of what is being exercised
-    rather than padding: the strategy must cope with a feature that is simply
-    absent, and it does that explicitly rather than by imputing a value.
+    Both scenario builders route through here. They used to have their own
+    copies of this loop, and the copies drifted: one kept emitting on a single
+    venue after the system became two-venue, so the perpetual's feature engine
+    never saw a book and the strategy silently stopped signalling. Duplicated
+    emission logic is how a fixture quietly stops matching the system.
     """
     events: List[MarketEvent] = []
     ts = START
-    for i in range(periods):
-        price = dec("60000") + dec(i)
-        events.append(MarketEvent(
-            correlation_id=f"corr-book-{i}", emitted_at=ts, source="demo",
-            venue="sim", symbol=SYMBOL, kind="book_snapshot",
-            exchange_ts=ts, local_recv_ts=ts, sequence=i,
-            payload=BookSnapshot(bids=((price, dec("5")),),
-                                 asks=((price + dec("1"), dec("5")),),
-                                 last_update_id=i),
-        ))
-        # Public trades, so a resting order can actually advance in the queue.
-        # Without them a maker order never fills, which is the honest outcome:
-        # nothing traded where we were quoting.
-        for j in range(4):
-            # Buyers lift the ask, sellers hit the bid. Trading both at the
-            # same mid would let a resting order fill against volume that
-            # never actually reached its price.
-            buy_side = j % 2 == 0
+    index = 0
+    state = seed
+    price = dec("60000")
+
+    def noise() -> Dec:
+        """Deterministic jitter, so events are identical on every machine."""
+        nonlocal state
+        state = (1103515245 * state + 12345) % 2147483648
+        return dec(state % 9 - 4) / dec("100000")
+
+    for phase in schedule:
+        if drift:
+            # Price and funding move together, which is the economically
+            # correct correlation and the one that makes carry hard: funding
+            # is elevated because longs are crowded and price is rising, and a
+            # rising price is what hurts the short perpetual leg.
+            price += dec(12) if phase == "elevated" else dec(-8)
+        else:
+            price = dec("60000") + dec(index)
+
+        for venue, offset in ((PERP_VENUE, dec(0)), (SPOT_VENUE, dec("-2"))):
+            # Spot trades below the perpetual, which is what a positive basis
+            # looks like and what the funding is paying for.
+            book_price = price + offset
             events.append(MarketEvent(
-                correlation_id=f"corr-trade-{i}-{j}", emitted_at=ts + 1 + j, source="demo",
-                venue="sim", symbol=SYMBOL, kind="trade",
-                exchange_ts=ts + 1 + j, local_recv_ts=ts + 1 + j,
-                payload=Trade(price=price + dec(1) if buy_side else price,
-                              quantity=dec("3"),
-                              aggressor_side="buy" if buy_side else "sell",
-                              trade_id=i * 10 + j),
+                correlation_id=f"corr-book-{venue}-{index}", emitted_at=ts, source="demo",
+                venue=venue, symbol=SYMBOL, kind="book_snapshot",
+                exchange_ts=ts, local_recv_ts=ts, sequence=index,
+                payload=BookSnapshot(bids=((book_price, dec(depth)),),
+                                     asks=((book_price + dec(1), dec(depth)),),
+                                     last_update_id=index),
             ))
 
-        rate = dec(quiet_rate) if i < spike_after else dec(spike_rate)
+        # Public trades, so a resting order can advance in the queue. Without
+        # them a maker order never fills, which is the honest outcome: nothing
+        # traded where we were quoting.
+        for j in range(6):
+            # Buyers lift the ask, sellers hit the bid. Trading both at mid
+            # would let a resting order fill against volume that never reached
+            # its price.
+            buy_side = j % 2 == 0
+            for venue, offset in ((PERP_VENUE, dec(0)), (SPOT_VENUE, dec("-2"))):
+                base = price + offset
+                events.append(MarketEvent(
+                    correlation_id=f"corr-trade-{venue}-{index}-{j}",
+                    emitted_at=ts + 1 + j, source="demo", venue=venue,
+                    symbol=SYMBOL, kind="trade",
+                    exchange_ts=ts + 1 + j, local_recv_ts=ts + 1 + j,
+                    payload=Trade(price=base + dec(1) if buy_side else base,
+                                  quantity=dec("5"),
+                                  aggressor_side="buy" if buy_side else "sell",
+                                  trade_id=index * 10 + j),
+                ))
+
+        base_rate = dec(spike_rate) if phase == "elevated" else dec(quiet_rate)
+        rate = base_rate + (noise() if drift else dec(0))
         events.append(MarketEvent(
-            correlation_id=f"corr-fund-{i}", emitted_at=ts + 10, source="demo",
-            venue="sim", symbol=SYMBOL, kind="funding",
+            correlation_id=f"corr-fund-{index}", emitted_at=ts + 10, source="demo",
+            venue=PERP_VENUE, symbol=SYMBOL, kind="funding",
             exchange_ts=ts + 10, local_recv_ts=ts + 10,
             payload=Funding(rate=rate, interval_hours=8,
                             next_settlement=ts + FUNDING_INTERVAL_NS),
         ))
+
         ts += FUNDING_INTERVAL_NS
+        index += 1
+
     return events
+
+
+def build_events(periods: int = 45, spike_after: int = 40,
+                 quiet_rate: str = "0.0001", spike_rate: str = "0.0009") -> List[MarketEvent]:
+    """A short session: a long quiet stretch, then one funding spike.
+
+    The funding z-score needs thirty observations *with some variance* before
+    it exists at all, so the quiet stretch is part of what is being exercised
+    rather than padding: the strategy must cope with a feature that is simply
+    absent, and it does so explicitly rather than by imputing a value.
+    """
+    schedule = ["calm"] * spike_after + ["elevated"] * max(0, periods - spike_after)
+    return _emit(schedule, quiet_rate, spike_rate, seed=11, drift=False, depth="5")
+
+
+def build_cycling_events(cycles: int = 12, warmup: int = 40, elevated: int = 5,
+                         calm: int = 5, seed: int = 11) -> List[MarketEvent]:
+    """A scenario with real round trips.
+
+    :func:`build_events` produces a single entry and never exits, which makes
+    every cost figure derived from it meaningless: a strategy that enters once
+    and holds pays roughly half the costs it would actually pay, so the SPEC
+    section 11.1 review heuristic has nothing to measure.
+
+    This alternates elevated and calm funding so the strategy enters and exits
+    repeatedly, with the price drifting against the short leg while funding is
+    generous. The warm-up funding is noisy rather than constant: a constant
+    series has zero variance, so its z-score is undefined and the strategy
+    would never see a signal at all.
+    """
+    schedule: List[str] = ["calm"] * warmup
+    for _ in range(cycles):
+        schedule.extend(["elevated"] * elevated)
+        schedule.extend(["calm"] * calm)
+    return _emit(schedule, "0.0001", "0.0009", seed=seed, drift=True, depth="50")
 
 
 def cost_model() -> CostModel:
@@ -161,7 +232,7 @@ def cost_model() -> CostModel:
 def build_pipeline(base_notional: str = "1000",
                    params: FundingCarryParams = None,
                    with_costs: bool = True,
-                   cost_multiple: Dec = None) -> Tuple[Pipeline, SimAdapter, DecisionRecorder]:
+                   cost_multiple: Dec = None) -> Tuple[Pipeline, Dict[str, SimAdapter], DecisionRecorder]:
     """Wire the full stack against the simulator.
 
     The same wiring a live session uses; only the adapter differs.
@@ -178,37 +249,51 @@ def build_pipeline(base_notional: str = "1000",
         # 1.5x costs is one fee-tier change from dead.
         model = replace(model, adverse_selection_bps=model.adverse_selection_bps * multiple)
 
-    adapter = SimAdapter(
-        filters=FILTERS,
+    def venue(name: str) -> SimAdapter:
+        a = SimAdapter(
+            filters=FILTERS,
         # A backtest left at zero latency is not modelling reality. These are
         # placeholders shaped like a Tokyo-region deployment; in a real system
         # they come from the measured distribution (SPEC section 11.1), not
         # from a guess like this one.
-        order_latency_ns=25_000_000 if with_costs else 0,
-        fill_latency_ns=15_000_000 if with_costs else 0,
-        fees=FeeSchedule("sim", dec("0.0002") * multiple, dec("0.0005") * multiple)
-        if with_costs else FeeSchedule("sim", dec("0"), dec("0")),
-        cost_model=model,
-        daily_volume={SYMBOL: dec("500")},
-        daily_vol_bps=dec("300"),
-    )
-    adapter.set_book(SYMBOL, [("60000", "5")], [("60001", "5")])
-    adapter.set_balance("USDT", "100000")
+            order_latency_ns=25_000_000 if with_costs else 0,
+            fill_latency_ns=15_000_000 if with_costs else 0,
+            fees=FeeSchedule(name, dec("0.0002") * multiple, dec("0.0005") * multiple)
+            if with_costs else FeeSchedule(name, dec("0"), dec("0")),
+            cost_model=model,
+            daily_volume={SYMBOL: dec("500")},
+            daily_vol_bps=dec("300"),
+        )
+        a.name = name
+        a.set_book(SYMBOL, [("60000", "50")], [("60001", "50")])
+        a.set_balance("USDT", "100000")
+        return a
+
+    adapters = {PERP_VENUE: venue(PERP_VENUE), SPOT_VENUE: venue(SPOT_VENUE)}
+    adapter = adapters[PERP_VENUE]
 
     state = PortfolioState(cash=dec("100000"))
     state.median_order_notional = dec("2000")
     state.mark()
 
     risk = RiskService(default_limits(), state)
-    executor = Executor(adapter, FILTERS, clock=lambda: adapter.now)
+    executor = Executor(adapters, FILTERS, clock=lambda: adapter.now)
 
     strategy = FundingCarry(
-        params=params or FundingCarryParams(base_notional=dec(base_notional))
+        params=params or FundingCarryParams(
+            base_notional=dec(base_notional),
+            perp_venue=PERP_VENUE, spot_venue=SPOT_VENUE,
+        )
     )
     strategy.health.state = StrategyState.PAPER
 
     recorder = DecisionRecorder()
-    return Pipeline([strategy], risk, executor, FILTERS, recorder=recorder), adapter, recorder
+    # Three funding intervals. The legs of a carry pair are not latency
+    # sensitive, and a timeout shorter than the data's own cadence expires
+    # every group before it can fill.
+    pipeline = Pipeline([strategy], risk, executor, FILTERS, recorder=recorder,
+                        leg_timeout_ns=3 * FUNDING_INTERVAL_NS)
+    return pipeline, adapters, recorder
 
 
 def make_backtest_runner(registry, strategy_name: str = "funding_carry"):
@@ -230,92 +315,11 @@ def make_backtest_runner(registry, strategy_name: str = "funding_carry"):
         for key, value in (parameters or {}).items():
             if hasattr(params, key):
                 params = replace(params, **{key: value})
-        pipeline, adapter, _ = build_pipeline(
+        pipeline, adapters, _ = build_pipeline(
             params=params, cost_multiple=dec(str(cost_multiple)),
         )
-        bt = Backtester(pipeline, adapter, registry, strategy_name,
+        bt = Backtester(pipeline, adapters, registry, strategy_name,
                         pipeline.strategies[0].parameters())
         return asyncio.run(bt.run(list(events)))
 
     return run
-
-
-def build_cycling_events(cycles: int = 12, warmup: int = 40, elevated: int = 5,
-                         calm: int = 5, seed: int = 11) -> List[MarketEvent]:
-    """A scenario with real round trips.
-
-    :func:`build_events` produces a single entry and never exits, which makes
-    every cost figure derived from it meaningless: a strategy that enters once
-    and holds pays roughly half the costs it would actually pay, so the SPEC
-    section 11.1 review heuristic has nothing to measure.
-
-    This alternates elevated and calm funding so the strategy enters and exits
-    repeatedly. Two design points worth stating:
-
-    * The warm-up funding is **noisy**, not constant. A constant series has zero
-      variance, so its z-score is undefined and the strategy would never see a
-      signal at all. That is correct behaviour and a poor scenario.
-    * The noise is a seeded linear congruential sequence rather than
-      :mod:`random`, so the events are identical on every machine and every
-      Python version. Replay comparisons depend on that.
-    """
-    events: List[MarketEvent] = []
-    ts = START
-    index = 0
-    state = seed
-
-    def noise() -> Dec:
-        """Deterministic jitter in the range roughly [-0.4, +0.4] basis points."""
-        nonlocal state
-        state = (1103515245 * state + 12345) % 2147483648
-        return dec(state % 9 - 4) / dec(100_000)
-
-    schedule: List[str] = ["calm"] * warmup
-    for _ in range(cycles):
-        schedule.extend(["elevated"] * elevated)
-        schedule.extend(["calm"] * calm)
-
-    price = dec("60000")
-    for phase in schedule:
-        # Price and funding move together, which is the economically correct
-        # correlation and the one that makes this strategy hard: funding is
-        # elevated precisely because longs are crowded and price is rising,
-        # and a rising price is what hurts the short perpetual leg. A scenario
-        # where funding is generous and price is flat is not testing carry, it
-        # is paying it.
-        price += dec(12) if phase == "elevated" else dec(-8)
-        events.append(MarketEvent(
-            correlation_id=f"corr-book-{index}", emitted_at=ts, source="demo",
-            venue="sim", symbol=SYMBOL, kind="book_snapshot",
-            exchange_ts=ts, local_recv_ts=ts, sequence=index,
-            payload=BookSnapshot(bids=((price, dec("50")),),
-                                 asks=((price + dec("1"), dec("50")),),
-                                 last_update_id=index),
-        ))
-
-        for j in range(6):
-            buy_side = j % 2 == 0
-            events.append(MarketEvent(
-                correlation_id=f"corr-trade-{index}-{j}", emitted_at=ts + 1 + j,
-                source="demo", venue="sim", symbol=SYMBOL, kind="trade",
-                exchange_ts=ts + 1 + j, local_recv_ts=ts + 1 + j,
-                payload=Trade(price=price + dec(1) if buy_side else price,
-                              quantity=dec("5"),
-                              aggressor_side="buy" if buy_side else "sell",
-                              trade_id=index * 10 + j),
-            ))
-
-        base = dec("0.0009") if phase == "elevated" else dec("0.0001")
-        rate = base + noise()
-        events.append(MarketEvent(
-            correlation_id=f"corr-fund-{index}", emitted_at=ts + 10, source="demo",
-            venue="sim", symbol=SYMBOL, kind="funding",
-            exchange_ts=ts + 10, local_recv_ts=ts + 10,
-            payload=Funding(rate=rate, interval_hours=8,
-                            next_settlement=ts + FUNDING_INTERVAL_NS),
-        ))
-
-        ts += FUNDING_INTERVAL_NS
-        index += 1
-
-    return events

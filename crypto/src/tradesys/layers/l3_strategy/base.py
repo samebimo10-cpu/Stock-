@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, Sequence, runtime_checkable
 
 from ...core.events import FeatureSnapshot, Signal
 from ...core.types import Decimal as Dec, Nanos, dec
@@ -58,8 +58,13 @@ class Strategy(Protocol):
     strategy_id: str
     health: StrategyHealth
 
-    def on_features(self, snapshot: FeatureSnapshot) -> Optional[Signal]:
-        """Return a desired exposure, or ``None`` for no opinion."""
+    def on_features(self, snapshot: FeatureSnapshot) -> Sequence[Signal]:
+        """Return the desired exposures, or an empty sequence for no opinion.
+
+        A sequence rather than a single signal because a hedged position is
+        two legs and a triangular trade is three. Returning one and leaving the
+        caller to discover the rest is how a strategy ends up half on.
+        """
         ...
 
     def parameters(self) -> dict:

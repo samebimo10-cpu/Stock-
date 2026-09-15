@@ -56,9 +56,21 @@ def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
     aggregate without distorting who earned what.
     """
     by_key: Dict[Tuple[str, str], Dict[str, Dec]] = {}
+    leg_of: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    urgency_of: Dict[Tuple[str, str], str] = {}
     for sig in signals:
         key = (sig.venue, sig.symbol)
         by_key.setdefault(key, {})[sig.strategy_id] = sig.target_position * multiplier
+        # The most urgent contributor wins. A passive order that is also
+        # somebody's hedge must cross, or the hedge does not happen.
+        order = {"passive": 0, "normal": 1, "aggressive": 2}
+        if order.get(sig.urgency, 1) >= order.get(urgency_of.get(key, "passive"), 0):
+            urgency_of[key] = sig.urgency
+        if sig.leg_group:
+            # Legs of one trade are netted within their instrument like any
+            # other target, but the group has to survive netting or the
+            # unwinder cannot tell which orders belong together.
+            leg_of[key] = (sig.leg_group, sig.leg_role)
 
     gross_before = dec(0)
     gross_after = dec(0)
@@ -77,6 +89,7 @@ def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
 
         gross_before += sum_abs
         gross_after += abs(total)
+        group, role = leg_of.get((venue, symbol), ("", "single"))
         targets.append(TargetPosition(
             correlation_id=new_correlation_id(now) if now else "",
             emitted_at=now,
@@ -86,6 +99,9 @@ def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
             target=total,
             contributions=dict(contributions),
             allocation_version=allocation_version,
+            leg_group=group,
+            leg_role=role,
+            urgency=urgency_of.get((venue, symbol), "normal"),
         ))
 
     return NettingResult(tuple(targets), gross_before, gross_after)

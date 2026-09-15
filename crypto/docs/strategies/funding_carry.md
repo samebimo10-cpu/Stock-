@@ -68,12 +68,22 @@ The short perpetual leg is the one that earns the funding. The spot leg is the
 hedge. The portfolio layer nets the two legs where they overlap with other
 strategies (SPEC §7.3).
 
-> **Implementation gap.** The code currently trades **only the perpetual leg**.
-> There is no spot hedge, so the implemented strategy is directionally short
-> rather than market-neutral, and its profit and loss includes price movement a
-> hedged version would largely cancel. Any figure the demo produces is a
-> demonstration of the pipeline, not of this strategy. The spot leg is a
-> prerequisite for paper trading, not an optimisation.
+> **Hedge status: implemented.** Both legs now trade, tied together in a leg
+> group so they fill or unwind as a unit. The strategy **refuses to run outside
+> `research` without a spot venue configured**: without the spot leg this is a
+> short perpetual, not carry.
+>
+> The hedge leg crosses the spread rather than resting. That is not a
+> shortcut - a resting bid does not get hit in a rising market, so legging in
+> passively fills the perpetual, leaves the spot behind, and turns a
+> market-neutral pair into a directional short. Paying the spread on one leg is
+> the price of actually being hedged.
+>
+> **And it is expensive.** With the hedge crossing, measured costs take about
+> 60% of gross profit on the demo scenario, against a 40% gate. That is the
+> Annex B section 4 arithmetic arriving with a hedge attached, and it says
+> plainly what the next piece of work is: a maker entry path on both legs is
+> worth more to this strategy than any plausible signal improvement.
 
 **Urgency is `passive`, always.** This strategy earns basis points per day.
 Paying the spread to enter destroys a meaningful fraction of the edge, and

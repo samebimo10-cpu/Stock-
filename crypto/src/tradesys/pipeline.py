@@ -38,6 +38,9 @@ from .layers.l2_features.engine import FeatureEngine
 from .layers.l4_portfolio.netting import net_targets
 from .layers.l5_risk.service import RiskContext, RiskService
 from .layers.l6_execution.executor import Executor
+from .layers.l6_execution.legs import (
+    DEFAULT_COMPLETION_TIMEOUT_NS, LegState, Unwinder,
+)
 
 __all__ = ["Pipeline", "DecisionRecorder", "Decision", "PipelineResult"]
 
@@ -92,6 +95,7 @@ class PipelineResult:
     intents: List[OrderIntent] = field(default_factory=list)
     decisions: List[RiskDecision] = field(default_factory=list)
     submitted: List[str] = field(default_factory=list)
+    unwound: List[str] = field(default_factory=list)
     rejected: List[Tuple[str, str]] = field(default_factory=list)
     unknown: List[str] = field(default_factory=list)
     #: Targets that could not be expressed as an order: the delta rounded below
@@ -112,6 +116,7 @@ class Pipeline:
         recorder: Optional[DecisionRecorder] = None,
         allocation_version: int = 1,
         books: Optional[Books] = None,
+        leg_timeout_ns: Optional[int] = None,
     ) -> None:
         self.strategies = list(strategies)
         self.risk = risk
@@ -126,12 +131,24 @@ class Pipeline:
         self.allocation_version = allocation_version
         self._engines: Dict[Tuple[str, str], FeatureEngine] = {}
         self._feed_last: Dict[str, Nanos] = {}
-        self._marks: Dict[str, Dec] = {}
+        #: Keyed by (venue, symbol). Two venues quote the same symbol at
+        #: different prices, and collapsing them to the symbol alone prices
+        #: one leg of a basis trade off the other one's book.
+        self._marks: Dict[Tuple[str, str], Dec] = {}
+        #: Best bid and ask per (venue, symbol). An aggressive order priced at
+        #: mid does not cross, so it rests like a passive one and the urgency
+        #: is a label rather than a behaviour.
+        self._touch: Dict[Tuple[str, str], Tuple[Optional[Dec], Optional[Dec]]] = {}
         #: The ledger. Positions live here and are pushed into the risk
         #: service's state, so the books and the risk layer cannot hold
         #: different views of the same account (SPEC section 12.1).
         self.books = books if books is not None else Books(risk.state.cash)
         self._last_funding_ts: Dict[Tuple[str, str], Nanos] = {}
+        #: Multi-leg trades in flight. Specified before any multi-leg strategy
+        #: exists, because a group that fills one leg and not the other is
+        #: holding exposure nobody sized.
+        self.unwinder = Unwinder(leg_timeout_ns if leg_timeout_ns is not None
+                                 else DEFAULT_COMPLETION_TIMEOUT_NS)
 
     # -- state -----------------------------------------------------------
 
@@ -149,10 +166,15 @@ class Pipeline:
         # L1 -> L2
         engine = self.engine(event.venue, event.symbol)
         engine.on_event(event)
+        previous = self._feed_last.get(event.symbol)
+        if previous is not None:
+            self.unwinder.observe_cadence(event.exchange_ts - previous)
         self._feed_last[event.symbol] = event.exchange_ts
         mid = engine.book.mid
         if mid is not None:
-            self._marks[event.symbol] = mid
+            self._marks[(event.venue, event.symbol)] = mid
+            self._touch[(event.venue, event.symbol)] = (engine.book.best_bid,
+                                                        engine.book.best_ask)
             self.books.mark(event.venue, event.symbol, mid)
 
         if event.kind == "funding":
@@ -165,19 +187,22 @@ class Pipeline:
             self._record_audit("gap_skip", {"symbol": event.symbol}, event.correlation_id)
             return result
 
+        await self._process_unwinds(event, result)
+
         snapshot = engine.snapshot(event.correlation_id, event.emitted_at)
 
         # L2 -> L3
         for strat in self.strategies:
             if not strat.health.may_trade:
                 continue
-            sig = strat.on_features(snapshot)
-            if sig is None:
+            emitted = strat.on_features(snapshot)
+            if not emitted:
                 continue
-            result.signals.append(sig)
-            self.recorder.add("signal", f"{sig.strategy_id}:{sig.symbol}",
-                              target=sig.target_position, urgency=sig.urgency)
-            self._record_audit("signal", sig, sig.correlation_id)
+            for sig in emitted:
+                result.signals.append(sig)
+                self.recorder.add("signal", f"{sig.strategy_id}:{sig.symbol}",
+                                  target=sig.target_position, urgency=sig.urgency)
+                self._record_audit("signal", sig, sig.correlation_id)
 
         if not result.signals:
             return result
@@ -201,7 +226,7 @@ class Pipeline:
             if delta == 0:
                 continue
             side = "buy" if delta > 0 else "sell"
-            price = self._marks.get(target.symbol)
+            price = self._order_price(target.venue, target.symbol, side, target.urgency)
             if price is None:
                 continue
 
@@ -215,7 +240,12 @@ class Pipeline:
                     correlation_id=event.correlation_id,
                     price=price,
                     order_type="limit",
-                    post_only=True,
+                    # Passive rests and waits; anything more urgent crosses.
+                    # A hedge leg that rests does not hedge: in a trending
+                    # market the primary fills and the hedge sits there, which
+                    # is how a market-neutral pair becomes a directional one.
+                    post_only=target.urgency == "passive",
+                    time_in_force="IOC" if target.urgency == "aggressive" else "GTC",
                 )
             except FilterViolation as e:
                 # The position is already within one lot of its target, or the
@@ -237,15 +267,7 @@ class Pipeline:
                               side=intent.side, qty=intent.quantity, px=intent.price)
             self._record_audit("intent", intent, intent.correlation_id)
 
-            ctx = RiskContext(
-                now=event.emitted_at,
-                feed_last_event=dict(self._feed_last),
-                reconciliation_clean=self.executor.reconciliation_clean,
-                rate_limit=self.executor.adapter.rate_limit_state(),
-                filters=self.filters,
-                mark_prices=dict(self._marks),
-            )
-            decision = self.risk.evaluate(intent, ctx)
+            decision = self.risk.evaluate(intent, self._risk_context(event))
             result.decisions.append(decision)
             self.recorder.add("risk", intent.client_order_id,
                               approved=decision.approved,
@@ -256,6 +278,20 @@ class Pipeline:
             outcome = await self.executor.submit(intent, decision)
             self.recorder.add("submit", intent.client_order_id,
                               accepted=outcome.accepted, unknown=outcome.unknown)
+
+            if target.leg_group:
+                group = self.unwinder.groups.get(target.leg_group) or self.unwinder.open(
+                    target.leg_group, intent.strategy_id, event.emitted_at
+                )
+                group.add_leg(LegState(
+                    client_order_id=intent.client_order_id, venue=intent.venue,
+                    symbol=intent.symbol, side=intent.side, quantity=intent.quantity,
+                ))
+                if not outcome.accepted and not outcome.unknown:
+                    # A refused leg cannot fill, so the group is already short
+                    # a side. Marking it terminal lets the unwinder act now
+                    # rather than waiting out a timeout it cannot beat.
+                    self.unwinder.on_status(intent.client_order_id, "REJECTED")
             if outcome.accepted:
                 result.submitted.append(intent.client_order_id)
             elif outcome.unknown:
@@ -278,9 +314,87 @@ class Pipeline:
         section 12.1 is written to prevent.
         """
         self.executor.on_fill(fill)
+        self.unwinder.on_fill(fill.client_order_id, fill.quantity)
         self.books.on_fill(fill)
         self.books.apply_to(self.risk.state)
         self._record_audit("fill", fill, fill.correlation_id)
+
+    async def _process_unwinds(self, event: MarketEvent, result: "PipelineResult") -> None:
+        """Flatten any leg group that could not complete.
+
+        Chasing the missing leg is the tempting response and the wrong one:
+        the price moved, which is why it did not fill, and paying up to
+        complete the trade turns a small loss into a position nobody sized.
+        Unwinds are reduce-only, so they can never open exposure and they
+        still execute during a kill-switch flatten.
+        """
+        due = self.unwinder.due_for_unwind(event.emitted_at)
+        for group in due:
+            self.unwinder.mark_unwinding(group, event.emitted_at)
+
+            for coid in group.orders_to_cancel():
+                try:
+                    await self.executor.cancel(coid)
+                except Exception:                     # noqa: BLE001
+                    # A cancel that fails leaves the leg working, and the
+                    # reconciliation loop is what notices. Never treat a failed
+                    # cancel as a cancelled order.
+                    pass
+
+            for unwind in group.unwind_orders():
+                # An unwind is the most urgent order the system places: it is
+                # removing exposure nobody sized. It crosses.
+                price = self._order_price(unwind.venue, unwind.symbol,
+                                          unwind.side, "aggressive")
+                if price is None:
+                    continue
+                try:
+                    intent = self.executor.build_intent(
+                        strategy_id=group.strategy_id, venue=unwind.venue,
+                        symbol=unwind.symbol, side=unwind.side,
+                        quantity=unwind.quantity, correlation_id=event.correlation_id,
+                        price=price, order_type="limit", reduce_only=True,
+                    )
+                except FilterViolation:
+                    continue
+                ctx = self._risk_context(event)
+                decision = self.risk.evaluate(intent, ctx)
+                outcome = await self.executor.submit(intent, decision)
+                if outcome.accepted:
+                    result.unwound.append(intent.client_order_id)
+                self._record_audit("unwind", {
+                    "group": group.group_id, "coid": intent.client_order_id,
+                    "reason": unwind.reason, "accepted": outcome.accepted,
+                }, event.correlation_id)
+
+            self.unwinder.mark_unwound(group.group_id)
+
+    def _order_price(self, venue: str, symbol: str, side: str,
+                     urgency: str) -> Optional[Dec]:
+        """Mid for a passive order, the far touch for an urgent one.
+
+        Pricing an aggressive order at mid leaves it resting inside the spread,
+        where it behaves exactly like a passive order. The urgency then exists
+        only in the logs, and a hedge that was supposed to cross quietly does
+        not - which is how a market-neutral pair becomes a directional one.
+        """
+        key = (venue, symbol)
+        mid = self._marks.get(key)
+        if urgency != "aggressive":
+            return mid
+        bid, ask = self._touch.get(key, (None, None))
+        touch = ask if side == "buy" else bid
+        return touch if touch is not None else mid
+
+    def _risk_context(self, event: MarketEvent) -> RiskContext:
+        return RiskContext(
+            now=event.emitted_at,
+            feed_last_event=dict(self._feed_last),
+            reconciliation_clean=self.executor.reconciliation_clean,
+            rate_limit=self.executor.adapter_for(event.venue).rate_limit_state(),
+            filters=self.filters,
+            mark_prices={symbol: price for (_, symbol), price in self._marks.items()},
+        )
 
     def _accrue_funding(self, event: MarketEvent) -> None:
         """Accrue funding for the elapsed fraction of the interval, then settle.

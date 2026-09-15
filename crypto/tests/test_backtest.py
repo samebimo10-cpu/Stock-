@@ -8,13 +8,13 @@ import pytest
 
 from tradesys.research.backtest import Backtester
 from tradesys.research.registry import RegistryRequired, TrialRegistry
-from tests.test_same_code_path import build_events, build_pipeline
+from tradesys.demo import PERP_VENUE, build_events, build_pipeline
 
 
 def test_backtest_runs_and_registers_its_trial():
-    pipeline, adapter, _ = build_pipeline()
+    pipeline, adapters, _ = build_pipeline()
     registry = TrialRegistry()
-    bt = Backtester(pipeline, adapter, registry, strategy_name="funding_carry",
+    bt = Backtester(pipeline, adapters, registry, strategy_name="funding_carry",
                     parameters=pipeline.strategies[0].parameters())
 
     events = build_events()
@@ -33,16 +33,16 @@ def test_every_run_increments_the_trial_count():
     registry = TrialRegistry()
     events = build_events()
     for _ in range(3):
-        pipeline, adapter, _ = build_pipeline()
-        bt = Backtester(pipeline, adapter, registry, strategy_name="funding_carry")
+        pipeline, adapters, _ = build_pipeline()
+        bt = Backtester(pipeline, adapters, registry, strategy_name="funding_carry")
         asyncio.run(bt.run(events))
     assert registry.count("funding_carry") == 3
 
 
 def test_a_crashed_backtest_is_still_a_trial():
     registry = TrialRegistry()
-    pipeline, adapter, _ = build_pipeline()
-    bt = Backtester(pipeline, adapter, registry, strategy_name="funding_carry")
+    pipeline, adapters, _ = build_pipeline()
+    bt = Backtester(pipeline, adapters, registry, strategy_name="funding_carry")
 
     class Exploding(list):
         def __iter__(self):
@@ -60,8 +60,8 @@ def test_no_registry_means_no_backtest():
 
 
 def test_equity_curve_is_produced():
-    pipeline, adapter, _ = build_pipeline()
-    bt = Backtester(pipeline, adapter, TrialRegistry(), strategy_name="funding_carry")
+    pipeline, adapters, _ = build_pipeline()
+    bt = Backtester(pipeline, adapters, TrialRegistry(), strategy_name="funding_carry")
     result = asyncio.run(bt.run(build_events()))
     assert len(result.equity_curve) == result.events
     assert all(e > 0 for e in result.equity_curve)
@@ -71,9 +71,9 @@ def test_the_audit_log_records_the_session(tmp_path):
     """Given the log, the research environment can reproduce every decision."""
     from tradesys.layers.l7_observability.audit import AuditLog
 
-    pipeline, adapter, _ = build_pipeline()
+    pipeline, adapters, _ = build_pipeline()
     pipeline.audit = AuditLog(tmp_path / "audit.jsonl")
-    bt = Backtester(pipeline, adapter, TrialRegistry(), strategy_name="funding_carry")
+    bt = Backtester(pipeline, adapters, TrialRegistry(), strategy_name="funding_carry")
     asyncio.run(bt.run(build_events()))
 
     assert pipeline.audit.verify()
@@ -104,8 +104,8 @@ def test_the_backtest_applies_the_cost_model():
     """A backtest without an honest cost model is a random number generator."""
     from tradesys.demo import build_events, build_pipeline
 
-    pipeline, adapter, _ = build_pipeline(with_costs=True)
-    bt = Backtester(pipeline, adapter, TrialRegistry(), "funding_carry")
+    pipeline, adapters, _ = build_pipeline(with_costs=True)
+    bt = Backtester(pipeline, adapters, TrialRegistry(), "funding_carry")
     result = asyncio.run(bt.run(build_events()))
 
     assert result.fills >= 1, "no fills, so the cost model was never exercised"
@@ -121,8 +121,8 @@ def test_costless_and_costed_runs_differ():
     events = build_events()
     outcomes = {}
     for with_costs in (False, True):
-        pipeline, adapter, _ = build_pipeline(with_costs=with_costs)
-        bt = Backtester(pipeline, adapter, TrialRegistry(), "funding_carry")
+        pipeline, adapters, _ = build_pipeline(with_costs=with_costs)
+        bt = Backtester(pipeline, adapters, TrialRegistry(), "funding_carry")
         outcomes[with_costs] = asyncio.run(bt.run(events)).equity_curve[-1]
     assert outcomes[True] < outcomes[False]
 
@@ -179,8 +179,8 @@ def test_queue_modelling_is_on_by_default():
 def test_funding_accrues_to_the_books_during_a_backtest():
     from tradesys.demo import build_events, build_pipeline
 
-    pipeline, adapter, _ = build_pipeline()
-    bt = Backtester(pipeline, adapter, TrialRegistry(), "funding_carry")
+    pipeline, adapters, _ = build_pipeline()
+    bt = Backtester(pipeline, adapters, TrialRegistry(), "funding_carry")
     result = asyncio.run(bt.run(build_events()))
     led = result.books.strategies.get("funding_carry")
     assert led is not None
@@ -190,8 +190,8 @@ def test_funding_accrues_to_the_books_during_a_backtest():
 def test_the_ledger_closes_after_a_backtest():
     from tradesys.demo import build_events, build_pipeline
 
-    pipeline, adapter, _ = build_pipeline()
-    bt = Backtester(pipeline, adapter, TrialRegistry(), "funding_carry")
+    pipeline, adapters, _ = build_pipeline()
+    bt = Backtester(pipeline, adapters, TrialRegistry(), "funding_carry")
     result = asyncio.run(bt.run(build_events()))
     assert result.books.reconciles(), (
         f"ledger off by {result.books.reconciliation_error()}"
@@ -202,10 +202,11 @@ def test_the_simulated_venue_tracks_the_replayed_book():
     """Otherwise fills are decided against a stale price, which looks like a result."""
     from tradesys.demo import build_events, build_pipeline
 
-    pipeline, adapter, _ = build_pipeline()
+    pipeline, adapters, _ = build_pipeline()
     events = build_events()
-    bt = Backtester(pipeline, adapter, TrialRegistry(), "funding_carry")
+    bt = Backtester(pipeline, adapters, TrialRegistry(), "funding_carry")
     asyncio.run(bt.run(events))
 
-    last_snapshot = [e for e in events if e.kind == "book_snapshot"][-1]
-    assert adapter.books["BTCUSDT"].best_bid == last_snapshot.payload.bids[0][0]
+    last_snapshot = [e for e in events
+                     if e.kind == "book_snapshot" and e.venue == PERP_VENUE][-1]
+    assert adapters[PERP_VENUE].books["BTCUSDT"].best_bid == last_snapshot.payload.bids[0][0]

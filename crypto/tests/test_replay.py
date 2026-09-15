@@ -25,9 +25,9 @@ from tradesys.research.replay import (
 
 def audited_session(tmp_path, events=None, **pipeline_kwargs):
     events = events if events is not None else build_events()
-    pipeline, adapter, recorder = build_pipeline(**pipeline_kwargs)
+    pipeline, adapters, recorder = build_pipeline(**pipeline_kwargs)
     pipeline.audit = AuditLog(tmp_path / "audit.jsonl")
-    asyncio.run(Backtester(pipeline, adapter, TrialRegistry(), "funding_carry").run(events))
+    asyncio.run(Backtester(pipeline, adapters, TrialRegistry(), "funding_carry").run(events))
     return pipeline, recorder, list(pipeline.audit.read())
 
 
@@ -121,8 +121,8 @@ def test_the_log_reproduces_the_decisions_of_a_fresh_run(tmp_path):
     events = build_events()
     _, _, records = audited_session(tmp_path, events)
 
-    pipeline, adapter, recorder = build_pipeline()
-    asyncio.run(Backtester(pipeline, adapter, TrialRegistry(), "funding_carry").run(events))
+    pipeline, adapters, recorder = build_pipeline()
+    asyncio.run(Backtester(pipeline, adapters, TrialRegistry(), "funding_carry").run(events))
 
     divergences = compare_decisions(records, recorder.decisions)
     assert not divergences, "\n".join(str(d) for d in divergences)
@@ -133,10 +133,15 @@ def test_a_truncated_log_is_detected(tmp_path):
     events = build_events()
     _, _, records = audited_session(tmp_path, events)
 
-    pipeline, adapter, recorder = build_pipeline()
-    asyncio.run(Backtester(pipeline, adapter, TrialRegistry(), "funding_carry").run(events))
+    pipeline, adapters, recorder = build_pipeline()
+    asyncio.run(Backtester(pipeline, adapters, TrialRegistry(), "funding_carry").run(events))
 
-    assert compare_decisions(records[:-2], recorder.decisions)
+    # Drop the last recorded *decision*, not merely the last record: the tail
+    # of a session is often a fill, and removing one of those proves nothing
+    # about whether the comparison can detect a missing decision.
+    keep = [r for r in records if r["kind"] in AUDITED_DECISIONS]
+    truncated = [r for r in records if r is not keep[-1]]
+    assert compare_decisions(truncated, recorder.decisions)
 
 
 def test_a_different_decision_is_detected(tmp_path):
@@ -144,8 +149,8 @@ def test_a_different_decision_is_detected(tmp_path):
     _, _, records = audited_session(tmp_path, events)
 
     # A run at a different size makes different decisions.
-    pipeline, adapter, recorder = build_pipeline(base_notional="4000")
-    asyncio.run(Backtester(pipeline, adapter, TrialRegistry(), "funding_carry").run(events))
+    pipeline, adapters, recorder = build_pipeline(base_notional="4000")
+    asyncio.run(Backtester(pipeline, adapters, TrialRegistry(), "funding_carry").run(events))
 
     assert compare_decisions(records, recorder.decisions)
 
@@ -169,6 +174,6 @@ def test_the_comparison_ignores_timestamps_and_correlation_ids(tmp_path):
         record["recorded_at"] = 0
         record["correlation_id"] = "rewritten"
 
-    pipeline, adapter, recorder = build_pipeline()
-    asyncio.run(Backtester(pipeline, adapter, TrialRegistry(), "funding_carry").run(events))
+    pipeline, adapters, recorder = build_pipeline()
+    asyncio.run(Backtester(pipeline, adapters, TrialRegistry(), "funding_carry").run(events))
     assert not compare_decisions(records, recorder.decisions)

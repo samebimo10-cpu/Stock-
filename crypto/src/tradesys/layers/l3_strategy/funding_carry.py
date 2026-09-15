@@ -32,11 +32,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional, Sequence
 
 from ...core.events import FeatureSnapshot, Signal
 from ...core.types import Decimal as Dec, Nanos, dec
 from ...costs import carry_breakeven_periods
+from ...core.ids import new_correlation_id
 from .base import StrategyHealth, StrategyState
 
 __all__ = ["FundingCarryParams", "FundingCarry"]
@@ -67,6 +68,13 @@ class FundingCarryParams:
     max_hold_intervals: int = 21
     #: Target notional per unit of confidence.
     base_notional: Dec = dec("1000")
+    #: Venue holding the spot leg. Empty means **unhedged**, which the strategy
+    #: refuses to run beyond research: without the spot leg this is a short
+    #: perpetual, not carry, and its profit and loss is dominated by price
+    #: direction rather than by funding.
+    spot_venue: str = ""
+    #: Venue holding the perpetual. Empty follows the snapshot's own venue.
+    perp_venue: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -74,6 +82,8 @@ class FundingCarryParams:
             "round_trip_cost": str(self.round_trip_cost),
             "max_hold_intervals": self.max_hold_intervals,
             "base_notional": str(self.base_notional),
+            "spot_venue": self.spot_venue,
+            "perp_venue": self.perp_venue,
         }
 
 
@@ -95,13 +105,28 @@ class FundingCarry:
 
     # -- the contract ----------------------------------------------------
 
-    def on_features(self, snapshot: FeatureSnapshot) -> Optional[Signal]:
+    @property
+    def is_hedged(self) -> bool:
+        return bool(self.params.spot_venue)
+
+    def on_features(self, snapshot: FeatureSnapshot) -> Sequence[Signal]:
         self.last_veto = None
+
+        # The hedge is a precondition, not an optimisation. An unhedged carry
+        # book is a directional short wearing a market-neutral label, and its
+        # losses arrive from price rather than from funding. Research may run
+        # it to exercise the pipeline; nothing past research may.
+        if not self.is_hedged and self.health.state != StrategyState.RESEARCH:
+            self.last_veto = (
+                f"unhedged carry is not approved in state {self.health.state!r}: "
+                "set spot_venue, or this is a short perpetual rather than carry"
+            )
+            return ()
 
         # A missing feature is handled explicitly. It is never imputed.
         if not snapshot.require("funding_zscore", "annualised_funding", "microprice"):
             self.last_veto = "required features missing"
-            return None
+            return ()
 
         z = snapshot.get("funding_zscore")
         annual = snapshot.get("annualised_funding")
@@ -110,35 +135,34 @@ class FundingCarry:
 
         if price <= 0:
             self.last_veto = "no usable price"
-            return None
+            return ()
 
         if self._in_position:
             if z <= self.params.exit_z:
                 self._in_position = False
-                return self._signal(snapshot, dec(0), z, annual,
-                                    reason="funding normalised")
-            return None
+                return self._legs(snapshot, dec(0), z, annual, reason="funding normalised")
+            return ()
 
         if z < self.params.entry_z:
             self.last_veto = f"funding z {z:.2f} below entry {self.params.entry_z}"
-            return None
+            return ()
 
         # Funding must be positive to be collected by the short-perp leg.
         if annual <= 0:
             self.last_veto = "funding is negative; the other side is the paid one"
-            return None
+            return ()
 
         veto = self._breakeven_blocks(annual)
         if veto is not None:
             self.last_veto = veto
-            return None
+            return ()
 
         # Short the perp: negative target. The long spot leg is the paired
         # order the portfolio layer nets against; this signal is the leg that
         # earns the funding.
         qty = -(self.params.base_notional / price)
         self._in_position = True
-        return self._signal(snapshot, qty, z, annual, reason="funding carry entry")
+        return self._legs(snapshot, qty, z, annual, reason="funding carry entry")
 
     def parameters(self) -> dict:
         return self.params.as_dict()
@@ -164,22 +188,55 @@ class FundingCarry:
             )
         return None
 
-    def _signal(self, snapshot: FeatureSnapshot, target: Dec, z: Dec,
-                annual: Dec, reason: str) -> Signal:
+    def _legs(self, snapshot: FeatureSnapshot, target: Dec, z: Dec,
+              annual: Dec, reason: str) -> List[Signal]:
+        """The perpetual leg, and its spot hedge when one is configured.
+
+        The two carry the same group id so they are filled or unwound as a
+        unit. A half-filled pair is a directional position nobody asked for,
+        and the unwinder exists so it does not survive a timeout.
+        """
         self.health.last_signal_at = snapshot.as_of
         self.health.signals_today += 1
         self.health.current_exposure = target
+
+        group = f"{self.strategy_id}-{snapshot.symbol}-{snapshot.as_of}" if self.is_hedged else ""
+        perp_venue = self.params.perp_venue or snapshot.venue
+
+        legs = [self._signal(snapshot, perp_venue, target, z, annual, reason,
+                             group, "primary" if self.is_hedged else "single",
+                             urgency="passive")]
+        if self.is_hedged:
+            # Equal and opposite: long spot against the short perpetual, so the
+            # pair is delta-neutral and what remains is the funding.
+            #
+            # The hedge crosses the spread. Nobody legs into a hedge passively:
+            # a resting bid does not get hit in a rising market, so the
+            # perpetual fills, the spot does not, and a market-neutral pair
+            # becomes a directional short. Paying the spread on one leg is the
+            # price of actually being hedged, and it belongs in the cost model
+            # rather than in a hopeful fill assumption.
+            legs.append(self._signal(snapshot, self.params.spot_venue, -target, z,
+                                     annual, f"{reason} (spot hedge)", group, "hedge",
+                                     urgency="aggressive"))
+        return legs
+
+    def _signal(self, snapshot: FeatureSnapshot, venue: str, target: Dec, z: Dec,
+                annual: Dec, reason: str, group: str, role: str,
+                urgency: str = "passive") -> Signal:
         return Signal(
             correlation_id=snapshot.correlation_id,
             emitted_at=snapshot.as_of,
             source=f"l3:{self.strategy_id}",
             strategy_id=self.strategy_id,
-            venue=snapshot.venue,
+            venue=venue,
             symbol=snapshot.symbol,
             target_position=target,
-            urgency="passive",     # carry has no urgency; paying the spread destroys it
+            urgency=urgency,
             limit_price=None,
             valid_until=snapshot.as_of + self.signal_ttl_ns,
             confidence=min(dec(1), abs(z) / (self.params.entry_z * 2)),
             rationale={"funding_zscore": z, "annualised_funding": annual},
+            leg_group=group,
+            leg_role=role,
         )

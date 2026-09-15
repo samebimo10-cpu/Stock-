@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Iterable, List, Mapping, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from ..accounting import Books
 from ..core.events import Fill, MarketEvent
@@ -86,6 +86,11 @@ class Backtester:
 
     def __init__(self, pipeline: Pipeline, adapter, registry: Optional[TrialRegistry],
                  strategy_name: str = "unnamed", parameters: Optional[Mapping] = None) -> None:
+        """``adapter`` is one simulated venue, or a mapping of venue to adapter.
+
+        A hedged strategy trades two venues, so a backtester that can only step
+        one of them silently never fills the second leg.
+        """
         if registry is None:
             raise RegistryRequired(
                 "a backtest requires a trial registry. Deflated Sharpe uses the "
@@ -93,7 +98,11 @@ class Backtester:
                 "that silently does not count (SPEC section 11.3)."
             )
         self.pipeline = pipeline
-        self.adapter = adapter
+        if hasattr(adapter, "place"):
+            self.adapters = {getattr(adapter, "name", "default"): adapter}
+        else:
+            self.adapters = dict(adapter)
+        self.adapter = next(iter(self.adapters.values()))
         self.registry = registry
         self.strategy_name = strategy_name
         self.parameters = dict(parameters or {})
@@ -116,21 +125,24 @@ class Backtester:
             st = self.pipeline.risk.state
 
             for event in events:
-                # The simulated venue sees the same events the strategy does.
-                # If it does not, fills are decided against a stale book.
-                if hasattr(self.adapter, "apply_market_event"):
-                    self.adapter.apply_market_event(event)
+                # Every simulated venue sees the events addressed to it. If a
+                # venue does not, fills there are decided against a stale book.
+                for name, venue in self.adapters.items():
+                    if event.venue in (name, "") or len(self.adapters) == 1:
+                        if hasattr(venue, "apply_market_event"):
+                            venue.apply_market_event(event)
                 result = await self.pipeline.on_market_event(event)
                 signals += len(result.signals)
                 orders += len(result.submitted)
                 rejections += len(result.rejected)
                 unknown += len(result.unknown)
 
-                # Match resting orders, then feed fills back through the same
-                # path a live fill takes.
-                for fill in self.adapter.step():
-                    self.pipeline.on_fill(fill)
-                    fills += 1
+                # Match resting orders on every venue, then feed fills back
+                # through the same path a live fill takes.
+                for venue in self.adapters.values():
+                    for fill in venue.step():
+                        self.pipeline.on_fill(fill)
+                        fills += 1
 
                 self._mark_to_market()
                 equity.append(float(st.equity))
@@ -140,7 +152,7 @@ class Backtester:
                 fills=fills, rejections=rejections, unknown=unknown,
                 equity_curve=equity, recorder=self.pipeline.recorder,
                 books=self.pipeline.books,
-                modelled_costs=dict(getattr(self.adapter, "modelled_costs", {})),
+                modelled_costs=_merge_costs(self.adapters.values()),
             )
             self.registry.finish(
                 trial_id, sharpe=res.sharpe, max_drawdown=res.max_drawdown,
@@ -205,3 +217,12 @@ def _total_return(result: BacktestResult) -> float:
     if len(curve) < 2 or curve[0] == 0:
         return 0.0
     return (curve[-1] - curve[0]) / curve[0]
+
+
+def _merge_costs(adapters) -> Dict[str, Dec]:
+    """Sum the modelled costs charged across every simulated venue."""
+    total: Dict[str, Dec] = {}
+    for adapter in adapters:
+        for key, value in getattr(adapter, "modelled_costs", {}).items():
+            total[key] = total.get(key, dec(0)) + value
+    return total

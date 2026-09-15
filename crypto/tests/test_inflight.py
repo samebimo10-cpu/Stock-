@@ -14,7 +14,7 @@ import pytest
 from tradesys.adapters.sim import SimAdapter
 from tradesys.core.events import OrderIntent, OrderStatus, RiskDecision, SymbolFilter
 from tradesys.core.types import dec
-from tradesys.demo import build_cycling_events, build_pipeline
+from tradesys.demo import PERP_VENUE, build_cycling_events, build_pipeline
 from tradesys.layers.l6_execution.executor import Executor
 from tradesys.research.backtest import Backtester
 from tradesys.research.registry import TrialRegistry
@@ -105,9 +105,9 @@ def test_the_pipeline_does_not_stack_orders_toward_one_target():
     and pointing the wrong way after an exit.
     """
     events = build_cycling_events()
-    pipeline, adapter, _ = build_pipeline()
+    pipeline, adapters, _ = build_pipeline()
     result = asyncio.run(
-        Backtester(pipeline, adapter, TrialRegistry(), "fc").run(events)
+        Backtester(pipeline, adapters, TrialRegistry(), "fc").run(events)
     )
     assert result.fills >= 4, "the scenario must round-trip or it tests nothing"
     assert not pipeline.books.positions, (
@@ -121,9 +121,9 @@ def test_a_carry_strategy_collects_funding_rather_than_paying_it():
     Paying it is the signature of a position that ended up long, which is what
     stacked orders produce.
     """
-    pipeline, adapter, _ = build_pipeline()
+    pipeline, adapters, _ = build_pipeline()
     result = asyncio.run(
-        Backtester(pipeline, adapter, TrialRegistry(), "fc").run(build_cycling_events())
+        Backtester(pipeline, adapters, TrialRegistry(), "fc").run(build_cycling_events())
     )
     assert result.books.strategies["funding_carry"].funding > 0
 
@@ -146,9 +146,9 @@ def test_the_venue_clock_advances_with_the_data():
 
 
 def test_fills_do_not_all_share_one_timestamp():
-    pipeline, adapter, _ = build_pipeline()
-    asyncio.run(Backtester(pipeline, adapter, TrialRegistry(), "fc").run(build_cycling_events()))
-    stamps = {f.exchange_ts for f in adapter.fills}
+    pipeline, adapters, _ = build_pipeline()
+    asyncio.run(Backtester(pipeline, adapters, TrialRegistry(), "fc").run(build_cycling_events()))
+    stamps = {f.exchange_ts for f in adapters[PERP_VENUE].fills}
     assert len(stamps) > 1
 
 
