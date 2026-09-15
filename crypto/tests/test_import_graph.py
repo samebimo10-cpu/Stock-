@@ -69,3 +69,44 @@ def test_every_layer_package_exists():
     for layer in ("l1_data", "l2_features", "l3_strategy", "l4_portfolio",
                   "l5_risk", "l6_execution", "l7_observability"):
         assert (SRC / "layers" / layer / "__init__.py").exists(), f"missing layer {layer}"
+
+
+#: Modules allowed to open a network connection. Everything else in the package
+#: reaches a venue through an injected transport or adapter, which is what makes
+#: the whole system testable offline - and testable offline is the only way the
+#: failure paths get tested at all.
+NETWORK_ALLOWED = {
+    "live/websocket.py",        # the socket itself
+    "adapters/binance.py",      # UrllibTransport, the default injected one
+    "adapters/bybit.py",
+}
+
+NETWORK_MODULES = ("socket", "ssl", "urllib.request", "http.client",
+                   "asyncio.open_connection")
+
+
+@pytest.mark.parametrize(
+    "path", [p for p in SRC.rglob("*.py")], ids=lambda p: str(p.name))
+def test_only_the_connection_modules_touch_the_network(path):
+    relative = path.relative_to(SRC).as_posix()
+    if relative in NETWORK_ALLOWED:
+        return
+    offending = [i for i in _imports(path)
+                 if any(i == m or i.startswith(m + ".") for m in NETWORK_MODULES)]
+    assert not offending, (
+        f"{relative} imports {offending}. Network access belongs behind an "
+        f"injected transport; only {sorted(NETWORK_ALLOWED)} may open a "
+        "connection, or the failure paths stop being testable offline."
+    )
+
+
+@pytest.mark.parametrize("path", _modules_under("layers"), ids=lambda p: p.name)
+def test_no_layer_imports_the_live_package(path):
+    """The layers do not know live connectivity exists.
+
+    ``live`` depends on the layers; nothing depends on ``live``. The moment that
+    reverses, running a backtest starts requiring a venue to be reachable.
+    """
+    offending = [i for i in _imports(path) if i.startswith("tradesys.live")
+                 or i == "live" or i.startswith("live.")]
+    assert not offending, f"{path.relative_to(SRC)} imports {offending}"

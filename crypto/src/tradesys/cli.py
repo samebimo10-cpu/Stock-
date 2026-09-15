@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from dataclasses import replace
 from typing import List, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -510,6 +511,77 @@ def cmd_session(args) -> int:
     return 0
 
 
+def cmd_live(args) -> int:
+    """Connect to Binance. Testnet and shadow mode unless told otherwise.
+
+    The defaults are the safe end of the SPEC section 17.5 ladder because the
+    defaults are what runs when somebody is in a hurry.
+    """
+    import asyncio
+
+    from .live.runner import Mode
+    from .live.wiring import MissingCredentials, build_binance_live
+
+    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    try:
+        session, feed, runner = build_binance_live(
+            symbols, mode=args.mode, testnet=not args.production,
+            futures=args.futures, equity=args.equity,
+            base_notional=args.notional, confirm_live=args.confirm_live,
+        )
+    except (MissingCredentials, PermissionError) as e:
+        print(f"REFUSED: {e}")
+        return 2
+
+    endpoint = "PRODUCTION" if args.production else "testnet"
+    print(f"  venue      {feed.venue}  ({endpoint})")
+    print(f"  mode       {args.mode}")
+    print(f"  symbols    {', '.join(symbols)}")
+    print(f"  orders     {_orders_go_where(args.mode)}")
+    if args.mode == Mode.LIVE:
+        print("  WARNING    real orders. Neither strategy in this repository has")
+        print("             passed validation; `tradesys validate` exits 1.")
+
+    if args.dry_run:
+        print("\n  dry run: nothing connected, nothing sent.")
+        return 0
+
+    if args.max_messages:
+        runner.config = replace(runner.config, max_messages=args.max_messages)
+
+    try:
+        report = asyncio.run(runner.run(operator=args.operator))
+    except KeyboardInterrupt:
+        runner.stop()
+        print("\n  interrupted")
+        return 0
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  run failed: {e}")
+        return 1
+
+    print(f"\n  {report}")
+    print(f"  feed: {feed.stats.events} events, {feed.stats.gaps} gaps, "
+          f"{feed.stats.resyncs} resyncs")
+    for error in report.errors[:5]:
+        print(f"    error: {error}")
+    status = session.status()
+    for key in ("state", "equity", "open_positions", "open_orders",
+                "reconciliation_clean"):
+        print(f"    {key:<22} {status[key]}")
+    return 0
+
+
+def _orders_go_where(mode: str) -> str:
+    from .live.runner import Mode
+
+    return {
+        Mode.READ_ONLY: "none - strategies are disabled",
+        Mode.SHADOW: "recorded locally, never sent",
+        Mode.PAPER: "the simulator, priced off the real book",
+        Mode.LIVE: "THE VENUE",
+    }[mode]
+
+
 def cmd_verify_audit(args) -> int:
     from .layers.l7_observability.audit import AuditLog, ChainBroken
 
@@ -542,10 +614,29 @@ def main(argv=None) -> int:
     va = sub.add_parser("verify-audit", help="verify a hash-chained audit log")
     va.add_argument("path")
 
+    li = sub.add_parser("live", help="connect to Binance (testnet + shadow by default)")
+    li.add_argument("--mode", default="shadow",
+                    choices=["read_only", "shadow", "paper", "live"],
+                    help="SPEC 17.5 rollout step; default shadow, which sends nothing")
+    li.add_argument("--production", action="store_true",
+                    help="use production endpoints instead of testnet")
+    li.add_argument("--confirm-live", action="store_true",
+                    help="required alongside --mode live --production")
+    li.add_argument("--symbols", default="BTCUSDT", help="comma separated")
+    li.add_argument("--futures", action="store_true",
+                    help="USD-M futures (carries funding; spot does not)")
+    li.add_argument("--equity", default="10000", help="starting equity for the limits")
+    li.add_argument("--notional", default="200", help="base notional per signal")
+    li.add_argument("--operator", help="acknowledge a startup discrepancy as this person")
+    li.add_argument("--max-messages", type=int, default=0,
+                    help="stop after this many stream messages")
+    li.add_argument("--dry-run", action="store_true",
+                    help="print the wiring and exit without connecting")
+
     args = parser.parse_args(argv)
     return {"selfcheck": cmd_selfcheck, "demo": cmd_demo, "chaos": cmd_chaos,
             "session": cmd_session, "validate": cmd_validate,
-            "verify-audit": cmd_verify_audit}[args.command](args)
+            "verify-audit": cmd_verify_audit, "live": cmd_live}[args.command](args)
 
 
 if __name__ == "__main__":

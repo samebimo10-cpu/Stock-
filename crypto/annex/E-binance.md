@@ -146,11 +146,25 @@ that caused the limit, and each retry round makes the next one larger.
 ```python
 # local book maintenance
 if delta.first_update_id > last_applied_id + 1:
-    mark_gap(); resync_from_snapshot(); return
+    mark_gap()
+    resync_from_snapshot()
+    # Do NOT return here. The delta that revealed the gap has not been
+    # applied, and the snapshot was fetched after it, so re-offer it: if its
+    # range spans the snapshot's last update id, apply it; if the snapshot
+    # already covers it, the staleness check below drops it. Returning instead
+    # leaves the book one update behind, the next delta reports a gap of its
+    # own, and that resync leaves another hole - a loop that tightens as the
+    # market gets busier. (Corrected during implementation; Annex G §4a.4.)
 if delta.final_update_id <= last_applied_id:
     return                        # stale, already applied
 apply(delta); last_applied_id = delta.final_update_id
 ```
+
+**A cold start is not a gap.** The first delta on any connection has nothing to
+apply itself to. It resyncs the same way, and the resulting snapshot is still
+marked `resync_in_progress`, but it must not increment `sequence_gaps` - that
+counter would otherwise tick on every healthy 23-hour rotation and stop being
+alertable (Annex G §4a.5).
 
 ### 6.2 User data stream — the classic silent failure
 

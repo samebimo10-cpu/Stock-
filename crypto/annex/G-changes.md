@@ -290,6 +290,37 @@ authorises trading for nothing.
 check worth having. The general point is worth keeping: **a threshold set
 equal to a break-even is not a threshold.**
 
+### 4a.4 The delta that triggers a resync must not be discarded
+
+**The problem.** Annex E §6.1 says "on any gap: discard, resync from a REST
+snapshot". Read literally — and it was implemented literally — that discards
+the delta that revealed the gap as well as the book. The snapshot is then one
+update behind, the next delta reports a gap of its own, and that resync leaves
+another hole. The loop gets tighter the busier the market is, which is to say
+it arrives precisely when it does the most damage.
+
+**The fix.** The triggering delta is re-offered to the sequencer after the
+snapshot and applied if it is now contiguous, which is Binance's own documented
+procedure (buffer, snapshot, apply the first delta whose range spans the
+snapshot's last update id). Annex E §6.1 now says so explicitly.
+
+### 4a.5 A cold start is not a sequence gap
+
+**The problem.** The first depth delta on any connection has nothing to apply
+itself to, so the gap detector fired on it. `sequence_gaps` would therefore
+have incremented once per connection, including every healthy 23-hour rotation
+— and a counter that increments when nothing is wrong cannot be alerted on,
+which was the only reason it existed.
+
+**The fix.** A cold start resyncs like a gap but is not counted as one. The
+resulting snapshot is still marked `resync_in_progress`, because it is still
+not research-grade data; it is simply not an incident.
+
+**The general point:** a health metric that moves during normal operation is
+not a health metric.
+
+---
+
 ---
 
 ## 5. One thing v2.0 does not fix

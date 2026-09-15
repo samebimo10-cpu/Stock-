@@ -62,6 +62,13 @@ src/tradesys/
                 base.py  the interface + filter rounding
                 sim.py   deterministic simulator with fault injection
                 binance.py  signing, filters, error mapping, listenKey, sequencing
+  live/         the only code that opens a socket
+                websocket.py    a minimal RFC 6455 client, no dependency
+                streams.py      stream sources, backoff, and the fakes tests use
+                binance_live.py Binance payloads to domain events, gap resync
+                shadow.py       reads pass through, orders are recorded not sent
+                runner.py       reconnect, 23h rotation, the independent timer
+                wiring.py       credentials from the environment, mode safety
   security/     the signing service and log redaction
   session.py    startup gate, reconciliation loop, dead-man, metrics
   chaos.py      the failure-injection scenarios, runnable
@@ -85,7 +92,8 @@ src/tradesys/
 risk/limits.yaml    the limit register, loaded with bounds validation
 docs/strategies/    one specification per strategy
 docs/adr/           decision records for every deviation from a SHOULD
-ops/runbooks/       the eight procedures section 13.3 requires
+ops/runbooks/       the eight procedures section 13.3 requires, plus
+                    one for operating a live connection
 ops/dashboards/     the five dashboards, as code
 ops/POSTMORTEM.md   the template, which requires a test
 ```
@@ -96,13 +104,34 @@ ops/POSTMORTEM.md   the template, which requires a test
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 505 tests
+python -m pytest -q                              # 675 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys selfcheck    # the machine-checkable Phase 0 gates
 tradesys demo         # funding carry through the pipeline, with the cost model
 tradesys validate     # the full section 11.2 protocol. Exits 1: not validated.
+
+# Binance. Testnet and shadow mode unless told otherwise.
+export BINANCE_API_KEY=... BINANCE_API_SECRET=...   # trading on, WITHDRAWALS OFF
+tradesys live --dry-run                # print the wiring, connect to nothing
+tradesys live --mode read_only         # real feeds, no strategy enabled
+tradesys live                          # shadow: orders recorded, never sent
 ```
+
+`tradesys live` defaults to Binance **testnet** and to **shadow mode**, and
+refuses `--mode live --production` without `--confirm-live`. The four modes are
+[SPEC §17.5](SPEC.md#175-live-testing-sequence)'s ladder:
+
+| Mode | Feeds | Orders | What it removes |
+|---|---|---|---|
+| `read_only` | real | none; strategies disabled | whether the data path works |
+| `shadow` | real | recorded locally | whether the whole system works |
+| `paper` | real | to the simulator, priced off the real book | whether the fill model is sane |
+| `live` | real | **to the venue** | whether the venue agrees |
+
+Credentials are read from the environment and from nowhere else. There is no
+flag to pass a secret: a secret on a command line is in the shell history and
+in every process listing on the box.
 
 `tradesys validate` exiting non-zero is the correct outcome, not a broken
 build. The demo strategy has never been validated, forty-five synthetic periods
@@ -294,6 +323,32 @@ surfaces.
 3. **The default carry holding limit sat exactly at break-even.** Thirty
    funding intervals is precisely what tier-0 fees need at baseline funding, so
    the default admitted a trade with zero expected profit. It is 21 now.
+
+### What connecting to Binance found
+
+Three bugs, all in code that looked right and all found by scripting a venue
+that behaves badly rather than by re-reading the module.
+
+1. **The delta that triggers a resync was being thrown away.** After fetching
+   the snapshot the local book was one update behind, so the *next* delta
+   reported a gap, which resynced, which left another hole. The loop tightens
+   as the market gets busier, so it would have arrived exactly when it cost the
+   most. The delta is now re-offered to the sequencer after the snapshot, which
+   is Binance's own documented procedure.
+2. **A cold start was counted as a sequence gap.** The first delta on any
+   connection has nothing to apply to, so `sequence_gaps` would have ticked once
+   per healthy reconnect — and a counter that increments when nothing is wrong
+   cannot be alerted on, which was the only thing it was for.
+3. **Renaming the venue in shadow mode split the books in two.** Positions,
+   fills and reconcilers are keyed by venue name; prefixing it `shadow:` gave
+   reconciliation two different empty accounts to compare, which it passed. The
+   shadow wrapper now keeps the inner venue's name, and the wiring asserts that
+   every adapter's name matches the key it is stored under.
+
+A fourth thing was a design fault rather than a bug: `stop()` could not
+interrupt a blocked read, so a shutdown waited out the read timeout. Reads are
+now raced against the stop signal — and only reads, because cancelling an order
+placement mid-flight produces the one state §9.2 has no recovery for.
 
 ## Where the build starts
 

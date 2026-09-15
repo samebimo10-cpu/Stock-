@@ -535,3 +535,27 @@ class BinanceAdapter:
 
     def rate_limit_state(self) -> RateLimitState:
         return RateLimitState(self._weight_used, self._weight_limit)
+
+    # -- private stream token --------------------------------------------
+    #
+    # Not part of :class:`~tradesys.adapters.base.VenueAdapter`: every venue
+    # has some way to authenticate a private stream and no two agree on its
+    # shape, so hoisting it into the shared protocol would define an interface
+    # around one venue's answer. The names are venue-neutral because the live
+    # layer calls them through a protocol of its own.
+
+    async def open_user_stream(self) -> str:
+        """Obtain a private-stream token, valid 60 minutes."""
+        data = self._call("POST", "/api/v3/userDataStream")
+        key = str(data["listenKey"])
+        self.listen_key.issue(key, time.time())
+        return key
+
+    async def keep_user_stream_alive(self, token: str) -> None:
+        """Extend the token by another 60 minutes. Called every 30 (Annex E 6.2)."""
+        self._call("PUT", "/api/v3/userDataStream", {"listenKey": token})
+        self.listen_key.keepalive_done(time.time())
+
+    async def close_user_stream(self, token: str) -> None:
+        self._call("DELETE", "/api/v3/userDataStream", {"listenKey": token})
+        self.listen_key.key = None

@@ -72,3 +72,39 @@ def test_validate_can_spend_the_holdout(capsys):
 def test_selfcheck_covers_adapter_conformance(capsys):
     cli.main(["selfcheck"])
     assert "data.multi_venue" in capsys.readouterr().out
+
+
+def test_live_defaults_to_testnet_and_shadow(capsys, monkeypatch):
+    """The defaults are what runs when somebody is in a hurry."""
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    assert cli.main(["live", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "testnet" in out
+    assert "mode       shadow" in out
+    assert "recorded locally, never sent" in out
+
+
+def test_live_refuses_production_orders_without_an_acknowledgement(capsys, monkeypatch):
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    assert cli.main(["live", "--mode", "live", "--production", "--dry-run"]) == 2
+    assert "REFUSED" in capsys.readouterr().out
+
+
+def test_live_refuses_to_start_without_credentials(capsys, monkeypatch):
+    monkeypatch.delenv("BINANCE_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_API_SECRET", raising=False)
+    assert cli.main(["live", "--dry-run"]) == 2
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "withdrawals DISABLED" in out
+
+
+def test_live_says_plainly_when_orders_would_be_real(capsys, monkeypatch):
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    cli.main(["live", "--mode", "live", "--production", "--confirm-live", "--dry-run"])
+    out = capsys.readouterr().out
+    assert "THE VENUE" in out
+    assert "passed validation" in out, "the warning must name the actual blocker"
