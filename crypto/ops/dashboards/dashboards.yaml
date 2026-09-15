@@ -1,0 +1,104 @@
+# Dashboards as code (SPEC section 10.3).
+#
+# Defined here and reviewed with the code they describe. A dashboard edited in
+# a web UI drifts from the system within a release, and nobody notices until
+# the panel they are staring at during an incident is measuring something that
+# no longer exists.
+#
+# Panels reference metric names from tradesys.layers.l7_observability.metrics,
+# and a test asserts every referenced metric is one the system actually emits.
+# A panel pointing at a metric nobody publishes shows a flat line, and a flat
+# line during an incident reads as "fine".
+
+version: 1
+
+dashboards:
+
+  # 1 --------------------------------------------------------------------
+  - name: trading
+    title: Trading
+    description: >
+      What the book is doing. The first screen for a question about money
+      rather than about machinery.
+    panels:
+      - {title: Equity, metric: equity, type: line, unit: quote}
+      - {title: Gross notional, metric: gross_notional, type: line, unit: quote}
+      - {title: Open positions, metric: open_positions, type: stat}
+      - {title: Open leg groups, metric: open_leg_groups, type: stat,
+         note: "A group open far longer than the leg timeout means the unwinder is stuck."}
+      - {title: Events processed, metric: events_processed, type: counter}
+
+  # 2 --------------------------------------------------------------------
+  - name: risk
+    title: Risk
+    description: >
+      Designed to answer one question at 3am - is money at risk right now, and
+      is the system already handling it. Nothing else belongs on this screen.
+    primary: true
+    panels:
+      - title: Kill switch
+        metric: kill_switch_engaged
+        type: state
+        note: "1 means engaged. This is the panel; everything else is context."
+      - title: Drawdown against the ladder
+        metric: drawdown
+        type: gauge
+        thresholds: {amber: 0.06, soft: 0.08, hard: 0.12}
+        note: "Amber alerts, soft halves allocations, hard flattens."
+      - {title: Flattens, metric: flattens, type: counter,
+         note: "Any non-zero value is an incident that has already happened."}
+      - {title: Reconciliation failures, metric: reconciliation_consecutive_failures,
+         type: stat, thresholds: {alert: 1, halt: 3}}
+      - {title: Indicator breaches, metric: slo_breaches, type: counter}
+
+  # 3 --------------------------------------------------------------------
+  - name: execution
+    title: Execution
+    description: >
+      Where edge leaks. On a strategy with 5bps of gross edge, 3bps of
+      avoidable slippage removes 60% of it.
+    panels:
+      - {title: Order acknowledgement latency, metric: order_ack_ms, type: percentiles}
+      - {title: Signal to order latency, metric: signal_to_order_ms, type: percentiles}
+      - {title: Orders placed, metric: orders_placed, type: counter}
+      - {title: Orders rejected, metric: orders_rejected, type: counter}
+      - title: Orders of unknown state
+        metric: orders_unknown
+        type: stat
+        note: >
+          Should be zero. A sustained non-zero value means orders are sitting
+          in QUERY, which is safe but means exposure is uncertain.
+      - {title: Taker fallbacks, metric: taker_fallbacks, type: counter,
+         note: "A fallback on every order means maker entry is not working."}
+
+  # 4 --------------------------------------------------------------------
+  - name: data
+    title: Data
+    description: >
+      Data quality is the highest-leverage investment in the system. A brilliant
+      strategy on bad data is a losing strategy.
+    panels:
+      - {title: Feed staleness, metric: feed_staleness_ms, type: percentiles,
+         thresholds: {amber: 100, red: 500}}
+      - {title: Clock drift, metric: clock_drift_ms, type: gauge,
+         thresholds: {amber: 10, red: 50, halt: 100}}
+      - {title: Sequence gaps, metric: sequence_gaps, type: counter}
+      - {title: Quality gate status, metric: data_quality_red_days, type: stat,
+         note: "Three consecutive amber days escalate to red on their own."}
+
+  # 5 --------------------------------------------------------------------
+  - name: system
+    title: System
+    description: Service health. The screen that says whether the machinery is up.
+    panels:
+      - {title: Reconciliation cycles, metric: reconciliation_cycles, type: counter}
+      - {title: Audit write failures, metric: audit_write_failures, type: stat,
+         note: "Non-zero halts trading. Losing the audit path is not a degraded mode."}
+      - {title: Strategies enabled, metric: strategies_enabled, type: stat}
+
+# Alert routing (SPEC section 10.2). The discipline is in what does not page.
+routing:
+  P1: {page: true, hours: 24/7, note: "Money at risk right now."}
+  P2: {page: false, notify: true, hours: business,
+       note: "Degradation. A P1 that fires without money at risk is a defect in the alert."}
+  P3: {page: false, notify: false, note: "Dashboard only."}

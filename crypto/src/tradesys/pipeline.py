@@ -42,6 +42,10 @@ from .layers.l6_execution.legs import (
     DEFAULT_COMPLETION_TIMEOUT_NS, LegState, Unwinder,
 )
 
+#: How long a maker-preferred order rests before it crosses. Must be shorter
+#: than the leg timeout, or the group breaks before the fallback can fire.
+DEFAULT_TAKER_FALLBACK_NS = 10_000_000_000
+
 __all__ = ["Pipeline", "DecisionRecorder", "Decision", "PipelineResult"]
 
 
@@ -117,6 +121,7 @@ class Pipeline:
         allocation_version: int = 1,
         books: Optional[Books] = None,
         leg_timeout_ns: Optional[int] = None,
+        taker_fallback_ns: Optional[int] = None,
     ) -> None:
         self.strategies = list(strategies)
         self.risk = risk
@@ -144,6 +149,15 @@ class Pipeline:
         #: different views of the same account (SPEC section 12.1).
         self.books = books if books is not None else Books(risk.state.cash)
         self._last_funding_ts: Dict[Tuple[str, str], Nanos] = {}
+        #: Maker-preferred orders waiting on their taker fallback, keyed by
+        #: client order id: (deadline, leg group). SPEC section 7.1 - post,
+        #: wait, cross only if the signal is decaying.
+        self._fallbacks: Dict[str, Tuple[Nanos, str]] = {}
+        self.taker_fallback_ns = (taker_fallback_ns if taker_fallback_ns is not None
+                                  else DEFAULT_TAKER_FALLBACK_NS)
+        #: How often a maker attempt had to cross. A fallback on every order
+        #: means maker entry is not working in these conditions.
+        self.fallbacks_fired = 0
         #: Multi-leg trades in flight. Specified before any multi-leg strategy
         #: exists, because a group that fills one leg and not the other is
         #: holding exposure nobody sized.
@@ -187,6 +201,7 @@ class Pipeline:
             self._record_audit("gap_skip", {"symbol": event.symbol}, event.correlation_id)
             return result
 
+        await self._process_taker_fallbacks(event, result)
         await self._process_unwinds(event, result)
 
         snapshot = engine.snapshot(event.correlation_id, event.emitted_at)
@@ -244,7 +259,7 @@ class Pipeline:
                     # A hedge leg that rests does not hedge: in a trending
                     # market the primary fills and the hedge sits there, which
                     # is how a market-neutral pair becomes a directional one.
-                    post_only=target.urgency == "passive",
+                    post_only=target.urgency in ("passive", "maker_preferred"),
                     time_in_force="IOC" if target.urgency == "aggressive" else "GTC",
                 )
             except FilterViolation as e:
@@ -278,6 +293,11 @@ class Pipeline:
             outcome = await self.executor.submit(intent, decision)
             self.recorder.add("submit", intent.client_order_id,
                               accepted=outcome.accepted, unknown=outcome.unknown)
+
+            if outcome.accepted and target.urgency == "maker_preferred":
+                self._fallbacks[intent.client_order_id] = (
+                    event.emitted_at + self.taker_fallback_ns, target.leg_group,
+                )
 
             if target.leg_group:
                 group = self.unwinder.groups.get(target.leg_group) or self.unwinder.open(
@@ -314,10 +334,77 @@ class Pipeline:
         section 12.1 is written to prevent.
         """
         self.executor.on_fill(fill)
+        machine = self.executor.machines.get(fill.client_order_id)
+        if machine is not None and machine.is_terminal:
+            self._fallbacks.pop(fill.client_order_id, None)
         self.unwinder.on_fill(fill.client_order_id, fill.quantity)
         self.books.on_fill(fill)
         self.books.apply_to(self.risk.state)
         self._record_audit("fill", fill, fill.correlation_id)
+
+    async def _process_taker_fallbacks(self, event: MarketEvent,
+                                       result: "PipelineResult") -> None:
+        """Cross anything that posted and did not fill in time.
+
+        Resting is cheaper and crossing is certain. Maker-preferred takes the
+        cheap route first and falls back, so the common case pays the rebate
+        and the uncommon case still hedges. An order that only ever rests is
+        not an execution style, it is a hope.
+        """
+        for coid, (deadline, group_id) in list(self._fallbacks.items()):
+            if event.emitted_at < deadline:
+                continue
+            machine = self.executor.machines.get(coid)
+            self._fallbacks.pop(coid, None)
+            if machine is None or machine.is_terminal or machine.remaining <= 0:
+                continue
+
+            intent = machine.intent
+            remaining = machine.remaining
+            try:
+                await self.executor.cancel(coid)
+            except Exception:                                  # noqa: BLE001
+                # A failed cancel leaves the maker order working. Placing the
+                # taker anyway would double the position, so we leave it to
+                # the unwinder and the reconciliation loop.
+                continue
+            if not self.executor.machines[coid].is_terminal:
+                continue
+
+            price = self._order_price(intent.venue, intent.symbol, intent.side,
+                                      "aggressive")
+            if price is None:
+                continue
+            try:
+                taker = self.executor.build_intent(
+                    strategy_id=intent.strategy_id, venue=intent.venue,
+                    symbol=intent.symbol, side=intent.side, quantity=remaining,
+                    correlation_id=event.correlation_id, price=price,
+                    order_type="limit", time_in_force="IOC",
+                    reduce_only=intent.reduce_only,
+                )
+            except FilterViolation:
+                continue
+
+            decision = self.risk.evaluate(taker, self._risk_context(event))
+            outcome = await self.executor.submit(taker, decision)
+            if outcome.accepted:
+                result.submitted.append(taker.client_order_id)
+                group = self.unwinder.groups.get(group_id) if group_id else None
+                if group is not None:
+                    # The replacement belongs to the same trade. Without this
+                    # the group waits on an order that no longer exists.
+                    group.on_status(coid, "CANCELLED")
+                    group.legs.pop(coid, None)
+                    group.add_leg(LegState(
+                        client_order_id=taker.client_order_id, venue=taker.venue,
+                        symbol=taker.symbol, side=taker.side, quantity=taker.quantity,
+                    ))
+            self.fallbacks_fired += 1
+            self._record_audit("taker_fallback", {
+                "replaced": coid, "with": taker.client_order_id,
+                "quantity": str(remaining), "accepted": outcome.accepted,
+            }, event.correlation_id)
 
     async def _process_unwinds(self, event: MarketEvent, result: "PipelineResult") -> None:
         """Flatten any leg group that could not complete.
@@ -380,10 +467,19 @@ class Pipeline:
         """
         key = (venue, symbol)
         mid = self._marks.get(key)
-        if urgency != "aggressive":
-            return mid
         bid, ask = self._touch.get(key, (None, None))
-        touch = ask if side == "buy" else bid
+
+        if urgency == "aggressive":
+            touch = ask if side == "buy" else bid
+        elif urgency == "maker_preferred":
+            # Join the near side rather than crossing it. This is the cheap
+            # half of SPEC section 7.1: post, wait, and cross only if the
+            # signal is decaying. It pays the rebate instead of the spread,
+            # and on a strategy earning basis points a day that difference is
+            # most of the edge.
+            touch = bid if side == "buy" else ask
+        else:
+            return mid
         return touch if touch is not None else mid
 
     def _risk_context(self, event: MarketEvent) -> RiskContext:

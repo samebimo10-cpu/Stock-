@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from ...core.types import Decimal as Dec, dec
+from .approval import ApprovalChain, ApprovalRequired
 
 __all__ = ["LimitError", "Limit", "LimitRegister"]
 
@@ -42,7 +43,21 @@ class LimitRegister:
     # -- loading ---------------------------------------------------------
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "LimitRegister":
+    def from_mapping(cls, payload: Mapping[str, Any],
+                     approvals: Optional[ApprovalChain] = None) -> "LimitRegister":
+        """Build a register from a config document.
+
+        When ``approvals`` is supplied the chain is checked **before** any
+        value is read, so an unapproved config cannot take effect even
+        partially. Passing ``None`` is for research and tests; a production
+        risk service always passes a chain (SPEC section 13.2).
+        """
+        if approvals is not None:
+            approvals.check(payload)
+        return cls._build(payload)
+
+    @classmethod
+    def _build(cls, payload: Mapping[str, Any]) -> "LimitRegister":
         limits_raw = payload.get("limits")
         bounds = payload.get("bounds", {})
         if not isinstance(limits_raw, Mapping) or not limits_raw:
@@ -77,11 +92,12 @@ class LimitRegister:
         return reg
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "LimitRegister":
+    def from_yaml(cls, path: str | Path,
+                  approvals: Optional[ApprovalChain] = None) -> "LimitRegister":
         import yaml
 
         with open(path, "r", encoding="utf-8") as fh:
-            return cls.from_mapping(yaml.safe_load(fh))
+            return cls.from_mapping(yaml.safe_load(fh), approvals)
 
     def _validate_ladder(self) -> None:
         """The drawdown ladder must be ordered, and must sit under the target.

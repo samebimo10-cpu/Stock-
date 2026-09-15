@@ -12,5 +12,10 @@ order - which is how SPEC section 3.2 rule 1 stops being a promise.
 
 from .base import Strategy, StrategyState, StrategyHealth
 from .funding_carry import FundingCarry, FundingCarryParams
+from .stat_arb import StatArbPairs, StatArbParams
 
-__all__ = ["Strategy", "StrategyState", "StrategyHealth", "FundingCarry", "FundingCarryParams"]
+__all__ = [
+    "Strategy", "StrategyState", "StrategyHealth",
+    "FundingCarry", "FundingCarryParams",
+    "StatArbPairs", "StatArbParams",
+]

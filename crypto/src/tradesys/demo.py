@@ -232,7 +232,9 @@ def cost_model() -> CostModel:
 def build_pipeline(base_notional: str = "1000",
                    params: FundingCarryParams = None,
                    with_costs: bool = True,
-                   cost_multiple: Dec = None) -> Tuple[Pipeline, Dict[str, SimAdapter], DecisionRecorder]:
+                   cost_multiple: Dec = None,
+                   taker_fallback_intervals: int = 1,
+                   leg_timeout_intervals: int = 3) -> Tuple[Pipeline, Dict[str, SimAdapter], DecisionRecorder]:
     """Wire the full stack against the simulator.
 
     The same wiring a live session uses; only the adapter differs.
@@ -292,7 +294,12 @@ def build_pipeline(base_notional: str = "1000",
     # sensitive, and a timeout shorter than the data's own cadence expires
     # every group before it can fill.
     pipeline = Pipeline([strategy], risk, executor, FILTERS, recorder=recorder,
-                        leg_timeout_ns=3 * FUNDING_INTERVAL_NS)
+                        leg_timeout_ns=leg_timeout_intervals * FUNDING_INTERVAL_NS,
+                        # Rest, then cross. Shorter than the leg timeout, or
+                        # the group breaks before the fallback can fire. How
+                        # long to rest is a real trade-off: too short and every
+                        # order crosses, too long and the hedge is late.
+                        taker_fallback_ns=taker_fallback_intervals * FUNDING_INTERVAL_NS)
     return pipeline, adapters, recorder
 
 

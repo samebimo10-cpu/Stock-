@@ -63,7 +63,7 @@ def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
         by_key.setdefault(key, {})[sig.strategy_id] = sig.target_position * multiplier
         # The most urgent contributor wins. A passive order that is also
         # somebody's hedge must cross, or the hedge does not happen.
-        order = {"passive": 0, "normal": 1, "aggressive": 2}
+        order = {"passive": 0, "maker_preferred": 1, "normal": 2, "aggressive": 3}
         if order.get(sig.urgency, 1) >= order.get(urgency_of.get(key, "passive"), 0):
             urgency_of[key] = sig.urgency
         if sig.leg_group:

@@ -359,11 +359,15 @@ def cmd_demo(args) -> int:
               f"{'n/a (gross not positive)' if ratio is None else f'{ratio:.1%}'}"
               f"{gate}  (gate: below 40%)")
         if ratio is not None and not led.passes_cost_gate:
-            print("      Costs take most of the carry. At tier-0 fees, crossing the")
-            print("      spread on the hedge leg is expensive relative to what funding")
-            print("      pays, which is the arithmetic in Annex B section 4 arriving")
-            print("      with a hedge attached. A maker entry path on both legs is")
-            print("      worth more here than any signal improvement.")
+            fallbacks = getattr(pipeline, "_fallback_count", None)
+            print("      Costs take most of the carry. The hedge posts first and")
+            print("      crosses only on the fallback, but in this scenario funding is")
+            print("      elevated precisely while price trends, so the resting bid is")
+            print("      never hit and the fallback fires every time. Maker entry does")
+            print("      not help when the market moves away from you, which is exactly")
+            print("      when the hedge is needed. What would help is a lower fee tier,")
+            print("      a wider entry threshold so fewer round trips carry the cost,")
+            print("      or accepting that tier-0 carry does not clear its own costs.")
 
     modelled = result.modelled_costs
     if modelled:

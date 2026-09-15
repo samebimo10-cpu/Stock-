@@ -79,11 +79,21 @@ strategies (SPEC §7.3).
 > market-neutral pair into a directional short. Paying the spread on one leg is
 > the price of actually being hedged.
 >
-> **And it is expensive.** With the hedge crossing, measured costs take about
-> 60% of gross profit on the demo scenario, against a 40% gate. That is the
-> Annex B section 4 arithmetic arriving with a hedge attached, and it says
-> plainly what the next piece of work is: a maker entry path on both legs is
-> worth more to this strategy than any plausible signal improvement.
+> **Maker-preferred, with a taker fallback.** The hedge posts at the near touch
+> and crosses only if it has not filled by the fallback deadline. In a market
+> that stands still it fills as maker and pays the rebate.
+>
+> **And it is still expensive.** Measured costs take about 69% of gross profit
+> on the demo scenario, against a 40% gate. The reason is specific and worth
+> stating: funding is elevated precisely while price is trending, so the
+> resting bid is never hit and the fallback fires every time. **Maker entry
+> does not help when the market moves away from you, which is exactly when the
+> hedge is needed.**
+>
+> What would actually move this number, in order: a lower fee tier; a wider
+> entry threshold so fewer round trips each carry the round-trip cost; or the
+> conclusion that tier-0 carry does not clear its own costs and should not be
+> traded until it can. The last is a real possible answer.
 
 **Urgency is `passive`, always.** This strategy earns basis points per day.
 Paying the spread to enter destroys a meaningful fraction of the edge, and
@@ -178,11 +188,15 @@ on the short side rather than against spread and depth alone.
 | Borrow | Not applicable while the short leg is a perpetual |
 | Cost as % of gross | **To be measured.** Gate is below 40% (SPEC §1.2). |
 
-**The single highest-value improvement to this strategy is a maker entry
-path.** Moving entry from taker to maker roughly halves the round trip and
-therefore roughly halves the break-even holding period. That is worth more than
-any plausible signal improvement, and it should be built before any effort goes
-into refining `entry_z`.
+**Maker entry is implemented and does not rescue this.** The hedge posts
+before it crosses, which halves the round trip whenever the resting order
+fills. It does not fill when the market is trending away, and funding is
+elevated precisely when the market is trending. The measured cost ratio is
+about 69% against a 40% gate.
+
+The honest reading is that **this strategy does not clear its costs at tier 0**,
+and the remaining levers are fee tier and entry threshold rather than
+execution. Refining `entry_z` is the last thing that would help.
 
 ## 7. Validation results
 

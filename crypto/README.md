@@ -69,7 +69,7 @@ src/tradesys/
     l1_data/         local order book, sequence gaps, quality gates,
                      the write-once raw archive and its normaliser
     l2_features/     pure features, versioned by content hash, look-ahead audit
-    l3_strategy/     the strategy contract and hedged funding carry
+    l3_strategy/     the contract, hedged funding carry, and pairs stat-arb
     l4_portfolio/    netting, correlation on short samples, risk parity
     l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
     l6_execution/    order state machine, reconciliation, TCA, startup gate,
@@ -82,8 +82,11 @@ src/tradesys/
   pipeline.py   the one path, used by backtest and live alike
   demo.py       a runnable scenario
 risk/limits.yaml    the limit register, loaded with bounds validation
-docs/strategies/    one specification per strategy, written before the code
+docs/strategies/    one specification per strategy
+docs/adr/           decision records for every deviation from a SHOULD
 ops/runbooks/       the eight procedures section 13.3 requires
+ops/dashboards/     the five dashboards, as code
+ops/POSTMORTEM.md   the template, which requires a test
 ```
 
 ### Run it
@@ -92,7 +95,7 @@ ops/runbooks/       the eight procedures section 13.3 requires
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 431 tests
+python -m pytest -q                              # 485 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys selfcheck    # the machine-checkable Phase 0 gates
@@ -141,6 +144,9 @@ Every one has a test that fails when it is broken.
 | No strategy runs before the gate passes | SPEC §9.5 | The session refuses to start rather than starting degraded, and a discrepancy needs a named operator. |
 | Every failure mode has a rehearsal | SPEC §14.3 | Thirteen scenarios, runnable on demand, each stating its guarantee before it runs. |
 | Every incident has a runbook | SPEC §13.3 | All eight exist, each with a first action, a diagnostic and a recovery. |
+| A limit change needs two people | SPEC §13.2 | The register refuses a config without two distinct signers, and the one-person substitute is a timed delay. |
+| Every dashboard panel measures something real | SPEC §10.3 | Panels are code, and a test asserts every metric they name is one a live session publishes. |
+| Every deviation is written down | SPEC §14.4 | Decision records with context, decision and consequences, indexed and never edited after acceptance. |
 
 ### What the second increment added
 
@@ -198,6 +204,36 @@ The prerequisite the third increment flagged, and the operational layer:
 - **Thirteen chaos scenarios, runnable.** Quarterly re-runs are a requirement,
   and a suite nobody can run on demand is a suite nobody runs.
 - **Eight runbooks.**
+
+### What the fifth increment added
+
+- **The two-person rule, enforced.** The risk register refuses a config whose
+  signature chain lacks two distinct signers. One person approving twice is one
+  person. The small-track substitute is a mandatory delay, which does not
+  prevent a bad decision but prevents one made mid-incident.
+- **A maker entry path with a taker fallback.** The hedge posts at the near
+  touch and crosses only if it has not filled in time.
+- **A second strategy.** Pairs stat-arb, with its specification written before
+  the code this time. Risk parity across one strategy is arithmetic with
+  nothing to decide.
+- **Dashboards as code, a post-mortem template and decision records.**
+
+### What the maker path did not fix
+
+It was supposed to rescue the cost gate and it does not, and that is the more
+useful finding. Funding is elevated precisely while price is trending, so the
+resting bid is never hit and the fallback fires on every order. **Maker entry
+does not help when the market moves away from you, which is exactly when the
+hedge is needed.**
+
+Measured costs are 69% of gross against a 40% gate. The honest reading is that
+this strategy does not clear its costs at tier 0, and the remaining levers are
+fee tier and entry threshold rather than execution.
+
+One more simulator error surfaced on the way: a resting order only filled if
+the book crossed it, so an order sitting on the bid never traded against the
+sellers hitting that bid. That is the ordinary way a maker order fills, and
+modelling it out made every maker strategy look unfillable.
 
 ### Four bugs the hedge exposed
 

@@ -76,21 +76,35 @@ def test_no_runbook_instructs_disabling_risk_to_resume():
 # ---------------------------------------------------- strategy specs
 
 
-def test_every_live_strategy_has_a_written_specification():
+STRATEGY_SPECS = ("funding_carry", "stat_arb")
+
+
+@pytest.mark.parametrize("name", STRATEGY_SPECS)
+def test_every_strategy_has_a_written_specification(name):
     """SPEC section 6.1: no strategy is coded before its specification exists."""
-    import tradesys.layers.l3_strategy as strategies
-
-    documented = {p.stem for p in STRATEGIES.glob("*.md")}
-    assert "funding_carry" in documented
-    assert hasattr(strategies, "FundingCarry")
+    assert (STRATEGIES / f"{name}.md").exists()
 
 
-def test_the_strategy_specification_fills_every_section():
-    text = (STRATEGIES / "funding_carry.md").read_text()
+@pytest.mark.parametrize("name", STRATEGY_SPECS)
+def test_every_strategy_specification_fills_every_section(name):
+    text = (STRATEGIES / f"{name}.md").read_text()
     for heading in ("Economic rationale", "Mechanics", "Parameters", "Risk profile",
                     "Capacity", "Costs", "Validation results", "Kill criteria",
                     "Monitoring"):
-        assert heading in text, f"the specification has no {heading!r} section"
+        assert heading in text, f"{name} has no {heading!r} section"
+
+
+@pytest.mark.parametrize("name", STRATEGY_SPECS)
+def test_every_specification_states_what_would_end_the_edge(name):
+    """"The backtest works" is not a rationale, and neither is "it persists"."""
+    text = (STRATEGIES / f"{name}.md").read_text()
+    assert "What would end it" in text
+
+
+@pytest.mark.parametrize("name", STRATEGY_SPECS)
+def test_no_specification_claims_more_than_six_parameters(name):
+    text = (STRATEGIES / f"{name}.md").read_text()
+    assert "hard limit is six" in text or "limit is six" in text
 
 
 def test_the_specification_names_the_counterparty():

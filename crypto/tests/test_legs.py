@@ -159,15 +159,24 @@ def test_the_legs_are_equal_and_opposite():
     assert perp.target_position < 0, "the perpetual leg is the short one"
 
 
-def test_the_hedge_crosses_and_the_primary_rests():
+def test_the_hedge_is_more_urgent_than_the_primary():
     """A resting bid does not get hit in a rising market.
 
     Legging into a hedge passively fills the perpetual, leaves the spot
-    behind, and turns a market-neutral pair into a directional short.
+    behind, and turns a market-neutral pair into a directional short. The
+    hedge therefore posts and then crosses, rather than only posting.
     """
     s = FundingCarry(params=FundingCarryParams(perp_venue=PERP_VENUE, spot_venue=SPOT_VENUE))
     perp, spot = s.on_features(snap("2.0", "0.40"))
     assert perp.urgency == "passive"
+    assert spot.urgency == "maker_preferred"
+
+
+def test_the_hedge_can_be_forced_to_cross_immediately():
+    """Certain and expensive. Available when certainty is worth the spread."""
+    s = FundingCarry(params=FundingCarryParams(
+        perp_venue=PERP_VENUE, spot_venue=SPOT_VENUE, hedge_urgency="aggressive"))
+    _, spot = s.on_features(snap("2.0", "0.40"))
     assert spot.urgency == "aggressive"
 
 

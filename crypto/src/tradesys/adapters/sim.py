@@ -138,6 +138,20 @@ def _crosses(book: "SimBook", intent: OrderIntent) -> bool:
     return book.best_bid is not None and book.best_bid >= intent.price
 
 
+def _swept(book: "SimBook", intent: OrderIntent) -> bool:
+    """Has the market traded *through* this price, rather than merely to it?
+
+    The distinction decides whether the queue still matters. At our price, the
+    orders ahead of us fill first and we may not fill at all. Past our price,
+    the level is gone and everything resting on it went with it.
+    """
+    if intent.price is None:
+        return False
+    if intent.side == "buy":
+        return book.best_ask is not None and book.best_ask < intent.price
+    return book.best_bid is not None and book.best_bid > intent.price
+
+
 @dataclass
 class _RestingOrder:
     intent: OrderIntent
@@ -317,26 +331,36 @@ class SimAdapter:
 
             if ro.intent.price is None:
                 continue
-            crosses = (
-                (ro.intent.side == "buy" and book.best_ask is not None and book.best_ask <= ro.intent.price)
-                or (ro.intent.side == "sell" and book.best_bid is not None and book.best_bid >= ro.intent.price)
-            )
-            if not crosses:
-                continue
-
             remaining = ro.intent.quantity - ro.filled
-            if not self.model_queue:
-                produced.append(self._fill(ro, remaining, ro.intent.price, maker=True))
+            if remaining <= 0:
                 continue
 
-            # We are behind whatever was resting when we joined. Only volume
-            # beyond that queue can reach us.
+            # A resting order fills two ways, and requiring the first alone was
+            # wrong: it meant a maker order at the touch could only ever fill
+            # when the market moved *through* it, so an order sitting on the
+            # bid never traded against the sellers hitting that bid. That is
+            # the ordinary way a maker order fills, and modelling it out makes
+            # every maker strategy look unfillable.
+            swept = _swept(book, ro.intent)
+
+            if not self.model_queue:
+                if _crosses(book, ro.intent):
+                    produced.append(self._fill(ro, remaining, ro.intent.price, maker=True))
+                continue
+
+            # We joined behind whatever was already resting at our price. Only
+            # volume beyond that queue reaches us.
             reaches_us = ro.volume_seen - ro.queue_ahead
             if reaches_us <= 0:
+                if swept:
+                    # The market traded *through* our level, so the level is
+                    # gone and everything resting on it went with it. Merely
+                    # reaching our price is not enough: there the queue ahead
+                    # of us fills first and we may not fill at all.
+                    produced.append(self._fill(ro, remaining, ro.intent.price, maker=True))
                 continue
+
             fillable = min(remaining, reaches_us)
-            if fillable <= 0:
-                continue
             ro.queue_ahead += fillable      # consumed, so it cannot fill twice
             produced.append(self._fill(ro, fillable, ro.intent.price, maker=True))
         return produced

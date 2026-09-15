@@ -72,3 +72,87 @@ def oi_price_divergence(oi: Sequence[Dec], price: Sequence[Dec]) -> Optional[Dec
     d_oi = (oi[-1] - oi[-2]) / oi[-2]
     d_px = (price[-1] - price[-2]) / price[-2]
     return d_oi * d_px
+
+
+@feature("hedge_ratio", lookback=30)
+def hedge_ratio(a: Sequence[Dec], b: Sequence[Dec]) -> Optional[Dec]:
+    """Least-squares slope of ``a`` on ``b``, for a spread.
+
+    The ratio that makes the pair's spread stationary. Re-estimated on a
+    rolling window rather than fixed: a hedge ratio that was right last quarter
+    is a directional position this quarter, and that is how a pairs book
+    quietly stops being market-neutral.
+    """
+    n = min(len(a), len(b))
+    if n < 30:
+        return None
+    a, b = list(a[-n:]), list(b[-n:])
+    mean_a = sum(a, dec(0)) / n
+    mean_b = sum(b, dec(0)) / n
+    covariance = sum(((x - mean_a) * (y - mean_b) for x, y in zip(a, b)), dec(0))
+    variance = sum(((y - mean_b) ** 2 for y in b), dec(0))
+    if variance == 0:
+        return None
+    return covariance / variance
+
+
+@feature("spread_zscore", lookback=30)
+def spread_zscore(a: Sequence[Dec], b: Sequence[Dec],
+                  ratio: Optional[Dec] = None) -> Optional[Dec]:
+    """Standardised spread between two series.
+
+    ``None`` below thirty observations or at zero variance. A z-score computed
+    from a handful of points is a number with no information in it, and the
+    strategy handles its absence explicitly rather than trading on it.
+    """
+    n = min(len(a), len(b))
+    if n < 30:
+        return None
+    beta = ratio if ratio is not None else hedge_ratio(a, b)
+    if beta is None:
+        return None
+    spread = [x - beta * y for x, y in zip(a[-n:], b[-n:])]
+    mean = sum(spread, dec(0)) / n
+    variance = sum(((s - mean) ** 2 for s in spread), dec(0)) / n
+    if variance <= 0:
+        return None
+    sd = dec(str(float(variance) ** 0.5))
+    return (spread[-1] - mean) / sd
+
+
+@feature("spread_half_life", lookback=30)
+def spread_half_life(a: Sequence[Dec], b: Sequence[Dec],
+                     ratio: Optional[Dec] = None) -> Optional[Dec]:
+    """Half-life of mean reversion, in observations.
+
+    Fitted from the AR(1) coefficient of the spread. This is the number that
+    decides whether the pair is tradeable at all: a spread reverting over three
+    months is a fact about the world, not a strategy, because the position has
+    to be financed and hedged for three months to collect it.
+
+    ``None`` when the spread is not mean-reverting, which is the answer that
+    matters most.
+    """
+    import math
+
+    n = min(len(a), len(b))
+    if n < 30:
+        return None
+    beta = ratio if ratio is not None else hedge_ratio(a, b)
+    if beta is None:
+        return None
+    spread = [float(x - beta * y) for x, y in zip(a[-n:], b[-n:])]
+    lagged = spread[:-1]
+    deltas = [spread[i + 1] - spread[i] for i in range(len(spread) - 1)]
+    if len(lagged) < 10:
+        return None
+    mean_lag = sum(lagged) / len(lagged)
+    mean_delta = sum(deltas) / len(deltas)
+    covariance = sum((x - mean_lag) * (y - mean_delta) for x, y in zip(lagged, deltas))
+    variance = sum((x - mean_lag) ** 2 for x in lagged)
+    if variance == 0:
+        return None
+    slope = covariance / variance
+    if slope >= 0:
+        return None            # not mean-reverting; the spread is drifting
+    return dec(str(round(-math.log(2) / slope, 4)))

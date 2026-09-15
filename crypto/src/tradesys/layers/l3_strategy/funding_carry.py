@@ -75,6 +75,13 @@ class FundingCarryParams:
     spot_venue: str = ""
     #: Venue holding the perpetual. Empty follows the snapshot's own venue.
     perp_venue: str = ""
+    #: How the hedge leg executes. ``maker_preferred`` posts at the near touch
+    #: and crosses only if it has not filled by the fallback deadline, which
+    #: pays the rebate in the common case and still hedges in the uncommon
+    #: one. ``aggressive`` crosses immediately and is certain but expensive:
+    #: on this strategy it takes costs from roughly a quarter of gross profit
+    #: to roughly two thirds.
+    hedge_urgency: str = "maker_preferred"
 
     def as_dict(self) -> dict:
         return {
@@ -84,6 +91,7 @@ class FundingCarryParams:
             "base_notional": str(self.base_notional),
             "spot_venue": self.spot_venue,
             "perp_venue": self.perp_venue,
+            "hedge_urgency": self.hedge_urgency,
         }
 
 
@@ -218,7 +226,7 @@ class FundingCarry:
             # rather than in a hopeful fill assumption.
             legs.append(self._signal(snapshot, self.params.spot_venue, -target, z,
                                      annual, f"{reason} (spot hedge)", group, "hedge",
-                                     urgency="aggressive"))
+                                     urgency=self.params.hedge_urgency))
         return legs
 
     def _signal(self, snapshot: FeatureSnapshot, venue: str, target: Dec, z: Dec,

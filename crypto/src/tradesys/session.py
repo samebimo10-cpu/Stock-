@@ -83,6 +83,49 @@ class TradingSession:
         self._last_reconcile: Nanos = 0
         self._last_heartbeat: Nanos = 0
         self.startup_report: List[str] = []
+        self._register_metrics()
+
+    def _register_metrics(self) -> None:
+        """Create every metric at zero, before anything can happen.
+
+        A counter that springs into existence the first time something goes
+        wrong leaves its panel empty until the incident, and an empty panel
+        reads as "fine" rather than as "not measured". Registering up front
+        costs nothing and makes the dashboards honest from the first second.
+        """
+        for name, help_text in (
+            ("events_processed", "market events through the pipeline"),
+            ("orders_placed", "orders accepted by a venue"),
+            ("orders_rejected", "orders refused"),
+            ("reconciliation_cycles", "reconciliation passes completed"),
+            ("flattens", "times the book was flattened"),
+            ("slo_breaches", "indicator breaches raised"),
+            ("sequence_gaps", "market data sequence discontinuities"),
+            ("strategies_enabled", "strategies enabled at startup"),
+        ):
+            self.metrics.counter(name, help_text)
+        for name, help_text in (
+            ("equity", "cash plus unrealised plus accrued"),
+            ("gross_notional", "gross position value"),
+            ("drawdown", "peak-to-trough fraction"),
+            ("open_positions", "instruments currently held"),
+            ("open_leg_groups", "multi-leg trades in flight"),
+            ("kill_switch_engaged", "1 when engaged"),
+            ("orders_unknown", "orders whose state the venue has not confirmed"),
+            ("taker_fallbacks", "maker attempts that had to cross"),
+            ("data_quality_red_days", "1 when the current data is unusable"),
+            ("audit_write_failures", "1 when the audit path is lost"),
+            ("feed_uptime_fraction", "1 when the feed is fresh"),
+            ("clock_drift_ms", "venue clock drift"),
+            ("reconciliation_consecutive_failures", "consecutive failed cycles"),
+        ):
+            self.metrics.gauge(name, help_text)
+        for name, help_text in (
+            ("signal_to_order_ms", "event received to order sent"),
+            ("order_ack_ms", "order sent to venue acknowledgement"),
+            ("feed_staleness_ms", "venue timestamp to local receipt"),
+        ):
+            self.metrics.histogram(name, help_text)
 
     # ------------------------------------------------------------------
     # Startup
@@ -193,9 +236,38 @@ class TradingSession:
             return
 
         started = self.clock()
-        await self.pipeline.on_market_event(event)
+        result = await self.pipeline.on_market_event(event)
         self.metrics.histogram("signal_to_order_ms").observe((self.clock() - started) / 1e6)
         self.metrics.counter("events_processed").inc()
+
+        # Every panel in ops/dashboards references a metric, and a panel
+        # pointing at a metric nobody publishes shows a flat line. A flat line
+        # during an incident reads as "fine", so the counters are emitted here
+        # even when they are zero.
+        self.metrics.counter("orders_placed").inc(len(result.submitted))
+        self.metrics.counter("orders_rejected").inc(len(result.rejected))
+        self.metrics.gauge("orders_unknown").set(
+            sum(1 for m in self.pipeline.executor.open_machines()
+                if m.status == "QUERY")
+        )
+        self.metrics.gauge("taker_fallbacks").set(float(self.pipeline.fallbacks_fired))
+        if event.quality.gap_detected:
+            self.metrics.counter("sequence_gaps").inc()
+        self.metrics.gauge("data_quality_red_days").set(
+            1.0 if event.quality.stale or event.quality.crossed_book else 0.0
+        )
+        self.metrics.gauge("audit_write_failures").set(
+            1.0 if getattr(self.pipeline.audit, "must_halt_trading", False) else 0.0
+        )
+        self.metrics.gauge("strategies_enabled_now").set(
+            sum(1 for st in self.pipeline.strategies if st.health.enabled)
+        )
+        self.metrics.gauge("feed_uptime_fraction").set(
+            0.0 if event.quality.stale else 1.0
+        )
+        self.metrics.histogram("order_ack_ms").observe(
+            max(0.0, (self.clock() - started) / 1e6)
+        )
 
         if event.exchange_ts:
             staleness_ms = max(0.0, (event.local_recv_ts - event.exchange_ts) / 1e6)
