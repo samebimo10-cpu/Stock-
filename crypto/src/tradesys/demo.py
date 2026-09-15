@@ -13,11 +13,16 @@ enter when funding cannot cover the round trip.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+import asyncio
+from dataclasses import replace
+from typing import Any, List, Mapping, Optional, Tuple
 
 from .adapters.sim import SimAdapter
-from .core.events import BookSnapshot, FeeSchedule, Funding, MarketEvent, SymbolFilter
+from .core.events import (
+    BookSnapshot, FeeSchedule, Funding, MarketEvent, SymbolFilter, Trade,
+)
 from .core.types import Decimal as Dec, dec
+from .costs import CostModel, FeeModel
 from .layers.l3_strategy.base import StrategyState
 from .layers.l3_strategy.funding_carry import FundingCarry, FundingCarryParams
 from .layers.l5_risk.limits import LimitRegister
@@ -26,7 +31,8 @@ from .layers.l5_risk.state import PortfolioState
 from .layers.l6_execution.executor import Executor
 from .pipeline import DecisionRecorder, Pipeline
 
-__all__ = ["build_events", "build_pipeline", "default_limits", "START", "FUNDING_INTERVAL_NS"]
+__all__ = ["build_events", "build_pipeline", "default_limits", "make_backtest_runner",
+           "START", "FUNDING_INTERVAL_NS"]
 
 START = 1_700_000_000_000_000_000
 FUNDING_INTERVAL_NS = 8 * 3600 * 1_000_000_000
@@ -107,11 +113,29 @@ def build_events(periods: int = 45, spike_after: int = 40,
                                  asks=((price + dec("1"), dec("5")),),
                                  last_update_id=i),
         ))
+        # Public trades, so a resting order can actually advance in the queue.
+        # Without them a maker order never fills, which is the honest outcome:
+        # nothing traded where we were quoting.
+        for j in range(4):
+            # Buyers lift the ask, sellers hit the bid. Trading both at the
+            # same mid would let a resting order fill against volume that
+            # never actually reached its price.
+            buy_side = j % 2 == 0
+            events.append(MarketEvent(
+                correlation_id=f"corr-trade-{i}-{j}", emitted_at=ts + 1 + j, source="demo",
+                venue="sim", symbol=SYMBOL, kind="trade",
+                exchange_ts=ts + 1 + j, local_recv_ts=ts + 1 + j,
+                payload=Trade(price=price + dec(1) if buy_side else price,
+                              quantity=dec("3"),
+                              aggressor_side="buy" if buy_side else "sell",
+                              trade_id=i * 10 + j),
+            ))
+
         rate = dec(quiet_rate) if i < spike_after else dec(spike_rate)
         events.append(MarketEvent(
-            correlation_id=f"corr-fund-{i}", emitted_at=ts + 1, source="demo",
+            correlation_id=f"corr-fund-{i}", emitted_at=ts + 10, source="demo",
             venue="sim", symbol=SYMBOL, kind="funding",
-            exchange_ts=ts + 1, local_recv_ts=ts + 1,
+            exchange_ts=ts + 10, local_recv_ts=ts + 10,
             payload=Funding(rate=rate, interval_hours=8,
                             next_settlement=ts + FUNDING_INTERVAL_NS),
         ))
@@ -119,14 +143,49 @@ def build_events(periods: int = 45, spike_after: int = 40,
     return events
 
 
+def cost_model() -> CostModel:
+    """Tier-0 economics, deliberately pessimistic.
+
+    ``adverse_selection_bps`` is positive because it always is for a naive
+    maker: you are filled preferentially when the price is about to move
+    against you. An estimate of zero means the estimator is wrong, not that
+    the market is being kind.
+    """
+    return CostModel(
+        fees=FeeModel(maker_rate=dec("0.0002"), taker_rate=dec("0.0005")),
+        adverse_selection_bps=dec("1.5"),
+        impact_y=dec("1"),
+    )
+
+
 def build_pipeline(base_notional: str = "1000",
-                   params: FundingCarryParams = None) -> Tuple[Pipeline, SimAdapter, DecisionRecorder]:
+                   params: FundingCarryParams = None,
+                   with_costs: bool = True,
+                   cost_multiple: Dec = None) -> Tuple[Pipeline, SimAdapter, DecisionRecorder]:
     """Wire the full stack against the simulator.
 
     The same wiring a live session uses; only the adapter differs.
+
+    ``with_costs=False`` builds the costless twin used by the SPEC section 11.1
+    review heuristic. It is not a faster mode or a debugging convenience - it
+    exists only to be compared against, and running it alone would produce
+    exactly the flattering backtest the specification warns about.
     """
-    adapter = SimAdapter(filters=FILTERS,
-                         fees=FeeSchedule("sim", dec("0.0002"), dec("0.0005")))
+    multiple = cost_multiple if cost_multiple is not None else dec(1)
+    model = cost_model() if with_costs else None
+    if model is not None and multiple != 1:
+        # Cost sensitivity (SPEC section 11.2 item 8): a strategy that dies at
+        # 1.5x costs is one fee-tier change from dead.
+        model = replace(model, adverse_selection_bps=model.adverse_selection_bps * multiple)
+
+    adapter = SimAdapter(
+        filters=FILTERS,
+        fees=FeeSchedule("sim", dec("0.0002") * multiple, dec("0.0005") * multiple)
+        if with_costs else FeeSchedule("sim", dec("0"), dec("0")),
+        cost_model=model,
+        daily_volume={SYMBOL: dec("500")},
+        daily_vol_bps=dec("300"),
+    )
     adapter.set_book(SYMBOL, [("60000", "5")], [("60001", "5")])
     adapter.set_balance("USDT", "100000")
 
@@ -144,3 +203,32 @@ def build_pipeline(base_notional: str = "1000",
 
     recorder = DecisionRecorder()
     return Pipeline([strategy], risk, executor, FILTERS, recorder=recorder), adapter, recorder
+
+
+def make_backtest_runner(registry, strategy_name: str = "funding_carry"):
+    """Adapt the demo wiring to the signature the validation harness wants.
+
+    The harness stays agnostic about how a backtest is built, so the same
+    protocol can be run against a different engine without rewriting the
+    protocol. This is the adapter for this one.
+
+    Every call registers a trial, including every sweep configuration and every
+    cost-stressed variant. That is the point: those are trials, they informed
+    the search, and deflated Sharpe is only honest if they are counted.
+    """
+    from .research.backtest import Backtester
+
+    def run(events, parameters: Optional[Mapping[str, Any]] = None,
+            cost_multiple: float = 1.0):
+        params = FundingCarryParams()
+        for key, value in (parameters or {}).items():
+            if hasattr(params, key):
+                params = replace(params, **{key: value})
+        pipeline, adapter, _ = build_pipeline(
+            params=params, cost_multiple=dec(str(cost_multiple)),
+        )
+        bt = Backtester(pipeline, adapter, registry, strategy_name,
+                        pipeline.strategies[0].parameters())
+        return asyncio.run(bt.run(list(events)))
+
+    return run

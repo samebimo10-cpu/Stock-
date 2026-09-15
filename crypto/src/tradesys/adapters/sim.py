@@ -49,6 +49,7 @@ from ..core.events import (
 )
 from ..core.ids import new_correlation_id
 from ..core.types import Decimal as Dec, dec, Nanos
+from ..costs import CostModel, market_impact_bps
 from .base import CancelAck, FilterRounder, OrderAck, RateLimitState
 
 __all__ = ["SimAdapter", "FaultInjector", "SimBook"]
@@ -134,6 +135,11 @@ class _RestingOrder:
     venue_order_id: str
     filled: Dec = dec(0)
     status: str = OrderStatus.ACKED
+    #: Size resting at our price when we joined. For a maker strategy this is
+    #: the whole game: we are behind it and it fills first.
+    queue_ahead: Dec = dec(0)
+    #: Volume that has traded through our level since we joined.
+    volume_seen: Dec = dec(0)
 
 
 class SimAdapter:
@@ -148,6 +154,10 @@ class SimAdapter:
         faults: Optional[FaultInjector] = None,
         start_ns: Nanos = 1_700_000_000_000_000_000,
         seed: int = 7,
+        cost_model: Optional[CostModel] = None,
+        model_queue: bool = True,
+        daily_volume: Optional[Dict[str, Dec]] = None,
+        daily_vol_bps: Dec = dec(0),
     ) -> None:
         self.filters: Dict[str, SymbolFilter] = filters or {}
         self.fees = fees or FeeSchedule(
@@ -165,6 +175,18 @@ class SimAdapter:
         self._next_venue_id = 1
         self._weight_used = 0
         self._weight_limit = 6000
+        self.cost_model = cost_model
+        #: Model queue position for resting orders. The default is True and
+        #: deliberately pessimistic: a maker backtest that fills whenever the
+        #: price touches your level overstates fill rates by a factor of two to
+        #: five, always in the favourable direction, because you fill on every
+        #: touch that goes your way and on none of the queue positions that
+        #: never reached you (Annex B section 5.2).
+        self.model_queue = model_queue
+        self.daily_volume: Dict[str, Dec] = dict(daily_volume or {})
+        self.daily_vol_bps = daily_vol_bps
+        #: Impact and adverse selection charged this run, for the cost report.
+        self.modelled_costs: Dict[str, Dec] = {"impact": dec(0), "adverse_selection": dec(0)}
 
     # -- driving the simulation -----------------------------------------
 
@@ -177,6 +199,65 @@ class SimAdapter:
 
     def set_balance(self, asset: str, free: str | Decimal) -> None:
         self._balances[asset] = Balance(venue=self.name, asset=asset, free=dec(free))
+
+    def apply_market_event(self, event) -> None:
+        """Keep the simulated venue's book in step with the replayed data.
+
+        Without this the adapter evaluates fills against whatever book it was
+        seeded with, while the strategy reasons about the replayed one. The two
+        drift apart silently and every maker fill decision is made against a
+        stale price - which looks like a strategy result and is a wiring bug.
+
+        Trades are forwarded to :meth:`observe_trade` so resting orders advance
+        in the queue, so a caller can drive the whole simulation with this one
+        method.
+        """
+        if event.kind == "book_snapshot":
+            snap = event.payload
+            self.set_book(event.symbol, snap.bids, snap.asks, snap.last_update_id)
+        elif event.kind == "book_delta":
+            self._apply_delta(event.symbol, event.payload)
+        elif event.kind == "trade":
+            self.observe_trade(event.symbol, event.payload.price,
+                               event.payload.quantity, event.payload.aggressor_side)
+
+    def _apply_delta(self, symbol: str, delta) -> None:
+        book = self.books.get(symbol)
+        bids = dict(book.bids) if book else {}
+        asks = dict(book.asks) if book else {}
+        for price, qty in delta.bids:
+            bids.pop(price, None) if qty == 0 else bids.__setitem__(price, qty)
+        for price, qty in delta.asks:
+            asks.pop(price, None) if qty == 0 else asks.__setitem__(price, qty)
+        self.set_book(
+            symbol,
+            sorted(bids.items(), key=lambda kv: kv[0], reverse=True),
+            sorted(asks.items(), key=lambda kv: kv[0]),
+            delta.final_update_id,
+        )
+
+    def observe_trade(self, symbol: str, price: Dec, quantity: Dec,
+                      aggressor_side: str) -> None:
+        """Feed a public trade, so resting orders can advance in the queue.
+
+        A resting buy only advances when a seller crosses into it at or below
+        our price. Without this the simulator has no idea whether anyone
+        actually traded where we are quoting, and filling on a price touch
+        alone is the fiction Annex B section 5.2 warns about.
+        """
+        price = dec(price)
+        quantity = dec(quantity)
+        for ro in self._orders.values():
+            if ro.status in OrderStatus.TERMINAL or ro.intent.symbol != symbol:
+                continue
+            if ro.intent.price is None:
+                continue
+            hits_us = (
+                (ro.intent.side == "buy" and aggressor_side == "sell" and price <= ro.intent.price)
+                or (ro.intent.side == "sell" and aggressor_side == "buy" and price >= ro.intent.price)
+            )
+            if hits_us:
+                ro.volume_seen += quantity
 
     def advance(self, ns: int) -> None:
         self.now += ns
@@ -194,8 +275,24 @@ class SimAdapter:
                 (ro.intent.side == "buy" and book.best_ask is not None and book.best_ask <= ro.intent.price)
                 or (ro.intent.side == "sell" and book.best_bid is not None and book.best_bid >= ro.intent.price)
             )
-            if crosses:
-                produced.append(self._fill(ro, ro.intent.quantity - ro.filled, ro.intent.price, maker=True))
+            if not crosses:
+                continue
+
+            remaining = ro.intent.quantity - ro.filled
+            if not self.model_queue:
+                produced.append(self._fill(ro, remaining, ro.intent.price, maker=True))
+                continue
+
+            # We are behind whatever was resting when we joined. Only volume
+            # beyond that queue can reach us.
+            reaches_us = ro.volume_seen - ro.queue_ahead
+            if reaches_us <= 0:
+                continue
+            fillable = min(remaining, reaches_us)
+            if fillable <= 0:
+                continue
+            ro.queue_ahead += fillable      # consumed, so it cannot fill twice
+            produced.append(self._fill(ro, fillable, ro.intent.price, maker=True))
         return produced
 
     # -- internals -------------------------------------------------------
@@ -203,6 +300,7 @@ class SimAdapter:
     def _fill(self, ro: _RestingOrder, qty: Dec, price: Dec, maker: bool) -> Fill:
         rate = self.fees.maker_rate if maker else self.fees.taker_rate
         fee = qty * price * rate
+        price = self._apply_costs(ro, qty, price, maker)
         fill = Fill(
             correlation_id=ro.intent.correlation_id,
             emitted_at=self.now,
@@ -226,6 +324,36 @@ class SimAdapter:
         self.fills.append(fill)
         return fill
 
+    def _apply_costs(self, ro: _RestingOrder, qty: Dec, price: Dec, maker: bool) -> Dec:
+        """Worsen the execution price by modelled impact and adverse selection.
+
+        Both are charged as price, not as a separate line item, because that is
+        how they are actually experienced: the fill happens somewhere worse
+        than the quote said. Charging them as a fee would leave the position's
+        entry price flattering and the profit and loss correct only in total.
+        """
+        if self.cost_model is None:
+            return price
+
+        worse = dec(0)
+        symbol = ro.intent.symbol
+
+        if not maker:
+            volume = self.daily_volume.get(symbol)
+            if volume and volume > 0:
+                bps = market_impact_bps(qty, volume, self.daily_vol_bps,
+                                        self.cost_model.impact_y)
+                worse += price * bps / dec(10_000)
+                self.modelled_costs["impact"] += worse * qty
+        else:
+            # Maker fills are not random: you are filled preferentially when
+            # the price is about to move against you.
+            adverse = price * self.cost_model.adverse_selection_bps / dec(10_000)
+            worse += adverse
+            self.modelled_costs["adverse_selection"] += adverse * qty
+
+        return price + worse if ro.intent.side == "buy" else price - worse
+
     def _apply_position(self, fill: Fill) -> None:
         key = (self.name, fill.symbol)
         cur = self._positions.get(key)
@@ -243,6 +371,14 @@ class SimAdapter:
         else:
             avg = cur.avg_entry_price
         self._positions[key] = Position(self.name, fill.symbol, new_qty, avg)
+
+    @staticmethod
+    def _queue_ahead(book: Optional[SimBook], intent: OrderIntent) -> Dec:
+        """Size already resting at our price when we join it."""
+        if book is None or intent.price is None:
+            return dec(0)
+        levels = book.bids if intent.side == "buy" else book.asks
+        return sum((q for p, q in levels if p == intent.price), dec(0))
 
     def _check_faults(self, accepted_callback=None):
         f = self.faults
@@ -265,7 +401,7 @@ class SimAdapter:
 
     # -- VenueAdapter ----------------------------------------------------
 
-    async def exchange_info(self) -> ExchangeInfo:
+    async def reference_data(self) -> ExchangeInfo:
         self._weight_used += 10
         return ExchangeInfo(venue=self.name, filters=dict(self.filters), fetched_at=self.now)
 
@@ -319,10 +455,11 @@ class SimAdapter:
         self._seen_client_ids.add(intent.client_order_id)
         vid = f"sim-{self._next_venue_id}"
         self._next_venue_id += 1
-        ro = _RestingOrder(intent=intent, venue_order_id=vid)
+        book = self.books.get(intent.symbol)
+        ro = _RestingOrder(intent=intent, venue_order_id=vid,
+                           queue_ahead=self._queue_ahead(book, intent))
         self._orders[intent.client_order_id] = ro
 
-        book = self.books.get(intent.symbol)
         if intent.order_type == "market" and book is not None:
             walked = book.walk(intent.side, intent.quantity)
             if walked is None:

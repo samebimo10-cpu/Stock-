@@ -54,3 +54,21 @@ def test_verify_audit_detects_a_broken_chain(tmp_path, capsys):
 
     assert cli.main(["verify-audit", str(path)]) == 1
     assert "CHAIN BROKEN" in capsys.readouterr().out
+
+
+def test_validate_reports_the_demo_strategy_as_unvalidated(capsys):
+    """Exits non-zero, because an unvalidated strategy must not read as fine."""
+    assert cli.main(["validate"]) == 1
+    out = capsys.readouterr().out
+    assert "INCONCLUSIVE" in out
+    assert "NOT validated" in out
+
+
+def test_validate_can_spend_the_holdout(capsys):
+    assert cli.main(["validate", "--holdout", "sam"]) == 1
+    assert "holdout" in capsys.readouterr().out
+
+
+def test_selfcheck_covers_adapter_conformance(capsys):
+    cli.main(["selfcheck"])
+    assert "data.multi_venue" in capsys.readouterr().out

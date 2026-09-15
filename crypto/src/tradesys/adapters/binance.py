@@ -386,6 +386,11 @@ _STATUS_MAP = {
 class BinanceAdapter:
     """Spot adapter. Futures differs in paths, not in shape."""
 
+    #: Set per instance, because one class serves production and testnet and
+    #: they must be distinguishable in the audit trail. Declared here so the
+    #: conformance check can see that the contract is met.
+    name: str = ""
+
     def __init__(
         self,
         endpoints: BinanceEndpoints,
@@ -437,7 +442,7 @@ class BinanceAdapter:
 
     # -- reference -------------------------------------------------------
 
-    async def exchange_info(self) -> ExchangeInfo:
+    async def reference_data(self) -> ExchangeInfo:
         return parse_exchange_info(self._call("GET", "/api/v3/exchangeInfo"), self.name)
 
     async def fee_schedule(self) -> FeeSchedule:

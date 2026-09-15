@@ -31,6 +31,7 @@ from .core.events import (
     SymbolFilter,
     TargetPosition,
 )
+from .accounting import Books
 from .core.types import Decimal as Dec, Nanos, dec
 from .layers.l2_features.engine import FeatureEngine
 from .layers.l4_portfolio.netting import net_targets
@@ -106,6 +107,7 @@ class Pipeline:
         audit=None,
         recorder: Optional[DecisionRecorder] = None,
         allocation_version: int = 1,
+        books: Optional[Books] = None,
     ) -> None:
         self.strategies = list(strategies)
         self.risk = risk
@@ -121,6 +123,11 @@ class Pipeline:
         self._engines: Dict[Tuple[str, str], FeatureEngine] = {}
         self._feed_last: Dict[str, Nanos] = {}
         self._marks: Dict[str, Dec] = {}
+        #: The ledger. Positions live here and are pushed into the risk
+        #: service's state, so the books and the risk layer cannot hold
+        #: different views of the same account (SPEC section 12.1).
+        self.books = books if books is not None else Books(risk.state.cash)
+        self._last_funding_ts: Dict[Tuple[str, str], Nanos] = {}
 
     # -- state -----------------------------------------------------------
 
@@ -142,6 +149,10 @@ class Pipeline:
         mid = engine.book.mid
         if mid is not None:
             self._marks[event.symbol] = mid
+            self.books.mark(event.venue, event.symbol, mid)
+
+        if event.kind == "funding":
+            self._accrue_funding(event)
 
         if not event.quality.usable_for_research and event.quality.gap_detected:
             # A gap window produces no signals. The feature values across it
@@ -233,27 +244,53 @@ class Pipeline:
         return result
 
     def on_fill(self, fill: Fill) -> None:
-        self.executor.on_fill(fill)
-        st = self.risk.state
-        key = (fill.venue, fill.symbol)
-        prev = st.positions.get(key)
-        from .core.events import Position
+        """Book a fill once, in the ledger, then push the result into risk.
 
-        signed = fill.signed_quantity
-        if prev is None:
-            st.positions[key] = Position(fill.venue, fill.symbol, signed, fill.price, fill.price)
-        else:
-            qty = prev.quantity + signed
-            if qty == 0:
-                st.positions.pop(key, None)
-            else:
-                avg = prev.avg_entry_price
-                if (prev.quantity > 0) == (signed > 0):
-                    avg = (prev.quantity * prev.avg_entry_price + signed * fill.price) / qty
-                st.positions[key] = Position(fill.venue, fill.symbol, qty, avg, fill.price)
-        st.cash -= fill.fee
-        st.mark()
+        The position arithmetic lives in :mod:`tradesys.accounting` and nowhere
+        else. Keeping a second copy here was how the pipeline and the books
+        could disagree about what the account holds, which is the failure SPEC
+        section 12.1 is written to prevent.
+        """
+        self.executor.on_fill(fill)
+        self.books.on_fill(fill)
+        self.books.apply_to(self.risk.state)
         self._record_audit("fill", fill, fill.correlation_id)
+
+    def _accrue_funding(self, event: MarketEvent) -> None:
+        """Accrue funding for the elapsed fraction of the interval, then settle.
+
+        Continuous accrual rather than a lump at settlement. Lumpy booking puts
+        step changes into the equity curve, and the drawdown and Sharpe numbers
+        the whole validation protocol rests on are measured off that curve.
+        """
+        payload = event.payload
+        key = (event.venue, event.symbol)
+        interval_ns = payload.interval_hours * 3600 * 1_000_000_000
+        last = self._last_funding_ts.get(key)
+        self._last_funding_ts[key] = event.exchange_ts
+        if last is None or interval_ns <= 0:
+            return
+
+        elapsed = event.exchange_ts - last
+        fraction = dec(str(min(1.0, max(0.0, elapsed / interval_ns))))
+        if fraction == 0:
+            return
+
+        position = self.books.positions.get(key)
+        if position is None or position.quantity == 0:
+            return
+        strategy_id = self._position_owner(key)
+        self.books.accrue_funding(event.venue, event.symbol, payload.rate,
+                                  fraction, strategy_id)
+        self.books.settle_funding(event.venue, event.symbol)
+        self.books.apply_to(self.risk.state)
+
+    def _position_owner(self, key: Tuple[str, str]) -> str:
+        """Which strategy holds this position, for funding attribution."""
+        for sid, led in self.books.strategies.items():
+            if key in led.positions:
+                return sid
+        return "unattributed"
 
     # -- helpers ---------------------------------------------------------
 

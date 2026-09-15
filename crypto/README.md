@@ -70,10 +70,13 @@ src/tradesys/
     l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
     l6_execution/    order state machine, reconciliation, TCA, startup gate
     l7_observability/ hash-chained audit log, alert taxonomy
-  research/     cost model, trial registry, validation arithmetic, backtester
+  research/     trial registry, validation arithmetic, backtester, harness
+  costs.py      the cost model, shared by the backtest and the simulated venue
+  accounting.py books, per-strategy attribution, capacity
   pipeline.py   the one path, used by backtest and live alike
   demo.py       a runnable scenario
-risk/limits.yaml   the limit register, loaded with bounds validation
+risk/limits.yaml    the limit register, loaded with bounds validation
+docs/strategies/    one specification per strategy, written before the code
 ```
 
 ### Run it
@@ -82,11 +85,18 @@ risk/limits.yaml   the limit register, loaded with bounds validation
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 200 tests
+python -m pytest -q                              # 279 tests
 python -m pytest --doctest-modules src/tradesys -q
-tradesys selfcheck                               # the machine-checkable Phase 0 gates
-tradesys demo                                    # funding carry through the live pipeline
+
+tradesys selfcheck    # the machine-checkable Phase 0 gates
+tradesys demo         # funding carry through the pipeline, with the cost model
+tradesys validate     # the full section 11.2 protocol. Exits 1: not validated.
 ```
+
+`tradesys validate` exiting non-zero is the correct outcome, not a broken
+build. The demo strategy has never been validated, forty-five synthetic periods
+cannot validate anything, and the harness says so rather than computing a
+Sharpe ratio from four trades.
 
 ### What the code enforces rather than describes
 
@@ -105,6 +115,37 @@ Every one has a test that fails when it is broken.
 | A backtest must register its trial | SPEC §11.3 | The backtester refuses to construct without a registry. Abandoned and crashed runs still count. |
 | Losing the audit path halts trading | SPEC §3.3 | The log buffers, then raises, then reports that trading must stop. |
 | Look-ahead bias is detected, not reviewed for | SPEC §5.4 | A causality check that catches full-sample normalisation, and a lag check for point features. |
+| An interface needs more than one implementation | SPEC §17.1 | Three adapters pass a shared conformance suite, which also fails on any venue vocabulary leaking above the boundary. |
+| A backtest needs an honest cost model | SPEC §11.1 | Fees, slippage from real depth, impact, adverse selection and funding are all applied, and the 30% review heuristic is run against a costless twin. |
+| Maker fills need volume at their level | Annex B §5.2 | Queue position is modelled and on by default. Filling on a price touch overstates maker fill rates two to five times. |
+| One definition of equity | SPEC §12.1 | The ledger is the only place position arithmetic happens, and it pushes its numbers into the risk service's state. |
+| Capacity before capital | SPEC §1.2 | A capacity estimate reports whether it is known, and an unestimated one is not. |
+| The holdout is read once | SPEC §11.2 | Enforced by the store, not by discipline. A refused second read is still logged. |
+| Absence of evidence is not evidence | SPEC §11.2 | Every validation check can return inconclusive, and inconclusive does not pass. |
+
+### What the second increment added
+
+The first increment built the skeleton. This one closed the gaps that made it
+flattering:
+
+- **The backtester did not apply the cost model.** It charged a flat fee and
+  nothing else, which by the specification's own words made it a random number
+  generator with good graphics. It now models slippage from real depth, market
+  impact, adverse selection on maker fills, queue position, and funding, and it
+  runs the 30% review heuristic against a costless twin of the same run.
+- **The simulated venue never saw the replayed book.** Fills were decided
+  against whatever book the adapter was seeded with, while the strategy reasoned
+  about the replayed one. That is a wiring bug that looks exactly like a
+  strategy result.
+- **There were no books.** Per-strategy attribution, funding accrual, a fee
+  ledger and one definition of equity now live in `accounting.py`, and the
+  pipeline's duplicate position arithmetic is gone.
+- **One venue is not multi-venue.** A Bybit adapter and a conformance suite all
+  three adapters pass. The suite immediately found that the interface method was
+  named after a Binance endpoint.
+- **The strategy had no written specification**, which the spec makes a hard
+  requirement *before* coding. It has one now, and it records the process
+  failure rather than tidying it away.
 
 ### Three things the build changed about the spec
 

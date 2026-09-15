@@ -140,13 +140,13 @@ def test_a_transport_failure_is_unknown_state_not_failure():
     t_broken = Exploding()
     adapter = BinanceAdapter(BinanceEndpoints.spot_testnet(), transport=t_broken)
     with pytest.raises(Exception):
-        asyncio.run(adapter.exchange_info())
+        asyncio.run(adapter.reference_data())
 
 
 def test_used_weight_header_is_tracked():
     transport = FakeTransport([Response(200, EXCHANGE_INFO, {"X-MBX-USED-WEIGHT-1M": "4500"})])
     adapter = BinanceAdapter(BinanceEndpoints.spot_testnet(), transport=transport)
-    asyncio.run(adapter.exchange_info())
+    asyncio.run(adapter.reference_data())
     state = adapter.rate_limit_state()
     assert state.used_weight == 4500
     assert state.should_throttle              # 4500/6000 = 75%, above the 70% budget
@@ -156,7 +156,7 @@ def test_error_responses_raise_the_mapped_exception():
     transport = FakeTransport([Response(400, {"code": -1013, "msg": "Filter failure: LOT_SIZE"})])
     adapter = BinanceAdapter(BinanceEndpoints.spot_testnet(), transport=transport)
     with pytest.raises(FilterViolation):
-        asyncio.run(adapter.exchange_info())
+        asyncio.run(adapter.reference_data())
 
 
 def test_place_always_sets_the_client_order_id():

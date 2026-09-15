@@ -36,7 +36,7 @@ from typing import Optional
 
 from ...core.events import FeatureSnapshot, Signal
 from ...core.types import Decimal as Dec, Nanos, dec
-from ...research.costmodel import carry_breakeven_periods
+from ...costs import carry_breakeven_periods
 from .base import StrategyHealth, StrategyState
 
 __all__ = ["FundingCarryParams", "FundingCarry"]

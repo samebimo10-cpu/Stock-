@@ -187,8 +187,24 @@ def _check_audit_halt() -> Tuple[bool, str]:
     return False, "trading continued with no audit path"
 
 
+def _check_adapter_conformance() -> Tuple[bool, str]:
+    from .adapters.binance import BinanceAdapter
+    from .adapters.bybit import BybitAdapter
+    from .adapters.conformance import structural_report
+    from .adapters.sim import SimAdapter
+
+    reports = [structural_report(cls, label)
+               for cls, label in ((SimAdapter, "sim"), (BinanceAdapter, "binance"),
+                                  (BybitAdapter, "bybit"))]
+    failed = [r for r in reports if not r.ok]
+    if failed:
+        return False, "; ".join(str(r) for r in failed)
+    return True, f"{len(reports)} adapters conform; no venue vocabulary leaks"
+
+
 GATES = [
     ("risk.import_graph", _check_import_rules),
+    ("data.multi_venue", _check_adapter_conformance),
     ("risk.limits_bounded", _check_limits_load),
     ("risk.fat_finger_rejected", _check_fat_finger_rejected),
     ("risk.never_enlarges", _check_risk_never_enlarges),
@@ -223,17 +239,18 @@ def cmd_selfcheck(args) -> int:
 
 def cmd_demo(args) -> int:
     from .demo import build_events, build_pipeline
-    from .research.backtest import Backtester
+    from .research.backtest import Backtester, cost_impact
     from .research.registry import TrialRegistry
 
-    pipeline, adapter, recorder = build_pipeline()
+    events = build_events()
     registry = TrialRegistry()
+    pipeline, adapter, recorder = build_pipeline()
     bt = Backtester(pipeline, adapter, registry, "funding_carry",
                     pipeline.strategies[0].parameters())
-    result = asyncio.run(bt.run(build_events(), "synthetic", "synthetic"))
+    result = asyncio.run(bt.run(events, "synthetic", "synthetic"))
 
     print("Funding carry through the live pipeline, against the simulator.\n")
-    rows = [
+    for label, value in (
         ("events replayed", result.events),
         ("signals", result.signals),
         ("orders submitted", result.orders),
@@ -241,13 +258,81 @@ def cmd_demo(args) -> int:
         ("orders of unknown state", result.unknown),
         ("fills", result.fills),
         ("decisions recorded", len(recorder)),
-        ("trial id", result.trial_id),
-    ]
-    for label, value in rows:
+    ):
         print(f"  {label:<26} {value}")
-    print(f"\n  The strategy declines to enter at baseline funding: break-even")
-    print(f"  needs ten days at tier-0 fees and it holds for seven.")
+
+    books = result.books
+    print("\n  Books")
+    for label, value in (
+        ("equity", books.equity),
+        ("realised", books.realised),
+        ("unrealised", books.unrealised),
+        ("funding accrued", books.accrued_funding),
+        ("fees paid", books.total_fees()),
+        ("ledger reconciles", books.reconciles()),
+    ):
+        print(f"    {label:<24} {value}")
+
+    for sid, led in sorted(books.strategies.items()):
+        ratio = led.cost_ratio
+        print(f"\n  Strategy {sid}")
+        print(f"    {'gross':<24} {led.gross_pnl}")
+        print(f"    {'net':<24} {led.net_pnl}")
+        print(f"    {'cost ratio':<24} "
+              f"{'n/a (gross not positive)' if ratio is None else f'{ratio:.1%}'}")
+
+    modelled = result.modelled_costs
+    if modelled:
+        print("\n  Modelled costs charged into the fill price")
+        for label, value in sorted(modelled.items()):
+            print(f"    {label:<24} {value}")
+
+    impact = asyncio.run(cost_impact(
+        lambda with_costs: build_pipeline(with_costs=with_costs),
+        events, registry, "funding_carry",
+    ))
+    print("\n  Cost model review (SPEC section 11.1)")
+    print(f"    gross return             {impact.gross_return:.4%}")
+    print(f"    net return               {impact.net_return:.4%}")
+    print(f"    cut by costs             {impact.cut:.1%}")
+    print(f"    verdict                  {impact}")
+
+    print(f"\n  Trials registered: {registry.count()}. The costless run counts too -")
+    print("  it informed the search, so it belongs in the deflated Sharpe denominator.")
     return 0
+
+
+def cmd_validate(args) -> int:
+    """Run the SPEC section 11.2 protocol against the demo strategy."""
+    from .core.types import dec
+    from .demo import build_events, make_backtest_runner
+    from .research.harness import HoldoutStore, ValidationHarness
+    from .research.registry import TrialRegistry
+
+    registry = TrialRegistry()
+    events = build_events()
+    store = HoldoutStore(events, registry, fraction=0.2)
+    harness = ValidationHarness(registry, make_backtest_runner(registry),
+                                "funding_carry", code_hash="demo")
+
+    report = harness.run(
+        store.development, ("synthetic", "synthetic"),
+        parameter_sweep={"entry_z": [dec("1.0"), dec("1.5"), dec("2.0")]},
+    )
+    print(report.render())
+    print(f"\n  Trials registered during validation: {registry.count()}")
+    print("  Every sweep configuration and cost-stressed run counts. That is the")
+    print("  number deflated Sharpe divides by, and it is why it is recorded")
+    print("  by the harness rather than by the researcher.")
+
+    if args.holdout:
+        print(f"\n  {harness.evaluate_holdout(store, args.holdout)}")
+
+    if not report.passes:
+        print("\n  This strategy is NOT validated. On a synthetic 45-period scenario")
+        print("  most checks cannot be evaluated at all, and the harness reports that")
+        print("  rather than computing a number from too little data.")
+    return 0 if report.passes else 1
 
 
 def cmd_verify_audit(args) -> int:
@@ -269,11 +354,16 @@ def main(argv=None) -> int:
 
     sub.add_parser("selfcheck", help="run the machine-checkable Phase 0 gates")
     sub.add_parser("demo", help="run the demo backtest through the live pipeline")
+    v = sub.add_parser("validate", help="run the full validation protocol")
+    v.add_argument("--holdout", metavar="WHO",
+                   help="also evaluate the holdout, once, recorded against this name")
+
     va = sub.add_parser("verify-audit", help="verify a hash-chained audit log")
     va.add_argument("path")
 
     args = parser.parse_args(argv)
     return {"selfcheck": cmd_selfcheck, "demo": cmd_demo,
+            "validate": cmd_validate,
             "verify-audit": cmd_verify_audit}[args.command](args)
 
 
