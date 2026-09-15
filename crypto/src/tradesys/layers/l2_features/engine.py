@@ -18,7 +18,7 @@ from typing import Deque, Dict, List, Mapping, Optional, Tuple
 from ...core.events import FeatureSnapshot, MarketEvent, QualityFlags
 from ...core.types import Decimal as Dec, Nanos, dec
 from ..l1_data.book import LocalBook
-from . import derivs, micro
+from . import derivs, micro, trend
 from .registry import REGISTRY
 
 __all__ = ["FeatureEngine"]
@@ -28,7 +28,8 @@ class FeatureEngine:
     """Per-(venue, symbol) rolling state and snapshot production."""
 
     def __init__(self, venue: str, symbol: str, price_window: int = 64,
-                 funding_window: int = 240, trade_window: int = 200) -> None:
+                 funding_window: int = 240, trade_window: int = 200,
+                 cascade_window_ns: int = 60_000_000_000) -> None:
         self.venue = venue
         self.symbol = symbol
         self.book = LocalBook(symbol)
@@ -39,6 +40,14 @@ class FeatureEngine:
         self._spot: Optional[Dec] = None
         self._mark: Optional[Dec] = None
         self._funding_interval = 8
+        #: Forced flow and ordinary flow over the same recent window, so the
+        #: ratio between them means something. Kept with timestamps rather
+        #: than as a fixed-length deque: a cascade is defined by how much
+        #: arrived in a minute, not by how many events ago it started, and a
+        #: count-based window silently stretches to hours in a quiet market.
+        self._cascade_window_ns = cascade_window_ns
+        self._liquidations: Deque[Tuple[Nanos, Dec, str]] = deque()
+        self._recent_trades: Deque[Tuple[Nanos, Dec]] = deque()
         self.last_input_ts: Nanos = 0
         self.last_quality = QualityFlags()
 
@@ -56,6 +65,13 @@ class FeatureEngine:
         elif event.kind == "trade":
             self._trades.append((event.payload.quantity, event.payload.aggressor_side))
             self._prices.append(event.payload.price)
+            self._recent_trades.append((event.exchange_ts, event.payload.quantity))
+            self._prune(event.exchange_ts)
+            return
+        elif event.kind == "liquidation":
+            self._liquidations.append(
+                (event.exchange_ts, event.payload.quantity, event.payload.side))
+            self._prune(event.exchange_ts)
             return
         elif event.kind == "funding":
             self._funding.append(event.payload.rate)
@@ -72,6 +88,23 @@ class FeatureEngine:
         if mid is not None:
             self._prices.append(mid)
             self._spot = mid
+
+    def _prune(self, now: Nanos) -> None:
+        """Drop everything outside the cascade window, from both series.
+
+        Both, always, in one place. Pruning one and not the other turns the
+        ratio into a comparison between a minute of liquidations and an hour of
+        volume, which reads as calm during a cascade.
+        """
+        cutoff = now - self._cascade_window_ns
+        while self._liquidations and self._liquidations[0][0] < cutoff:
+            self._liquidations.popleft()
+        while self._recent_trades and self._recent_trades[0][0] < cutoff:
+            self._recent_trades.popleft()
+
+    @property
+    def recent_volume(self) -> Dec:
+        return sum((q for _, q in self._recent_trades), dec(0))
 
     # -- production ------------------------------------------------------
 
@@ -97,6 +130,15 @@ class FeatureEngine:
                 if self._spot is not None and self._mark is not None else None
             ),
             "oi_price_divergence": derivs.oi_price_divergence(list(self._oi), prices),
+            # Trend and dislocation. These are what a strategy with a chance of
+            # clearing the cost gate is built on: a signal whose gross, when it
+            # is right, is whole percentage points rather than basis points.
+            "ewmac": trend.ewmac(prices),
+            "breakout_position": trend.breakout_position(prices),
+            "downside_volatility": trend.downside_volatility(prices),
+            "atr": trend.atr(prices),
+            "cascade_pressure": trend.cascade_pressure(
+                [(q, side) for _, q, side in self._liquidations], self.recent_volume),
         }
 
         versions = REGISTRY.versions()

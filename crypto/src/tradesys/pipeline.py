@@ -35,6 +35,7 @@ from .core.events import (
 from .accounting import Books
 from .core.types import Decimal as Dec, Nanos, dec
 from .layers.l2_features.engine import FeatureEngine
+from .layers.l3_strategy.base import declared_stop_distance
 from .layers.l4_portfolio.allocator import Allocator
 from .layers.l4_portfolio.netting import net_targets
 from .layers.l5_risk.service import RiskContext, RiskService
@@ -498,7 +499,26 @@ class Pipeline:
             rate_limit=self.executor.adapter_for(event.venue).rate_limit_state(),
             filters=self.filters,
             mark_prices={symbol: price for (_, symbol), price in self._marks.items()},
+            # Without this the per-trade risk check sizes every strategy as
+            # though it had no stop, because an absent entry defaults to the
+            # whole notional being at risk. The check, the default and the
+            # tests were all correct; nothing connected them to the strategies.
+            stop_distance_frac=self._stop_distances(),
         )
+
+    def _stop_distances(self) -> Dict[str, Dec]:
+        """Each strategy's current stop distance, for the risk service.
+
+        Current rather than nominal: a stop placed in volatility units moves
+        with volatility, and a risk check using last week's distance is sizing
+        against a stop that no longer exists.
+        """
+        out: Dict[str, Dec] = {}
+        for strategy in self.strategies:
+            distance = declared_stop_distance(strategy)
+            if distance is not None:
+                out[strategy.strategy_id] = distance
+        return out
 
     def _accrue_funding(self, event: MarketEvent) -> None:
         """Accrue funding for the elapsed fraction of the interval, then settle.

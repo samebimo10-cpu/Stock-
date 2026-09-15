@@ -228,6 +228,34 @@ hedge from filling. The condition that makes the trade worth doing is the
 condition that makes it hard to execute. That is not a coincidence to optimise
 around; it is what the funding is paying for.
 
+### 6.2 The 69% is a measurement of the scenario, not of the strategy
+
+Re-measured while building the dispersion strategy, and the correction matters
+more than the original number.
+
+`tradesys demo` emits **one bar per eight-hour funding interval**. A taker
+fallback can only fire on an event, so the hedge leg crossed eight hours after
+the primary, and eight hours of price drift was charged as though it were
+spread. Re-run at hourly resolution with a one-hour fallback, on a comparable
+scenario, the same code measures **11%**.
+
+| Scenario | Bars per interval | Fallback | Cost share |
+|---|---|---|---|
+| `tradesys demo` | 1 | 8h | 68.7% |
+| `carry_events` in `tradesys strategies` | 8 | 1h | 11.0% |
+
+Neither number is a property of the strategy. **A cost ratio measured on
+synthetic data measures the scenario** (ADR 0007).
+
+What survives the correction is the arithmetic, which needs no scenario at all:
+carry collects the funding **level**, which is 0.01% per eight hours at
+baseline against a fixed 0.20% round trip. `tradesys viability` puts the
+requirement at 0.024% per interval sustained for seven days — more than twice
+baseline, and still above baseline even at VIP 9. That conclusion stands.
+
+The execution fix is real and should be adopted regardless: **the hedge leg's
+fallback belongs in minutes, not funding intervals** (ADR 0007).
+
 ## 7. Validation results
 
 **None. Nothing in this section has been run.**

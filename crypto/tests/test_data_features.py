@@ -174,10 +174,45 @@ def test_a_properly_lagged_feature_passes():
     assert_respects_lag(lambda w: w[-2], [1, 2, 3], lag=1)
 
 
+def _audit_sample(name: str):
+    """A sample long enough and varied enough to actually exercise the feature.
+
+    ``[1, 2, 3, 4]`` was enough when nothing declared a lag. It is not enough
+    now: a feature with a 32-point lookback returns None on it, the audit
+    compares None to None, and passes without having checked anything. An audit
+    that cannot fail is the thing this repository keeps refusing to ship.
+    """
+    from tradesys.core.types import dec
+
+    if name in ("ewmac", "breakout_position", "downside_volatility", "atr",
+                "realised_volatility"):
+        # A trending series with real variation: a flat or perfectly linear one
+        # makes several of these return None, which audits nothing.
+        return [dec(str(100 + i * 0.7 + (3 if i % 5 == 0 else -2))) for i in range(48)]
+    if name == "cascade_pressure":
+        return [(dec("5"), "sell"), (dec("3"), "sell")]
+    return [dec(1), dec(2), dec(3), dec(4)]
+
+
 def test_every_registered_feature_is_audited():
     """A feature nobody wrote a sample for is a feature nobody checked."""
-    samples = {name: [1, 2, 3, 4] for name in REGISTRY.names()}
+    samples = {name: _audit_sample(name) for name in REGISTRY.names()}
     assert audit_registry(REGISTRY, samples) == []
+
+
+def test_the_audit_catches_a_trend_feature_that_overstates_its_lag():
+    """The trend features declare lag=0 because they read a live price series.
+
+    The first draft declared 1, and the audit caught it. This pins that the
+    audit really does cover them, rather than skipping them because lag=0 makes
+    the lag check a no-op.
+    """
+    from tradesys.layers.l2_features import trend
+
+    sample = _audit_sample("ewmac")
+    # Claiming lag=1 is a claim not to read the latest price. It does.
+    with pytest.raises(LookAheadError, match="declares lag=1"):
+        assert_respects_lag(trend.ewmac, sample, lag=1, name="ewmac")
 
 
 # ------------------------------------------------------------- features

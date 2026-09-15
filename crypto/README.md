@@ -11,12 +11,10 @@ the system built to it. `SPEC.md` and its annexes are the frame;
 connected to Binance testnet, generating orders and sending none of them.
 
 **It is not ready for real money, and the blockers are specific.**
-`tradesys validate` exits 1 — no strategy has passed the §11.2 protocol. The
-carry strategy spends about 69% of its gross on costs against a 40% gate, and
-`tradesys viability` says exactly what would have to change. §17.5's first
-three steps take six to twelve weeks and have not been run. The engineering is
-finished; the research is not, and the first does not substitute for the
-second.
+`tradesys validate` exits 1 — **no strategy has passed the §11.2 protocol**,
+and none has ever seen a real market. §17.5's first three steps take six to
+twelve weeks and have not been run. The engineering is finished; the research
+is not, and the first does not substitute for the second.
 
 ## Start here
 
@@ -87,7 +85,9 @@ src/tradesys/
     l1_data/         local order book, sequence gaps, quality gates,
                      the write-once raw archive and its normaliser
     l2_features/     pure features, versioned by content hash, look-ahead audit
-    l3_strategy/     the contract, hedged funding carry, and pairs stat-arb
+    l3_strategy/     the contract, and five strategies: time-series momentum,
+                     liquidation-cascade reversion, cross-venue funding
+                     dispersion, hedged funding carry, pairs stat-arb
     l4_portfolio/    netting, correlation on short samples, risk parity,
                      and the allocator that applies the weights
     l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
@@ -102,7 +102,8 @@ src/tradesys/
   costs.py      the cost model, shared by the backtest and the simulated venue
   accounting.py books, per-strategy attribution, capacity
   pipeline.py   the one path, used by backtest and live alike
-  demo.py       a runnable scenario
+  demo.py       the carry scenario, runnable
+  scenarios.py  one scenario per strategy, each built to exercise it
 risk/limits.yaml    the limit register, loaded with bounds validation
 docs/strategies/    one specification per strategy
 docs/adr/           decision records for every deviation from a SHOULD
@@ -118,7 +119,7 @@ ops/POSTMORTEM.md   the template, which requires a test
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 709 tests
+python -m pytest -q                              # 762 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys doctor       # preflight: python, limits, credentials, clock
@@ -126,7 +127,8 @@ tradesys limits       # which limits are in force, and which file they came from
 tradesys selfcheck    # the machine-checkable Phase 0 gates
 tradesys demo         # funding carry through the pipeline, with the cost model
 tradesys validate     # the full section 11.2 protocol. Exits 1: not validated.
-tradesys viability    # what funding the carry trade would need to clear its gate
+tradesys viability    # the cost arithmetic: what each strategy needs to clear its gate
+tradesys strategies   # run every strategy against its scenario, predicted vs measured
 
 # Binance. Testnet and shadow mode unless told otherwise.
 export BINANCE_API_KEY=... BINANCE_API_SECRET=...   # trading on, WITHDRAWALS OFF
@@ -353,6 +355,68 @@ surfaces.
 3. **The default carry holding limit sat exactly at break-even.** Thirty
    funding intervals is precisely what tier-0 fees need at baseline funding, so
    the default admitted a trade with zero expected profit. It is 21 now.
+
+### Five strategies, and the arithmetic that chose them
+
+The cost gate is a ratio — cost over gross — and a strategy clears it by
+raising the denominator, not by shaving the numerator. `tradesys viability`
+states each strategy's own claim about its economics, written down before it
+was run:
+
+| Strategy | Gross/trade | Cost/trade | Cost share | Verdict |
+|---|---|---|---|---|
+| `trend` — time-series momentum | 1.60% | 0.08% | **5.0%** | clears |
+| `cascade` — liquidation reversion | 0.66% | 0.12% | **18.2%** | clears |
+| `funding_dispersion` — cross-venue | 0.54% | 0.17% | **31.3%** | clears |
+| `funding_carry` — hedged carry | 0.08% | 0.20% | **238%** | fails |
+
+Trend clears by a factor of eight and would still clear at ten times the cost:
+one leg, held for weeks, and when it is right the move is whole percentage
+points. Carry fails for the mirror-image reason — its gross accrues in basis
+points per eight hours against the same fixed round trip — and that conclusion
+is arithmetic, so it needs no backtest and survives every scenario.
+
+Trend and cascade are deliberately opposite: one buys strength, the other buys
+collapse. Their correlation is structurally negative in the moments that
+matter, which is what [SPEC §7.2](SPEC.md) means by diversification that is
+real rather than nominal.
+
+**None of this is evidence that any of them makes money.** That is
+`tradesys validate` against years of archived data, and it exits 1.
+
+### What building the strategies found
+
+**A cost ratio measured on synthetic data measures the scenario.** The same
+carry code measures 68.7% in `tradesys demo` and 11% in `tradesys strategies`
+— a factor of six, same code, two synthetic scenarios. The demo emits one bar
+per eight-hour funding interval, so the second leg of every pair crossed eight
+hours late and price drift was charged as though it were spread. Neither
+number is a property of the strategy ([ADR 0007](docs/adr/0007-legging-cost-is-drift-not-spread.md)).
+
+**Delta-neutrality protects the position, not the entry.** The dispersion
+strategy was built on the argument that both legs could rest, because neither
+chases the other. One scenario falsified it: the legs are on opposite *sides*,
+and in a rising market a resting buy does not fill while a resting sell does.
+The cost model now says one crossing leg, the entry threshold was re-derived
+from the honest cost, and the strategy's annual upper bound fell from 7% to
+about 4%.
+
+**The risk service was sizing every strategy as though it had no stop.**
+`RiskContext.stop_distance_frac` was declared, checked and unit-tested, and
+nothing in the running system populated it — so the per-trade risk check used
+its conservative "whole notional at risk" default for everything, including
+strategies that had stops. It surfaced only when a strategy arrived whose
+sizing was large enough for the 2% limit to bite. A control that is never
+exercised is a control whose wiring nobody has checked.
+
+**A stop is only meaningful at the horizon the position is held for.** "4 ×
+ATR" on hourly data is a 0.18% stop that noise clears in an afternoon; the
+trend strategy stopped out of everything and looked broken. The signal was
+fine, the stop was in the wrong units.
+
+**The look-ahead audit caught my own features lying about their lag**, within a
+minute of being written, in code written by someone who had just finished
+explaining the rule.
 
 ### What connecting to Binance found
 

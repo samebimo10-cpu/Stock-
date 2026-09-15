@@ -321,6 +321,67 @@ not a health metric.
 
 ---
 
+### 4a.6 A cost ratio measured on synthetic data measures the scenario
+
+**The problem.** §11.1 treats the cost ratio as a property of a strategy and
+sets a 40% gate on it. Building three more strategies showed it is not: the
+same carry code measured 68.7% on one synthetic scenario and 11% on another.
+The difference was resolution. The first emits one bar per eight-hour funding
+interval, and a taker fallback can only fire on an event — so the second leg
+of every pair crossed eight hours late, and eight hours of price drift was
+charged as though it were spread.
+
+**The fix.** Two, and the second matters more.
+
+The mechanical one: a multi-leg strategy's fallback deadline is set in minutes,
+against the instrument's drift, not against the strategy's own cadence (ADR
+0007). Deriving an execution parameter from an economic one is how "one
+interval" came to mean eight hours.
+
+The methodological one: **the cost gate must be judged on the arithmetic first
+and the measurement second.** `tradesys viability` computes the ratio from the
+mechanism — expected move, hit rate, fills per round trip — and needs no
+scenario at all. Where the two disagree, the scenario is the suspect. Carry
+fails on the arithmetic because it collects the funding *level*, which is small
+against a fixed round trip, and that conclusion survives every scenario
+precisely because it does not come from one.
+
+**The general point:** a backtest measures the data it was given. That is
+obvious for returns and it is just as true for costs, which is where it is
+routinely forgotten because costs feel like a property of the venue.
+
+### 4a.7 A stop distance is only meaningful at the holding horizon
+
+**The problem.** "Stop at four ATR" is a standard formulation and it is
+under-specified: ATR measured over what? On hourly observations, four ATR came
+to 0.18%, which noise clears within an afternoon. A trend strategy holding for
+weeks stopped out of every position and looked like it did not work.
+
+**The fix.** Square-root-of-time scaling to the holding horizon, and a
+docstring saying that the stop is a disaster stop for gaps rather than a
+trading stop. Annex D should state the rule: **a risk parameter expressed in
+volatility units must name the horizon its volatility is measured over**, or it
+is a different parameter on every data frequency.
+
+### 4a.8 A declared control that nothing populates is not a control
+
+**The problem.** `RiskContext.stop_distance_frac` feeds the per-trade risk
+check, which is `notional x stop_distance / equity`. It was declared, the check
+read it, and a unit test exercised it. Nothing in the running system ever
+populated it, so every strategy was sized against the conservative default of
+"the whole notional is at risk" — including strategies that had stops.
+
+It was invisible for as long as every strategy happened to size well under the
+2% limit anyway. The first strategy whose sizing was large enough for the limit
+to bite found it immediately.
+
+**The fix.** Strategies declare a stop distance through an optional method; the
+pipeline collects them into the context each event. The general rule is worth
+more: **a control that is never exercised is a control whose wiring nobody has
+checked**, and a unit test on the control itself does not exercise the wiring.
+
+---
+
 ---
 
 ## 5. One thing v2.0 does not fix

@@ -645,6 +645,19 @@ def cmd_viability(args) -> int:
         print(f"    {label:<26} {float(rate) * 100:8.4f}%  "
               f"{float(multiple):13.2f}x  {verdict}")
 
+    print("\n  Every strategy in this repository, against the same gate\n")
+    print("  Each line is the strategy's OWN claim about its economics, written")
+    print("  down before it was run. Where a measurement contradicts one, the")
+    print("  claim is what gets corrected - and the correction is recorded,")
+    print("  because a prior quietly edited to match a result was never a prior.\n")
+    from .research.viability import STRATEGY_PROFILES, assess
+
+    for profile in STRATEGY_PROFILES:
+        print(f"    {assess(profile)}")
+    print("\n    net/yr is an UPPER bound: it assumes the notional is deployed")
+    print("    on every trip. It is quoted so a strategy that fails even the")
+    print("    upper bound needs no further analysis.")
+
     print("\n  What this says")
     print(f"    At tier 0 the trade needs {float(tier0.required_rate) * 100:.4f}% "
           f"per 8h sustained for {hold / 3:.0f} days")
@@ -835,6 +848,78 @@ def _check_clock(production: bool) -> Tuple[bool, str]:
         + ("" if drift_ms < 100 else " - the startup gate will halt on this"))
 
 
+def cmd_strategies(args) -> int:
+    """Run every strategy against its own scenario and report predicted vs measured.
+
+    The two columns are the point. A prediction that matches a measurement is
+    weak evidence that both are right; a prediction that does not match is
+    strong evidence that one of them is wrong, and finding out which is the
+    work. Printing only the measurement would hide the disagreement, and the
+    disagreement is the only part that teaches anything.
+    """
+    from .research.backtest import Backtester
+    from .research.registry import TrialRegistry
+    from .research.viability import STRATEGY_PROFILES, assess
+    from .scenarios import (
+        build_carry_pipeline, build_cascade_pipeline, build_dispersion_pipeline,
+        build_trend_pipeline, carry_events, cascade_events, dispersion_events,
+        trend_events,
+    )
+
+    runs = (
+        ("trend", build_trend_pipeline, trend_events),
+        ("cascade", build_cascade_pipeline, cascade_events),
+        ("funding_dispersion", build_dispersion_pipeline, dispersion_events),
+        ("funding_carry", build_carry_pipeline, carry_events),
+    )
+    profiles = {p.name: p for p in STRATEGY_PROFILES}
+    registry = TrialRegistry()
+
+    print("  Four strategies, each against a scenario built to exercise it.\n")
+    print(f"    {'strategy':<20} {'trades':>7} {'gross':>9} {'net':>9} "
+          f"{'cost share':>11} {'predicted':>10}")
+    rows = []
+    for name, factory, events_fn in runs:
+        pipeline, adapters, _ = factory(True)
+        result = asyncio.run(
+            Backtester(pipeline, adapters, registry, strategy_name=name)
+            .run(events_fn()))
+        share = result.cost_ratio
+        predicted = assess(profiles[name]).cost_share if name in profiles else None
+        rows.append((name, result, share, predicted))
+        share_text = f"{float(share) * 100:9.1f}%" if share is not None else "      n/a"
+        pred_text = f"{float(predicted) * 100:8.1f}%" if predicted is not None else "     n/a"
+        print(f"    {name:<20} {result.fills // 2:>7} "
+              f"{float(result.gross_pnl):>9.2f} {float(result.net_pnl):>9.2f} "
+              f"{share_text:>11} {pred_text:>10}")
+
+    print("\n  What these numbers are, and are not\n")
+    print("    They are NOT evidence that any of these strategies makes money.")
+    print("    The scenarios are synthetic. A synthetic scenario contains")
+    print("    exactly the behaviour its author put there, so a strategy that")
+    print("    profits from it has demonstrated that the code does what the")
+    print("    specification says - nothing more.")
+    print()
+    print("    They ARE evidence about cost structure, which is the one thing")
+    print("    a synthetic run can establish honestly: the fills are real")
+    print("    fills, priced through the same cost model the backtester and")
+    print("    the simulated venue share.")
+    print()
+    print("    And even that has a limit, discovered the hard way. The carry")
+    print("    strategy measures 68.7% in `tradesys demo` and 11% here. Same")
+    print("    strategy, same code, two synthetic scenarios, a factor of six")
+    print("    apart - because the demo emits one bar per eight-hour funding")
+    print("    interval, so the second leg of every pair crossed eight hours")
+    print("    late and price drift was charged as though it were spread.")
+    print()
+    print("    The lesson is worth more than either number: **a cost ratio")
+    print("    measured on synthetic data measures the scenario.** Trust the")
+    print("    arithmetic in `tradesys viability` over any of it, and trust")
+    print("    neither over `tradesys validate` against real archived data -")
+    print("    which exits 1, because there is none.")
+    return 0
+
+
 def cmd_verify_audit(args) -> int:
     from .layers.l7_observability.audit import AuditLog, ChainBroken
 
@@ -877,6 +962,9 @@ def main(argv=None) -> int:
     li2.add_argument("--export", metavar="PATH",
                      help="write an editable limit register to PATH")
 
+    sub.add_parser("strategies",
+                   help="run every strategy against its scenario, predicted vs measured")
+
     do = sub.add_parser("doctor", help="preflight: everything that must be true before connecting")
     do.add_argument("--network", action="store_true",
                     help="also check the venue is reachable and the clock is close")
@@ -907,7 +995,7 @@ def main(argv=None) -> int:
             "session": cmd_session, "validate": cmd_validate,
             "verify-audit": cmd_verify_audit, "live": cmd_live,
             "viability": cmd_viability, "limits": cmd_limits,
-            "doctor": cmd_doctor}[args.command](args)
+            "doctor": cmd_doctor, "strategies": cmd_strategies}[args.command](args)
 
 
 if __name__ == "__main__":

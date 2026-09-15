@@ -34,6 +34,10 @@ __all__ = [
     "CostStructure",
     "CarryRequirement",
     "carry_requirement",
+    "EdgeProfile",
+    "Viability",
+    "assess",
+    "STRATEGY_PROFILES",
     "BINANCE_SPOT_TIERS",
     "BINANCE_FUTURES_TIERS",
     "OBSERVED_FUNDING",
@@ -192,3 +196,180 @@ def survey(tiers: Sequence[Tuple[str, Dec, Dec]] = BINANCE_FUTURES_TIERS,
             CostStructure(maker, taker, crossing_legs=crossing_legs, label=label),
             hold_intervals=hold_intervals, observed_rate=observed_rate))
     return out
+
+
+# --------------------------------------------------------------------------
+# The general case
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EdgeProfile:
+    """One strategy's claim about its own economics, stated so it can be checked.
+
+    Writing it down in this shape is most of the value. A strategy whose author
+    cannot say what the average winner is, how often it wins, and how many
+    fills a round trip takes has not got a strategy - it has a backtest. And
+    the three numbers together decide whether it can ever clear the cost gate,
+    before a single line of it is run.
+
+    The numbers are **priors, not results**. They come from the mechanism the
+    strategy claims to exploit, and the point of writing them down first is
+    that the backtest then either confirms them or contradicts them - either of
+    which is information. A prior written after the backtest is not a prior.
+    """
+
+    name: str
+    #: Average absolute move captured on a winning trade, as a fraction.
+    win_move: Dec
+    #: Average absolute move given up on a loser, as a fraction. For a stopped
+    #: strategy this is roughly the stop distance.
+    loss_move: Dec
+    #: Fraction of trades that win. Trend following is famously around 0.35,
+    #: and a strategy claiming 0.8 needs to explain why.
+    hit_rate: Dec
+    #: Fills per complete round trip. Two for a single leg, four for a pair.
+    #: This is the number most often halved by accident.
+    fills: int
+    #: Legs that must cross the spread rather than rest.
+    crossing_legs: int
+    #: Round trips per year. Capacity and the cost ratio pull in opposite
+    #: directions through this term.
+    trips_per_year: int
+    #: Conditional drift after a resting fill, in basis points. Per profile
+    #: rather than global, because it genuinely differs by strategy and
+    #: burying it in a default hides the single most arguable number here.
+    #:
+    #: 2bp is the right order for a directional maker. A **delta-neutral pair**
+    #: is different in kind, not degree: adverse selection is directional
+    #: drift, and a position with no delta is not exposed to it. What remains
+    #: is drift in the *basis* between the two legs, which is roughly an order
+    #: of magnitude smaller. That is a structural argument rather than an
+    #: optimistic one, and it is stated here so it can be attacked.
+    adverse_bps: Dec = dec("2")
+    note: str = ""
+
+    @property
+    def expected_gross(self) -> Dec:
+        """Expected move per trade before costs. Can be negative, and should be
+        allowed to be: a profile whose arithmetic does not work is worth seeing
+        rather than worth rejecting at construction."""
+        return (self.hit_rate * self.win_move
+                - (dec(1) - self.hit_rate) * self.loss_move)
+
+
+@dataclass(frozen=True)
+class Viability:
+    profile: EdgeProfile
+    structure: CostStructure
+    round_trip_cost: Dec
+    expected_gross: Dec
+
+    @property
+    def cost_share(self) -> Optional[Dec]:
+        """Costs as a fraction of gross. ``None`` when gross is not positive,
+        because a ratio against a negative denominator is not a cost share, it
+        is a strategy that loses money before costs."""
+        if self.expected_gross <= 0:
+            return None
+        return self.round_trip_cost / self.expected_gross
+
+    @property
+    def clears(self) -> bool:
+        share = self.cost_share
+        return share is not None and share <= COST_GATE
+
+    @property
+    def net_per_trade(self) -> Dec:
+        return self.expected_gross - self.round_trip_cost
+
+    @property
+    def net_annual(self) -> Dec:
+        """Net return per unit of notional deployed per trade, per year.
+
+        Not a return on capital: a strategy trading 20 times a year at 1% of
+        notional each is not making 20% on equity unless it is fully deployed
+        every time, which it is not. It is an upper bound, and it is quoted
+        because a strategy that fails even the upper bound needs no further
+        analysis.
+        """
+        return self.net_per_trade * dec(self.profile.trips_per_year)
+
+    def __str__(self) -> str:
+        share = self.cost_share
+        share_text = f"{float(share) * 100:5.1f}%" if share is not None else "  n/a"
+        verdict = "CLEARS" if self.clears else ("fails" if share is not None
+                                                else "NEGATIVE EDGE")
+        return (f"{self.profile.name:<24} "
+                f"gross {float(self.expected_gross) * 100:6.3f}%  "
+                f"cost {float(self.round_trip_cost) * 100:5.3f}%  "
+                f"share {share_text}  "
+                f"net/yr {float(self.net_annual) * 100:7.1f}%  {verdict}")
+
+
+def assess(profile: EdgeProfile, maker: Dec = dec("0.0002"),
+           taker: Dec = dec("0.0005"), slippage_bps: Dec = dec("1")) -> Viability:
+    """Cost share of gross for any strategy, from its own stated economics.
+
+    >>> profile = EdgeProfile("demo", dec("0.12"), dec("0.04"), dec("0.35"),
+    ...                       fills=2, crossing_legs=0, trips_per_year=12)
+    >>> assess(profile).clears
+    True
+    >>> round(float(assess(profile).cost_share), 3)
+    0.05
+    """
+    structure = CostStructure(
+        maker_rate=maker, taker_rate=taker,
+        crossing_legs=profile.crossing_legs,
+        slippage_bps=slippage_bps, adverse_selection_bps=profile.adverse_bps,
+        label=profile.name,
+    )
+    crossing_fills = min(profile.crossing_legs * 2, profile.fills)
+    resting_fills = profile.fills - crossing_fills
+    cost = (crossing_fills * (taker + slippage_bps / dec(10_000))
+            + resting_fills * (maker + profile.adverse_bps / dec(10_000)))
+    return Viability(profile, structure, cost, profile.expected_gross)
+
+
+#: What each strategy in this repository claims about itself. Committed, dated
+#: by the git history, and compared against measured results in each strategy's
+#: specification. Where a measurement contradicts one of these, the profile is
+#: what gets corrected - and the correction is recorded, because a prior
+#: quietly edited to match a result was never a prior.
+STRATEGY_PROFILES: Tuple[EdgeProfile, ...] = (
+    EdgeProfile(
+        "trend", win_move=dec("0.12"), loss_move=dec("0.04"), hit_rate=dec("0.35"),
+        fills=2, crossing_legs=0, trips_per_year=14,
+        note="Wins rarely and large. The hit rate is the documented one for "
+             "time-series momentum across asset classes; claiming better needs "
+             "an argument. One leg, resting entry, stop crosses.",
+    ),
+    EdgeProfile(
+        "cascade", win_move=dec("0.018"), loss_move=dec("0.012"), hit_rate=dec("0.62"),
+        fills=2, crossing_legs=1, trips_per_year=30,
+        note="Wins often and small, and pays the spread on purpose: the premise "
+             "is that liquidity vanished, so an order that waits for a better "
+             "price waits for the edge to close.",
+    ),
+    EdgeProfile(
+        "funding_dispersion", win_move=dec("0.0084"), loss_move=dec("0.0015"),
+        hit_rate=dec("0.70"), fills=4, crossing_legs=1, trips_per_year=10,
+        adverse_bps=dec("0.5"),
+        note="Delta-neutral, so adverse selection is on the basis rather than "
+             "the price - but ONE LEG CROSSES. The first profile said zero, on "
+             "the argument that neither leg chases the other; the measurement "
+             "showed a resting buy does not fill in a rising market whatever "
+             "the other leg is doing. Threshold and trip count were both "
+             "re-derived from the corrected cost, which is why the trips fell "
+             "from 26 to 10: a 0.07% differential is rarer than a 0.05% one.",
+    ),
+    EdgeProfile(
+        "funding_carry", win_move=dec("0.0021"), loss_move=dec("0.0015"),
+        hit_rate=dec("0.65"), fills=4, crossing_legs=1, trips_per_year=18,
+        note="The one that does not clear, at baseline funding. The 69% "
+             "measured in the demo is the SPIKE case - funding at 0.09% per "
+             "interval - and this profile is the ordinary one, which is worse. "
+             "Gross is the funding LEVEL over the hold, and one leg must cross "
+             "into a trending market (ADR 0004).",
+    ),
+)

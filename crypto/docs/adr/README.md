@@ -18,3 +18,4 @@ once believed something is part of the history.
 | [0004](0004-hedge-crosses.md) | The hedge leg crosses rather than only resting | Accepted |
 | [0005](0005-inconclusive-is-not-a-pass.md) | Validation checks may return inconclusive | Accepted |
 | [0006](0006-reconnection-is-the-callers-job.md) | Reconnection is the caller's job, and the book is always discarded | Accepted |
+| [0007](0007-legging-cost-is-drift-not-spread.md) | A two-leg trade's cost is drift, not spread | Accepted |

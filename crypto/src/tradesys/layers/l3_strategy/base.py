@@ -9,7 +9,8 @@ from typing import Optional, Protocol, Sequence, runtime_checkable
 from ...core.events import FeatureSnapshot, Signal
 from ...core.types import Decimal as Dec, Nanos, dec
 
-__all__ = ["StrategyState", "Strategy", "StrategyHealth"]
+__all__ = ["StrategyState", "Strategy", "StrategyHealth",
+           "declared_stop_distance"]
 
 
 class StrategyState:
@@ -70,3 +71,37 @@ class Strategy(Protocol):
     def parameters(self) -> dict:
         """Current parameters, for the trial registry and the audit log."""
         ...
+
+
+def declared_stop_distance(strategy) -> Optional[Dec]:
+    """How much of a position's notional is at risk before its stop fires.
+
+    Optional on purpose, and read through this helper rather than required on
+    the protocol, so a strategy with no stop simply does not implement it.
+
+    What is **not** optional is the consequence. The risk service's per-trade
+    risk check is ``notional x stop_distance / equity``, and an undeclared stop
+    distance defaults to 1.0 - the whole notional at risk. That default is
+    correct and deliberately punitive: a strategy that has not said where it
+    gets out has not established that it gets out.
+
+    This helper exists because the connection between the two was missing.
+    ``RiskContext.stop_distance_frac`` was declared, checked, and unit-tested,
+    and nothing in the running system ever populated it - so every strategy was
+    sized as though it had no stop, including the ones that had one. It
+    surfaced only when a strategy came along whose sizing was large enough for
+    the 2% limit to bite. A control that is never exercised is a control whose
+    wiring nobody has checked.
+    """
+    getter = getattr(strategy, "stop_distance", None)
+    if getter is None:
+        return None
+    try:
+        value = getter()
+    except Exception:                                          # noqa: BLE001
+        return None
+    if value is None or value <= 0 or value > 1:
+        # A stop distance above 1 is not a stop, and a negative one is a bug.
+        # Fall back to the conservative default rather than trusting it.
+        return None
+    return value
