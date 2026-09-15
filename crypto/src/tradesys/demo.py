@@ -25,6 +25,7 @@ from .core.types import Decimal as Dec, dec
 from .costs import CostModel, FeeModel
 from .layers.l3_strategy.base import StrategyState
 from .layers.l3_strategy.funding_carry import FundingCarry, FundingCarryParams
+from .config import load_limits
 from .layers.l5_risk.limits import LimitRegister
 from .layers.l5_risk.service import RiskService
 from .layers.l5_risk.state import PortfolioState
@@ -47,54 +48,14 @@ FILTERS = {SYMBOL: SymbolFilter(SYMBOL, dec("0.01"), dec("0.00001"), dec("10"))}
 
 
 def default_limits() -> LimitRegister:
-    """Load ``risk/limits.yaml`` from the repository, or fall back to defaults.
+    """The limit register, from wherever :mod:`tradesys.config` finds it.
 
-    The fallback matters for an installed package, where the YAML file is not
-    on disk. It carries the same values, so a demo run behaves identically
-    either way.
+    Re-exported here because the demo and the tests both reach for it, but the
+    search order lives in one place - and ``tradesys limits`` prints what that
+    search actually resolved to, so nobody has to infer it.
     """
-    from pathlib import Path
+    return load_limits()
 
-    candidate = Path(__file__).resolve().parents[2] / "risk" / "limits.yaml"
-    if candidate.exists():
-        return LimitRegister.from_yaml(candidate)
-    return LimitRegister.from_mapping(_FALLBACK_LIMITS)
-
-
-_FALLBACK_LIMITS = {
-    "schema_version": 1,
-    "equity_definition": "cash_plus_unrealised_plus_accrued",
-    "limits": {
-        "per_trade_risk": {"value": 0.02, "action": "reject"},
-        "daily_loss": {"value": 0.03, "action": "flatten_and_halt"},
-        "weekly_loss": {"value": 0.07, "action": "flatten_and_halt"},
-        "drawdown_amber": {"value": 0.06, "action": "alert"},
-        "drawdown_soft": {"value": 0.08, "action": "halve_allocations"},
-        "drawdown_hard": {"value": 0.12, "action": "full_stop"},
-        "gross_exposure": {"value": 3.0, "action": "reject_new"},
-        "asset_concentration": {"value": 0.25, "action": "reject"},
-        "venue_concentration": {"value": 0.40, "action": "alert_and_sweep"},
-        "liquidation_distance": {"value": 0.25, "action": "auto_deleverage"},
-        "single_order_equity_frac": {"value": 0.02, "action": "reject"},
-        "single_order_median_mult": {"value": 5.0, "action": "reject"},
-        "order_rate": {"value": 0.7, "action": "throttle"},
-        "consecutive_rejects": {"value": 5, "action": "disable_strategy"},
-        "backtest_divergence_z": {"value": -2.0, "action": "disable_strategy"},
-        "feed_staleness_s": {"value": 30.0, "action": "reject"},
-        "clock_drift_ms": {"value": 100.0, "action": "halt"},
-    },
-    "bounds": {
-        "per_trade_risk": [0.0001, 0.05], "daily_loss": [0.005, 0.10],
-        "weekly_loss": [0.01, 0.20], "drawdown_amber": [0.01, 0.20],
-        "drawdown_soft": [0.02, 0.20], "drawdown_hard": [0.05, 0.25],
-        "gross_exposure": [1.0, 5.0], "asset_concentration": [0.05, 1.0],
-        "venue_concentration": [0.10, 1.0], "liquidation_distance": [0.05, 0.90],
-        "single_order_equity_frac": [0.0001, 0.10], "single_order_median_mult": [1.0, 50.0],
-        "order_rate": [0.1, 0.95], "consecutive_rejects": [1, 50],
-        "backtest_divergence_z": [-5.0, -1.0], "feed_staleness_s": [1.0, 300.0],
-        "clock_drift_ms": [10.0, 1000.0],
-    },
-}
 
 
 def _emit(schedule: List[str], quiet_rate: str, spike_rate: str,

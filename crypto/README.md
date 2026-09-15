@@ -1,11 +1,22 @@
-# Crypto trading system — engineering specification
+# Crypto trading system — specification and implementation
 
-This directory holds the build specification for an institutional-grade crypto trading system.
-It is **documentation, not code**. No bot is built here yet; this is the frame the bot gets built
-against.
+The build specification for an institutional-grade crypto trading system, and
+the system built to it. `SPEC.md` and its annexes are the frame;
+`src/tradesys/` is the code, and it connects to Binance.
 
 > Nothing here is investment advice. Capital deployed in a system built to this specification can
 > be lost entirely, including through defects in the system itself.
+
+**[QUICKSTART.md](QUICKSTART.md)** — ten minutes from a clone to a system
+connected to Binance testnet, generating orders and sending none of them.
+
+**It is not ready for real money, and the blockers are specific.**
+`tradesys validate` exits 1 — no strategy has passed the §11.2 protocol. The
+carry strategy spends about 69% of its gross on costs against a 40% gate, and
+`tradesys viability` says exactly what would have to change. §17.5's first
+three steps take six to twelve weeks and have not been run. The engineering is
+finished; the research is not, and the first does not substitute for the
+second.
 
 ## Start here
 
@@ -86,6 +97,8 @@ src/tradesys/
   research/     trial registry, validation arithmetic, backtester, harness,
                 replay from the audit log, and the viability arithmetic that
                 says what a strategy would need in order to clear its gate
+  config.py     where limits come from, in a documented search order, so
+                "which limits are in force?" is answerable in one command
   costs.py      the cost model, shared by the backtest and the simulated venue
   accounting.py books, per-strategy attribution, capacity
   pipeline.py   the one path, used by backtest and live alike
@@ -105,9 +118,11 @@ ops/POSTMORTEM.md   the template, which requires a test
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 688 tests
+python -m pytest -q                              # 709 tests
 python -m pytest --doctest-modules src/tradesys -q
 
+tradesys doctor       # preflight: python, limits, credentials, clock
+tradesys limits       # which limits are in force, and which file they came from
 tradesys selfcheck    # the machine-checkable Phase 0 gates
 tradesys demo         # funding carry through the pipeline, with the cost model
 tradesys validate     # the full section 11.2 protocol. Exits 1: not validated.

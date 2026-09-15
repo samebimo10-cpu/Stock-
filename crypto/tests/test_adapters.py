@@ -208,3 +208,34 @@ def test_throttle_and_halt_thresholds():
     assert RateLimitState(4500, 6000).should_throttle           # 75%
     assert not RateLimitState(4500, 6000).should_halt_non_critical
     assert RateLimitState(5500, 6000).should_halt_non_critical  # 92%
+
+
+def test_a_failed_read_is_not_reported_as_an_unknown_order():
+    """"Order status unknown" on a failed clock check sends an operator hunting
+    for an order that never existed - during an incident, which is the only
+    time anyone reads that line."""
+    import pytest
+
+    from tradesys.adapters.binance import UrllibTransport
+    from tradesys.core.errors import UnknownState, VenueDown
+
+    transport = UrllibTransport(timeout=0.001)
+    with pytest.raises(VenueDown):
+        transport.request("GET", "http://127.0.0.1:1/api/v3/time", {})
+
+
+def test_a_failed_write_is_reported_as_an_unknown_order():
+    """The request may have arrived and been acted on before the socket died.
+
+    This is the QUERY trap of SPEC section 9.2: the one thing that must never
+    happen is sending it again.
+    """
+    import pytest
+
+    from tradesys.adapters.binance import UrllibTransport
+    from tradesys.core.errors import UnknownState
+
+    transport = UrllibTransport(timeout=0.001)
+    for method in ("POST", "PUT", "DELETE"):
+        with pytest.raises(UnknownState):
+            transport.request(method, "http://127.0.0.1:1/api/v3/order", {})

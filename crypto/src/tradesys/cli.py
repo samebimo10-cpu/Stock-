@@ -1,20 +1,42 @@
 """Command line entry point.
 
-Three commands, each corresponding to something the specification says must be
-verifiable rather than asserted:
+Every command corresponds to something the specification says must be
+verifiable rather than asserted, or to a question an operator has to be able to
+answer instantly.
 
-* ``selfcheck`` - the Phase 0 gates that can be checked against the code
-  itself (Annex F). Exits non-zero when one fails, because a requirement
-  nobody can fail automatically is a requirement that gets waived at 2am.
-* ``demo`` - runs the funding-carry strategy through the real pipeline against
-  the simulator, so the system can be seen working.
+**Prove it**
+
+* ``selfcheck`` - the Phase 0 gates checkable against the code itself (Annex
+  F). Exits non-zero when one fails, because a requirement nobody can fail
+  automatically is a requirement that gets waived at 2am.
+* ``chaos`` - injects each failure SPEC section 8.5 ranks above strategy risk
+  and asserts the guarantee holds.
 * ``verify-audit`` - re-verifies a hash-chained audit log.
+
+**See it work, offline**
+
+* ``demo`` - the funding-carry strategy through the real pipeline against the
+  simulator.
+* ``session`` - the same, with the startup gate, reconciliation and the
+  dead-man's switch.
+* ``validate`` - the full section 11.2 protocol. Exits 1: nothing is validated.
+* ``viability`` - what the market would have to pay for the strategy to clear
+  its own cost gate.
+
+**Operate it**
+
+* ``doctor`` - everything that must be true before anything connects.
+* ``limits`` - which limits are in force, and which file they came from. The
+  second half is the point: a system that silently falls back to built-in
+  defaults will trade all week on limits nobody chose.
+* ``live`` - connect to Binance. Testnet and shadow mode unless told otherwise.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import sys
 from pathlib import Path
 from dataclasses import replace
@@ -49,21 +71,30 @@ def _check_import_rules() -> Tuple[bool, str]:
 
 
 def _check_limits_load() -> Tuple[bool, str]:
-    from .layers.l5_risk.limits import LimitRegister
+    """The limits actually in force, wherever they came from.
+
+    Reading ``ROOT / "risk" / "limits.yaml"`` directly, as this used to, made
+    three of the fifteen gates fail for anyone who installed the package rather
+    than working in the checkout - and selfcheck is the first thing the
+    quickstart tells them to run. A gate that fails because of where the code
+    was installed teaches people to ignore gate failures.
+    """
+    from .config import find_limits, load_limits
 
     try:
-        reg = LimitRegister.from_yaml(ROOT / "risk" / "limits.yaml")
-    except Exception as e:
+        source = find_limits()
+        reg = load_limits()
+    except Exception as e:                                     # noqa: BLE001
         return False, f"{type(e).__name__}: {e}"
-    return True, f"{len(reg.names())} limits, bounds validated, ladder ordered"
+    where = "built-in" if source.is_built_in else str(source.path)
+    return True, f"{len(reg.names())} limits, bounds validated, ladder ordered ({where})"
 
 
 def _check_fat_finger_rejected() -> Tuple[bool, str]:
-    import yaml
-
+    from .config import BUILT_IN_LIMITS
     from .layers.l5_risk.limits import LimitError, LimitRegister
 
-    payload = yaml.safe_load((ROOT / "risk" / "limits.yaml").read_text())
+    payload = copy.deepcopy(dict(BUILT_IN_LIMITS))
     payload["limits"]["per_trade_risk"]["value"] = 0.2
     try:
         LimitRegister.from_mapping(payload)
@@ -88,16 +119,16 @@ def _check_query_never_orders() -> Tuple[bool, str]:
 
 
 def _check_risk_never_enlarges() -> Tuple[bool, str]:
+    from .config import load_limits
     from .core.events import OrderIntent
     from .core.types import dec
-    from .layers.l5_risk.limits import LimitRegister
     from .layers.l5_risk.service import RiskContext, RiskService
     from .layers.l5_risk.state import PortfolioState
 
     state = PortfolioState(cash=dec("100000"))
     state.median_order_notional = dec("1000")
     state.mark()
-    svc = RiskService(LimitRegister.from_yaml(ROOT / "risk" / "limits.yaml"), state)
+    svc = RiskService(load_limits(), state)
     now = 1_700_000_000_000_000_000
     for qty in ("0.001", "0.01", "0.05", "0.5", "5"):
         intent = OrderIntent(correlation_id="c", emitted_at=now, source="cli",
@@ -629,6 +660,181 @@ def cmd_viability(args) -> int:
     return 0
 
 
+def cmd_limits(args) -> int:
+    """Print the limits actually in force, and the file they came from.
+
+    The second half is the point. A system that silently falls back to
+    built-in defaults when a file is missing will trade all week on limits
+    nobody chose, and the first sign of it is a position larger than anyone
+    expected.
+    """
+    from .config import LIMITS_ENV, export_limits, find_limits, load_limits
+
+    if args.export:
+        try:
+            written = export_limits(args.export)
+        except FileExistsError as e:
+            print(f"REFUSED: {e}")
+            return 2
+        print(f"  wrote {written}")
+        print(f"  point {LIMITS_ENV} at it, then `tradesys limits` to confirm "
+              "it is the one in force.")
+        return 0
+
+    try:
+        source = find_limits(args.path)
+        register = load_limits(args.path)
+    except FileNotFoundError as e:
+        print(f"REFUSED: {e}")
+        return 2
+    except Exception as e:                                     # noqa: BLE001
+        print(f"REFUSED: the limit register did not load: {e}")
+        return 2
+
+    print(f"  source           {source}")
+    if source.is_built_in:
+        print("                   No limits file was found. These are the built-in")
+        print("                   values. That is survivable but it is not a choice")
+        print("                   anyone made - run `tradesys limits --export` and")
+        print(f"                   set {LIMITS_ENV}.")
+    print(f"  equity           {register.equity_definition}")
+    print()
+    snapshot = register.snapshot()
+    print(f"    {'limit':<28} {'value':>10}   action")
+    for name in sorted(snapshot):
+        limit = register.limit(name)
+        low, high = limit.bounds if limit.bounds else ("", "")
+        bound = f"[{low}, {high}]" if limit.bounds else ""
+        print(f"    {name:<28} {str(limit.value):>10}   {limit.action:<20} {bound}")
+    print(f"\n  {len(snapshot)} limits, every one bounded and validated on load.")
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    """Everything that must be true before anything connects.
+
+    Written as a command rather than a checklist in a runbook because a
+    checklist gets skipped and a command gets run. Each check says what it
+    found, not merely pass or fail - "clock drift 4.2ms" is actionable and
+    "clock: OK" is not.
+    """
+    import os
+    import sys as _sys
+
+    from .config import LIMITS_ENV, find_limits, load_limits
+
+    problems: List[str] = []
+    warnings: List[str] = []
+
+    def report(name: str, ok: bool, detail: str, fatal: bool = True) -> None:
+        mark = "ok  " if ok else ("FAIL" if fatal else "warn")
+        print(f"  [{mark}] {name:<22} {detail}")
+        if not ok:
+            (problems if fatal else warnings).append(f"{name}: {detail}")
+
+    print("  Preflight\n")
+
+    version = ".".join(str(n) for n in _sys.version_info[:3])
+    report("python", _sys.version_info >= (3, 10), f"{version} (3.10+ required)")
+
+    try:
+        import yaml                                            # noqa: F401
+        report("pyyaml", True, "present")
+    except ImportError:
+        report("pyyaml", False, "missing - pip install pyyaml")
+
+    try:
+        source = find_limits()
+        register = load_limits()
+        report("limits", not source.is_built_in,
+               f"{source}, {len(register.snapshot())} limits",
+               fatal=False)
+        if source.is_built_in:
+            warnings.append(
+                f"no limits file: run `tradesys limits --export risk/limits.yaml` "
+                f"and set {LIMITS_ENV}")
+    except Exception as e:                                     # noqa: BLE001
+        report("limits", False, str(e))
+
+    key = os.environ.get("BINANCE_API_KEY", "")
+    secret = os.environ.get("BINANCE_API_SECRET", "")
+    have_creds = bool(key and secret)
+    report("credentials", have_creds,
+           f"BINANCE_API_KEY set ({len(key)} chars), secret set" if have_creds
+           else "BINANCE_API_KEY / BINANCE_API_SECRET not set "
+                "(only read_only mode works without them)",
+           fatal=False)
+    if key and not key.startswith(("test", "TEST")) and not args.production:
+        warnings.append(
+            "the key does not look like a testnet key, and you have not passed "
+            "--production. Check you are pointing where you think you are.")
+
+    # Never print a secret, not even a prefix. A truncated secret in a terminal
+    # is still a secret in a scrollback buffer and in whatever captured it.
+    if secret and secret in os.environ.get("PS1", ""):
+        problems.append("the API secret appears in your shell prompt")
+
+    if args.network:
+        ok, detail = _check_venue(args.production)
+        report("venue", ok, detail)
+        if ok:
+            drift_ok, drift_detail = _check_clock(args.production)
+            report("clock", drift_ok, drift_detail)
+    else:
+        print("  [skip] venue                 pass --network to check "
+              "reachability and clock drift")
+
+    print()
+    for warning in warnings:
+        print(f"  warn: {warning}")
+    if problems:
+        print(f"\n  RESULT: NOT READY ({len(problems)} blocking)")
+        for problem in problems:
+            print(f"    {problem}")
+        return 1
+    print("  RESULT: ready" + (" (with warnings)" if warnings else ""))
+    print("\n  Ready means the machine is ready. It says nothing about whether")
+    print("  the strategy should trade - that is `tradesys validate`, which")
+    print("  exits 1 today, and the section 15 gates agreed in writing.")
+    return 0
+
+
+def _check_venue(production: bool) -> Tuple[bool, str]:
+    import time as _time
+
+    from .adapters.binance import BinanceAdapter, BinanceEndpoints
+
+    endpoints = (BinanceEndpoints.spot_production() if production
+                 else BinanceEndpoints.spot_testnet())
+    adapter = BinanceAdapter(endpoints)
+    started = _time.time()
+    try:
+        asyncio.run(adapter.server_time())
+    except Exception as e:                                     # noqa: BLE001
+        return False, f"{endpoints.rest} unreachable: {e}"
+    return True, f"{endpoints.rest} reachable in {(_time.time() - started) * 1000:.0f}ms"
+
+
+def _check_clock(production: bool) -> Tuple[bool, str]:
+    from .adapters.binance import BinanceAdapter, BinanceEndpoints
+    from .core.types import now_ns
+
+    endpoints = (BinanceEndpoints.spot_production() if production
+                 else BinanceEndpoints.spot_testnet())
+    adapter = BinanceAdapter(endpoints)
+    try:
+        venue_ns = asyncio.run(adapter.server_time())
+    except Exception as e:                                     # noqa: BLE001
+        return False, f"could not read venue time: {e}"
+    drift_ms = abs(venue_ns - now_ns()) / 1e6
+    # 100ms is where the venue rejects signed requests outright, so trading on
+    # is not an option anyway. 50ms is where it is worth fixing.
+    return drift_ms < 100.0, (
+        f"drift {drift_ms:.1f}ms"
+        + ("" if drift_ms < 50 else " - above 50ms, check NTP")
+        + ("" if drift_ms < 100 else " - the startup gate will halt on this"))
+
+
 def cmd_verify_audit(args) -> int:
     from .layers.l7_observability.audit import AuditLog, ChainBroken
 
@@ -666,6 +872,17 @@ def main(argv=None) -> int:
     vi.add_argument("--hold", type=int, default=21,
                     help="holding period in funding intervals (default 21, seven days)")
 
+    li2 = sub.add_parser("limits", help="print the limits in force and where they came from")
+    li2.add_argument("--path", help="load this file instead of searching")
+    li2.add_argument("--export", metavar="PATH",
+                     help="write an editable limit register to PATH")
+
+    do = sub.add_parser("doctor", help="preflight: everything that must be true before connecting")
+    do.add_argument("--network", action="store_true",
+                    help="also check the venue is reachable and the clock is close")
+    do.add_argument("--production", action="store_true",
+                    help="check production endpoints rather than testnet")
+
     li = sub.add_parser("live", help="connect to Binance (testnet + shadow by default)")
     li.add_argument("--mode", default="shadow",
                     choices=["read_only", "shadow", "paper", "live"],
@@ -689,7 +906,8 @@ def main(argv=None) -> int:
     return {"selfcheck": cmd_selfcheck, "demo": cmd_demo, "chaos": cmd_chaos,
             "session": cmd_session, "validate": cmd_validate,
             "verify-audit": cmd_verify_audit, "live": cmd_live,
-            "viability": cmd_viability}[args.command](args)
+            "viability": cmd_viability, "limits": cmd_limits,
+            "doctor": cmd_doctor}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,11 @@ class Limit:
     value: Dec
     unit: str
     action: str
+    #: The declared range this value had to sit inside to load. Carried on the
+    #: limit rather than discarded after validation, so an operator asking
+    #: "how much room do I have here?" gets an answer from the running system
+    #: instead of from whichever file they guess is the one in force.
+    bounds: Optional[Tuple[Dec, Dec]] = None
 
 
 class LimitRegister:
@@ -81,7 +86,8 @@ class LimitRegister:
                     f"limit {name!r} = {value} is outside its declared bounds "
                     f"[{lo}, {hi}]. Refusing to load."
                 )
-            limits[name] = Limit(name, value, str(spec.get("unit", "")), str(spec.get("action", "reject")))
+            limits[name] = Limit(name, value, str(spec.get("unit", "")),
+                                 str(spec.get("action", "reject")), (lo, hi))
 
         reg = cls(
             limits,

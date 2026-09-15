@@ -363,8 +363,23 @@ class UrllibTransport:
                 payload = {"msg": raw.decode(errors="replace")}
             return Response(e.code, payload, dict(e.headers or {}))
         except Exception as e:
-            # The request went out and we do not know what happened to it.
-            raise UnknownState(f"transport failure, order status unknown: {e}") from e
+            # A failed request means one of two very different things, and the
+            # HTTP method is what distinguishes them.
+            #
+            # For a method that changes state, the request may have arrived and
+            # been acted on before the connection died: the outcome is genuinely
+            # unknown, and UnknownState is what stops the caller from sending it
+            # again (SPEC section 9.2).
+            #
+            # For a read there is nothing to be unknown about. Raising
+            # UnknownState here would put "order status unknown" in the log for
+            # a failed clock check, which is a sentence that sends an operator
+            # hunting for an order that never existed - during an incident,
+            # which is the only time anyone reads it.
+            if method.upper() in ("POST", "PUT", "DELETE"):
+                raise UnknownState(
+                    f"{method} failed in flight, order status unknown: {e}") from e
+            raise VenueDown(f"{method} {url.split('?')[0]} failed: {e}") from e
 
 
 # --------------------------------------------------------------------------

@@ -81,20 +81,23 @@ def test_the_audit_log_records_the_session(tmp_path):
     assert {"signal", "risk_decision", "order"} <= kinds
 
 
-def test_fallback_limits_match_the_repository_file():
+def test_the_built_in_limits_cannot_drift_from_the_repository_file():
     """An installed package has no risk/limits.yaml on disk.
 
-    The fallback must carry the same values, or a demo run behaves differently
-    from a repository run and the demonstration stops demonstrating anything.
+    Two copies of a limit register that disagree is the failure the fallback
+    would otherwise introduce: it starts, it looks right, and it enforces
+    something nobody agreed to. This test is what makes the fallback safe
+    rather than merely convenient.
     """
-    from tradesys.demo import _FALLBACK_LIMITS, default_limits
+    from tradesys.config import BUILT_IN_LIMITS, load_limits
     from tradesys.layers.l5_risk.limits import LimitRegister
     from tests.conftest import LIMITS_PATH
 
     from_file = LimitRegister.from_yaml(LIMITS_PATH)
-    from_fallback = LimitRegister.from_mapping(_FALLBACK_LIMITS)
-    assert from_file.snapshot() == from_fallback.snapshot()
-    assert default_limits().snapshot() == from_file.snapshot()
+    built_in = LimitRegister.from_mapping(BUILT_IN_LIMITS)
+    assert from_file.snapshot() == built_in.snapshot()
+    assert from_file.equity_definition == built_in.equity_definition
+    assert load_limits().snapshot() == from_file.snapshot()
 
 
 # ------------------------------------------------------- the cost model

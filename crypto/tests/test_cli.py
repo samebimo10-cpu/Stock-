@@ -118,3 +118,70 @@ def test_viability_says_what_the_strategy_would_need(capsys):
     assert "VIP 0" in out
     assert "baseline" in out
     assert "annualised" in out
+
+
+def test_limits_prints_where_the_limits_came_from(capsys):
+    """The question a stranger must be able to answer in one command."""
+    assert cli.main(["limits"]) == 0
+    out = capsys.readouterr().out
+    assert "source" in out
+    assert "limits.yaml" in out
+    assert "drawdown_hard" in out
+    assert "17 limits" in out
+
+
+def test_limits_export_then_load_round_trips(tmp_path, capsys, monkeypatch):
+    target = tmp_path / "risk" / "limits.yaml"
+    assert cli.main(["limits", "--export", str(target)]) == 0
+    capsys.readouterr()
+    assert cli.main(["limits", "--path", str(target)]) == 0
+    assert "drawdown_hard" in capsys.readouterr().out
+
+
+def test_limits_export_refuses_to_overwrite(tmp_path, capsys):
+    target = tmp_path / "limits.yaml"
+    cli.main(["limits", "--export", str(target)])
+    capsys.readouterr()
+    assert cli.main(["limits", "--export", str(target)]) == 2
+    assert "REFUSED" in capsys.readouterr().out
+
+
+def test_doctor_reports_without_touching_the_network(capsys):
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "python" in out and "limits" in out
+    assert "pass --network" in out, "the network check must be opt-in"
+
+
+def test_doctor_says_ready_is_not_the_same_as_should_trade(capsys):
+    """The one thing an operator most needs not to conflate."""
+    cli.main(["doctor"])
+    assert "says nothing about whether" in capsys.readouterr().out
+
+
+def test_doctor_fails_when_the_named_limits_file_is_missing(monkeypatch, capsys):
+    from tradesys.config import LIMITS_ENV
+
+    monkeypatch.setenv(LIMITS_ENV, "/nonexistent/limits.yaml")
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "NOT READY" in out
+
+
+def test_selfcheck_passes_with_no_repository_on_disk(monkeypatch, tmp_path, capsys):
+    """An installed package has no risk/limits.yaml and no checkout.
+
+    Three of the fifteen gates used to fail there, and selfcheck is the first
+    thing the quickstart tells someone to run. A gate that fails because of
+    where the code was installed teaches people to ignore gate failures, which
+    costs more than the gate was ever worth.
+    """
+    from tradesys.config import LIMITS_ENV
+
+    monkeypatch.delenv(LIMITS_ENV, raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("tradesys.config.repository_limits", lambda: None)
+    assert cli.main(["selfcheck"]) == 0
+    out = capsys.readouterr().out
+    assert "RESULT: PASS" in out
+    assert "built-in" in out, "it must say the limits were the built-in ones"

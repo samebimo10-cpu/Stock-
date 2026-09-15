@@ -24,10 +24,12 @@ from dataclasses import dataclass
 from typing import Any, List, Optional
 
 from ..adapters.base import CancelAck, OrderAck, RateLimitState
+from ..core.errors import OrderNotFound
 from ..core.events import (
-    Balance, BookSnapshot, ExchangeInfo, FeeSchedule, OrderIntent, OrderState, Position,
+    Balance, BookSnapshot, ExchangeInfo, FeeSchedule, OrderIntent, OrderState,
+    OrderStatus, Position,
 )
-from ..core.types import Nanos
+from ..core.types import Nanos, dec
 
 __all__ = ["ShadowVenue", "ShadowOrder"]
 
@@ -116,9 +118,30 @@ class ShadowVenue:
         return CancelAck(client_order_id, self._now())
 
     async def query_order(self, client_order_id: str, symbol: str = "") -> OrderState:
-        raise NotImplementedError(
-            "shadow mode has no venue-side order state to query; a QUERY here "
-            "means the order FSM reached a state it should not have in shadow"
+        """Answer from the recording, because refusing to answer breaks the caller.
+
+        The obvious implementation here is to raise: shadow mode has no
+        venue-side order to ask about. It is wrong. ``Executor.resolve_unknown``
+        catches ``OrderNotFound`` and ``VenueError`` and nothing else, so an
+        exception of any other type escapes and takes the run down - during a
+        shadow run, which is the mode the system defaults to and the one meant
+        to be left alone for weeks.
+
+        So it answers honestly instead: the order was recorded, nothing filled
+        it, and it is either still resting or cancelled.
+        """
+        order = self._by_id.get(client_order_id)
+        if order is None:
+            raise OrderNotFound(f"no shadow order {client_order_id!r}")
+        return OrderState(
+            correlation_id="", emitted_at=self._now(), source=self.name,
+            client_order_id=client_order_id, venue_order_id="shadow",
+            venue=self.name, symbol=order.symbol, side=order.side,
+            status=OrderStatus.CANCELLED if order.cancelled else OrderStatus.ACKED,
+            quantity=dec(order.quantity),
+            filled_quantity=dec(0),
+            price=dec(order.price) if order.price is not None else None,
+            entered_state_at=order.at,
         )
 
     # -- truth: the real account, which shadow orders never touched ------
