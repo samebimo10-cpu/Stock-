@@ -63,14 +63,16 @@ src/tradesys/
                 sim.py   deterministic simulator with fault injection
                 binance.py  signing, filters, error mapping, listenKey, sequencing
   layers/
-    l1_data/         local order book, sequence gaps, the eight quality gates
+    l1_data/         local order book, sequence gaps, quality gates,
+                     the write-once raw archive and its normaliser
     l2_features/     pure features, versioned by content hash, look-ahead audit
     l3_strategy/     the strategy contract and funding carry
     l4_portfolio/    netting, correlation on short samples, risk parity
     l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
     l6_execution/    order state machine, reconciliation, TCA, startup gate
     l7_observability/ hash-chained audit log, alert taxonomy
-  research/     trial registry, validation arithmetic, backtester, harness
+  research/     trial registry, validation arithmetic, backtester, harness,
+                replay from the audit log
   costs.py      the cost model, shared by the backtest and the simulated venue
   accounting.py books, per-strategy attribution, capacity
   pipeline.py   the one path, used by backtest and live alike
@@ -85,7 +87,7 @@ docs/strategies/    one specification per strategy, written before the code
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 279 tests
+python -m pytest -q                              # 333 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys selfcheck    # the machine-checkable Phase 0 gates
@@ -122,6 +124,10 @@ Every one has a test that fails when it is broken.
 | Capacity before capital | SPEC §1.2 | A capacity estimate reports whether it is known, and an unestimated one is not. |
 | The holdout is read once | SPEC §11.2 | Enforced by the store, not by discipline. A refused second read is still logged. |
 | Absence of evidence is not evidence | SPEC §11.2 | Every validation check can return inconclusive, and inconclusive does not pass. |
+| Raw data is never overwritten | SPEC §4.3 | Parts are write-once, checksummed over their uncompressed bytes, and made read-only. |
+| Normalisation is a pure versioned function | SPEC §4.3 | Re-running a version on the same bytes is byte-identical, including when the input arrives in a different order. |
+| State is reconstructible from the log | SPEC §3.2 | Positions and fees rebuilt from the audit records alone match the live books exactly. |
+| The log reproduces every decision | SPEC §10.4 | A replay comparison against a fresh run, with a truncated-log negative control. |
 
 ### What the second increment added
 
@@ -146,6 +152,39 @@ flattering:
 - **The strategy had no written specification**, which the spec makes a hard
   requirement *before* coding. It has one now, and it records the process
   failure rather than tidying it away.
+
+### What the third increment added
+
+The last Phase 0 item, plus the two follow-ups the second increment flagged:
+
+- **A write-once raw archive and a deterministic normaliser.** Raw parts are
+  checksummed over their uncompressed bytes, so a file recompressed later still
+  verifies, and normalisation output is byte-identical regardless of the order
+  the input arrives in. Gaps are annotated, never repaired.
+- **Replay from the audit log.** Positions and fees rebuilt from the records
+  alone match the live books, and a decision-by-decision comparison against a
+  fresh run passes with a truncated-log negative control to prove it can fail.
+- **A scenario that actually round-trips.** The single-entry demo made every
+  cost figure meaningless. Building one with entries and exits immediately
+  exposed three real bugs, below.
+
+### Three bugs a round-trip scenario found
+
+All three were invisible with one entry and no exit. This is the argument for
+building a scenario that round-trips before believing any backtest number.
+
+1. **The pipeline ignored orders already in flight.** It sized every order from
+   the held position alone, so a target repeated across events produced one
+   order per event. They then all filled, leaving a position several times the
+   intended size and pointing the wrong way after an exit. The giveaway was a
+   carry strategy *paying* funding.
+2. **The backtester never advanced the simulated venue's clock.** Every fill
+   carried the same timestamp. Nothing depending on elapsed time could work,
+   and the defect stayed invisible until latency modelling needed a clock.
+3. **A target within one lot of the position crashed the pipeline.** The
+   rounded order quantity was zero, which the venue filter correctly refuses,
+   and the exception took the whole book down instead of skipping a trade that
+   cannot be expressed.
 
 ### Three things the build changed about the spec
 

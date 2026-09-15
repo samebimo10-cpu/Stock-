@@ -31,8 +31,8 @@ from .layers.l5_risk.state import PortfolioState
 from .layers.l6_execution.executor import Executor
 from .pipeline import DecisionRecorder, Pipeline
 
-__all__ = ["build_events", "build_pipeline", "default_limits", "make_backtest_runner",
-           "START", "FUNDING_INTERVAL_NS"]
+__all__ = ["build_events", "build_cycling_events", "build_pipeline",
+           "default_limits", "make_backtest_runner", "START", "FUNDING_INTERVAL_NS"]
 
 START = 1_700_000_000_000_000_000
 FUNDING_INTERVAL_NS = 8 * 3600 * 1_000_000_000
@@ -180,6 +180,12 @@ def build_pipeline(base_notional: str = "1000",
 
     adapter = SimAdapter(
         filters=FILTERS,
+        # A backtest left at zero latency is not modelling reality. These are
+        # placeholders shaped like a Tokyo-region deployment; in a real system
+        # they come from the measured distribution (SPEC section 11.1), not
+        # from a guess like this one.
+        order_latency_ns=25_000_000 if with_costs else 0,
+        fill_latency_ns=15_000_000 if with_costs else 0,
         fees=FeeSchedule("sim", dec("0.0002") * multiple, dec("0.0005") * multiple)
         if with_costs else FeeSchedule("sim", dec("0"), dec("0")),
         cost_model=model,
@@ -232,3 +238,84 @@ def make_backtest_runner(registry, strategy_name: str = "funding_carry"):
         return asyncio.run(bt.run(list(events)))
 
     return run
+
+
+def build_cycling_events(cycles: int = 12, warmup: int = 40, elevated: int = 5,
+                         calm: int = 5, seed: int = 11) -> List[MarketEvent]:
+    """A scenario with real round trips.
+
+    :func:`build_events` produces a single entry and never exits, which makes
+    every cost figure derived from it meaningless: a strategy that enters once
+    and holds pays roughly half the costs it would actually pay, so the SPEC
+    section 11.1 review heuristic has nothing to measure.
+
+    This alternates elevated and calm funding so the strategy enters and exits
+    repeatedly. Two design points worth stating:
+
+    * The warm-up funding is **noisy**, not constant. A constant series has zero
+      variance, so its z-score is undefined and the strategy would never see a
+      signal at all. That is correct behaviour and a poor scenario.
+    * The noise is a seeded linear congruential sequence rather than
+      :mod:`random`, so the events are identical on every machine and every
+      Python version. Replay comparisons depend on that.
+    """
+    events: List[MarketEvent] = []
+    ts = START
+    index = 0
+    state = seed
+
+    def noise() -> Dec:
+        """Deterministic jitter in the range roughly [-0.4, +0.4] basis points."""
+        nonlocal state
+        state = (1103515245 * state + 12345) % 2147483648
+        return dec(state % 9 - 4) / dec(100_000)
+
+    schedule: List[str] = ["calm"] * warmup
+    for _ in range(cycles):
+        schedule.extend(["elevated"] * elevated)
+        schedule.extend(["calm"] * calm)
+
+    price = dec("60000")
+    for phase in schedule:
+        # Price and funding move together, which is the economically correct
+        # correlation and the one that makes this strategy hard: funding is
+        # elevated precisely because longs are crowded and price is rising,
+        # and a rising price is what hurts the short perpetual leg. A scenario
+        # where funding is generous and price is flat is not testing carry, it
+        # is paying it.
+        price += dec(12) if phase == "elevated" else dec(-8)
+        events.append(MarketEvent(
+            correlation_id=f"corr-book-{index}", emitted_at=ts, source="demo",
+            venue="sim", symbol=SYMBOL, kind="book_snapshot",
+            exchange_ts=ts, local_recv_ts=ts, sequence=index,
+            payload=BookSnapshot(bids=((price, dec("50")),),
+                                 asks=((price + dec("1"), dec("50")),),
+                                 last_update_id=index),
+        ))
+
+        for j in range(6):
+            buy_side = j % 2 == 0
+            events.append(MarketEvent(
+                correlation_id=f"corr-trade-{index}-{j}", emitted_at=ts + 1 + j,
+                source="demo", venue="sim", symbol=SYMBOL, kind="trade",
+                exchange_ts=ts + 1 + j, local_recv_ts=ts + 1 + j,
+                payload=Trade(price=price + dec(1) if buy_side else price,
+                              quantity=dec("5"),
+                              aggressor_side="buy" if buy_side else "sell",
+                              trade_id=index * 10 + j),
+            ))
+
+        base = dec("0.0009") if phase == "elevated" else dec("0.0001")
+        rate = base + noise()
+        events.append(MarketEvent(
+            correlation_id=f"corr-fund-{index}", emitted_at=ts + 10, source="demo",
+            venue="sim", symbol=SYMBOL, kind="funding",
+            exchange_ts=ts + 10, local_recv_ts=ts + 10,
+            payload=Funding(rate=rate, interval_hours=8,
+                            next_settlement=ts + FUNDING_INTERVAL_NS),
+        ))
+
+        ts += FUNDING_INTERVAL_NS
+        index += 1
+
+    return events

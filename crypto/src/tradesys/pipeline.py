@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .core.errors import FilterViolation
 from .core.events import (
     FeatureSnapshot,
     Fill,
@@ -93,6 +94,9 @@ class PipelineResult:
     submitted: List[str] = field(default_factory=list)
     rejected: List[Tuple[str, str]] = field(default_factory=list)
     unknown: List[str] = field(default_factory=list)
+    #: Targets that could not be expressed as an order: the delta rounded below
+    #: a lot, or below the venue's minimum notional.
+    unfillable: List[Tuple[str, str]] = field(default_factory=list)
 
 
 class Pipeline:
@@ -184,11 +188,16 @@ class Pipeline:
         result.targets = list(netted.targets)
         for t in netted.targets:
             self.recorder.add("target", f"{t.venue}:{t.symbol}", target=t.target)
+            self._record_audit("target", t, t.correlation_id or event.correlation_id)
 
         # L4 -> L5 -> L6
         for target in netted.targets:
             current = self.risk.state.position_qty(target.venue, target.symbol)
-            delta = target.target - current
+            # Orders already working count toward the position we are heading
+            # for. Sizing from the held position alone re-sends the same order
+            # on every event until one fills, and then all of them fill.
+            in_flight = self.executor.in_flight(target.venue, target.symbol)
+            delta = target.target - current - in_flight
             if delta == 0:
                 continue
             side = "buy" if delta > 0 else "sell"
@@ -196,20 +205,37 @@ class Pipeline:
             if price is None:
                 continue
 
-            intent = self.executor.build_intent(
-                strategy_id=_dominant(target),
-                venue=target.venue,
-                symbol=target.symbol,
-                side=side,
-                quantity=abs(delta),
-                correlation_id=event.correlation_id,
-                price=price,
-                order_type="limit",
-                post_only=True,
-            )
+            try:
+                intent = self.executor.build_intent(
+                    strategy_id=_dominant(target),
+                    venue=target.venue,
+                    symbol=target.symbol,
+                    side=side,
+                    quantity=abs(delta),
+                    correlation_id=event.correlation_id,
+                    price=price,
+                    order_type="limit",
+                    post_only=True,
+                )
+            except FilterViolation as e:
+                # The position is already within one lot of its target, or the
+                # remaining delta is below the venue's minimum notional. There
+                # is nothing to trade, which is a normal outcome and not an
+                # error: a target that moves by less than a lot cannot be
+                # expressed. Skipping is the safe degradation required by SPEC
+                # section 3.2 rule 6 - no layer's failure path may result in a
+                # new position, and crashing the pipeline on a rounding edge
+                # would take the whole book down with it.
+                result.unfillable.append((target.symbol, str(e)))
+                self._record_audit("untradeable_delta",
+                                   {"symbol": target.symbol, "delta": str(delta),
+                                    "reason": str(e)},
+                                   event.correlation_id)
+                continue
             result.intents.append(intent)
             self.recorder.add("intent", intent.client_order_id,
                               side=intent.side, qty=intent.quantity, px=intent.price)
+            self._record_audit("intent", intent, intent.correlation_id)
 
             ctx = RiskContext(
                 now=event.emitted_at,

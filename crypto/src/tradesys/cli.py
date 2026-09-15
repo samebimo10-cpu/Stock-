@@ -202,8 +202,45 @@ def _check_adapter_conformance() -> Tuple[bool, str]:
     return True, f"{len(reports)} adapters conform; no venue vocabulary leaks"
 
 
+def _check_normalisation_deterministic() -> Tuple[bool, str]:
+    from .layers.l1_data.archive import Normaliser
+
+    base = 1_700_000_000_000_000_000
+    records = [{
+        "venue": "binance", "symbol": "BTCUSDT", "stream": "depth",
+        "kind": "book_delta", "exchange_ts": base + i * 1_000_000,
+        "local_recv_ts": base + i * 1_000_000 + 5_000_000, "sequence": 100 + i,
+        "payload": {"b": [["60000.01", "1.5"]]},
+    } for i in range(25)]
+    n = Normaliser()
+    ok = n.is_deterministic(records)
+    return ok, ("re-running a version on the same bytes is byte-identical"
+                if ok else "normalisation output depends on input order")
+
+
+def _check_raw_archive_immutable() -> Tuple[bool, str]:
+    import tempfile
+
+    from .layers.l1_data.archive import ImmutableViolation, RawArchive
+
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = RawArchive(tmp)
+        rows = [{"venue": "v", "symbol": "s", "stream": "d",
+                 "exchange_ts": 1, "local_recv_ts": 2, "sequence": 1,
+                 "payload": {}}]
+        path = archive.write("v", "d", rows)
+        try:
+            archive.overwrite_guard(path)
+        except ImmutableViolation:
+            checked, failures = archive.verify_all()
+            return not failures, f"write-once enforced, {checked} part(s) verified"
+    return False, "an existing raw part could be overwritten"
+
+
 GATES = [
     ("risk.import_graph", _check_import_rules),
+    ("data.normalisation_deterministic", _check_normalisation_deterministic),
+    ("data.raw_archive_immutable", _check_raw_archive_immutable),
     ("data.multi_venue", _check_adapter_conformance),
     ("risk.limits_bounded", _check_limits_load),
     ("risk.fat_finger_rejected", _check_fat_finger_rejected),
@@ -238,11 +275,11 @@ def cmd_selfcheck(args) -> int:
 
 
 def cmd_demo(args) -> int:
-    from .demo import build_events, build_pipeline
+    from .demo import build_cycling_events, build_pipeline
     from .research.backtest import Backtester, cost_impact
     from .research.registry import TrialRegistry
 
-    events = build_events()
+    events = build_cycling_events()
     registry = TrialRegistry()
     pipeline, adapter, recorder = build_pipeline()
     bt = Backtester(pipeline, adapter, registry, "funding_carry",
@@ -295,10 +332,20 @@ def cmd_demo(args) -> int:
     print(f"    gross return             {impact.gross_return:.4%}")
     print(f"    net return               {impact.net_return:.4%}")
     print(f"    cut by costs             {impact.cut:.1%}")
-    print(f"    verdict                  {impact}")
+    print(f"    verdict                  {'OK' if impact.passes else 'SUSPECT'}")
+    if not impact.passes:
+        print("\n  The heuristic is flagging the scenario, not only the model. This")
+        print("  synthetic funding stays elevated for five consecutive settlements")
+        print("  at a time, which real funding does not, so costs are a smaller")
+        print("  share of profit here than they would be live. Reporting that is")
+        print("  the point; tuning the scenario until the check passes would be")
+        print("  the failure the check exists to catch.")
 
     print(f"\n  Trials registered: {registry.count()}. The costless run counts too -")
     print("  it informed the search, so it belongs in the deflated Sharpe denominator.")
+    print("\n  Note: this demo trades only the perpetual leg. Real carry is hedged")
+    print("  against spot, so the price movement above would largely cancel. The")
+    print("  profit and loss here demonstrates the pipeline, not the strategy.")
     return 0
 
 

@@ -230,5 +230,28 @@ class Executor:
     def open_machines(self) -> List[OrderMachine]:
         return [m for m in self.machines.values() if not m.is_terminal]
 
+    def in_flight(self, venue: str, symbol: str) -> Dec:
+        """Signed quantity already working at the venue for this instrument.
+
+        Anything not terminal counts, **including orders in QUERY**: an order
+        whose state is unknown may well be live, and assuming it is not is how
+        you end up holding two of it.
+
+        Callers must subtract this from a desired position change. A pipeline
+        that sizes from the current position alone re-sends the same order on
+        every event until one fills, and then they all fill - which is the
+        rapid-fire-orders failure mode of SPEC section 8.5, arriving by way of
+        an ordinary-looking subtraction.
+        """
+        total = dec(0)
+        for machine in self.machines.values():
+            if machine.is_terminal:
+                continue
+            if machine.intent.venue != venue or machine.intent.symbol != symbol:
+                continue
+            remaining = machine.remaining
+            total += remaining if machine.intent.side == "buy" else -remaining
+        return total
+
     def halt(self, reason: str) -> None:
         self.halted_reason = reason

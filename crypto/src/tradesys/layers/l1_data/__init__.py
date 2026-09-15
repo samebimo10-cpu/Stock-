@@ -7,5 +7,14 @@ right up until it trades.
 
 from .book import LocalBook
 from .quality import QualityMonitor, QualityGrade, DailyQualityReport, THRESHOLDS
+from .archive import (
+    NORMALISER_VERSION, ArchiveError, ChecksumMismatch, ImmutableViolation,
+    Normaliser, RawArchive, Retention, partition_for,
+)
 
-__all__ = ["LocalBook", "QualityMonitor", "QualityGrade", "DailyQualityReport", "THRESHOLDS"]
+__all__ = [
+    "LocalBook",
+    "QualityMonitor", "QualityGrade", "DailyQualityReport", "THRESHOLDS",
+    "RawArchive", "Normaliser", "Retention", "partition_for",
+    "NORMALISER_VERSION", "ArchiveError", "ChecksumMismatch", "ImmutableViolation",
+]

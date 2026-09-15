@@ -129,6 +129,15 @@ class SimBook:
         return None
 
 
+def _crosses(book: "SimBook", intent: OrderIntent) -> bool:
+    """Would this limit order execute immediately against the book?"""
+    if intent.price is None:
+        return False
+    if intent.side == "buy":
+        return book.best_ask is not None and book.best_ask <= intent.price
+    return book.best_bid is not None and book.best_bid >= intent.price
+
+
 @dataclass
 class _RestingOrder:
     intent: OrderIntent
@@ -140,6 +149,12 @@ class _RestingOrder:
     queue_ahead: Dec = dec(0)
     #: Volume that has traded through our level since we joined.
     volume_seen: Dec = dec(0)
+    #: When the order actually reaches the matching engine. Until then it is
+    #: in flight and cannot fill.
+    active_at: Nanos = 0
+    #: A crossing order that has not yet arrived. It executes against the book
+    #: as it stands on arrival, not as it stood when we decided.
+    pending_taker: bool = False
 
 
 class SimAdapter:
@@ -156,6 +171,8 @@ class SimAdapter:
         seed: int = 7,
         cost_model: Optional[CostModel] = None,
         model_queue: bool = True,
+        order_latency_ns: int = 0,
+        fill_latency_ns: int = 0,
         daily_volume: Optional[Dict[str, Dec]] = None,
         daily_vol_bps: Dec = dec(0),
     ) -> None:
@@ -183,6 +200,14 @@ class SimAdapter:
         #: touch that goes your way and on none of the queue positions that
         #: never reached you (Annex B section 5.2).
         self.model_queue = model_queue
+        #: Order-to-exchange delay. Zero by default because latency is a
+        #: property of a deployment rather than of a simulator - but a backtest
+        #: left at zero is not modelling reality, and SPEC section 11.1 lists
+        #: latency as a required component of an honest cost model. Set it from
+        #: the measured distribution, not from an assumption.
+        self.order_latency_ns = order_latency_ns
+        #: Fill-to-system delay. Affects when we learn, not when it happened.
+        self.fill_latency_ns = fill_latency_ns
         self.daily_volume: Dict[str, Dec] = dict(daily_volume or {})
         self.daily_vol_bps = daily_vol_bps
         #: Impact and adverse selection charged this run, for the cost report.
@@ -211,7 +236,14 @@ class SimAdapter:
         Trades are forwarded to :meth:`observe_trade` so resting orders advance
         in the queue, so a caller can drive the whole simulation with this one
         method.
+
+        It also advances the simulated clock to the event's timestamp. The
+        venue's clock comes from the data it is fed, and without that every
+        fill carries the same timestamp and nothing that depends on elapsed
+        time - latency, order ageing, funding intervals - can work at all.
         """
+        if event.exchange_ts:
+            self.now = max(self.now, event.exchange_ts)
         if event.kind == "book_snapshot":
             snap = event.payload
             self.set_book(event.symbol, snap.bids, snap.asks, snap.last_update_id)
@@ -268,8 +300,22 @@ class SimAdapter:
         for coid, ro in list(self._orders.items()):
             if ro.status in OrderStatus.TERMINAL:
                 continue
+            if self.now < ro.active_at:
+                continue                    # still in flight
             book = self.books.get(ro.intent.symbol)
-            if book is None or ro.intent.price is None:
+            if book is None:
+                continue
+
+            if ro.pending_taker:
+                ro.pending_taker = False
+                walked = book.walk(ro.intent.side, ro.intent.quantity - ro.filled)
+                if walked is None:
+                    ro.status = OrderStatus.REJECTED
+                    continue
+                produced.append(self._fill(ro, walked[0], walked[1], maker=False))
+                continue
+
+            if ro.intent.price is None:
                 continue
             crosses = (
                 (ro.intent.side == "buy" and book.best_ask is not None and book.best_ask <= ro.intent.price)
@@ -316,7 +362,7 @@ class SimAdapter:
             is_maker=maker,
             strategy_id=ro.intent.strategy_id,
             exchange_ts=self.now,
-            local_recv_ts=self.now,
+            local_recv_ts=self.now + self.fill_latency_ns,
         )
         ro.filled += qty
         ro.status = OrderStatus.FILLED if ro.filled >= ro.intent.quantity else OrderStatus.PARTIAL
@@ -457,8 +503,24 @@ class SimAdapter:
         self._next_venue_id += 1
         book = self.books.get(intent.symbol)
         ro = _RestingOrder(intent=intent, venue_order_id=vid,
-                           queue_ahead=self._queue_ahead(book, intent))
+                           queue_ahead=self._queue_ahead(book, intent),
+                           active_at=self.now + self.order_latency_ns)
         self._orders[intent.client_order_id] = ro
+
+        if self.order_latency_ns > 0 and book is not None:
+            # The order has not arrived yet. A crossing order executes against
+            # the book as it stands on arrival, which is the whole cost of
+            # latency: the price you decided on is not the price you get.
+            ro.pending_taker = bool(
+                intent.order_type == "market"
+                or (intent.order_type in ("limit", "limit_maker")
+                    and not intent.post_only and _crosses(book, intent))
+            )
+            if self.faults._take("drop_response_after_accept"):
+                raise UnknownState(
+                    "simulated timeout AFTER the venue accepted the order", venue_code=-1007
+                )
+            return OrderAck(intent.client_order_id, vid, self.now)
 
         if intent.order_type == "market" and book is not None:
             walked = book.walk(intent.side, intent.quantity)

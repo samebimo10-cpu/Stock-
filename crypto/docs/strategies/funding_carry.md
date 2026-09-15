@@ -68,6 +68,13 @@ The short perpetual leg is the one that earns the funding. The spot leg is the
 hedge. The portfolio layer nets the two legs where they overlap with other
 strategies (SPEC §7.3).
 
+> **Implementation gap.** The code currently trades **only the perpetual leg**.
+> There is no spot hedge, so the implemented strategy is directionally short
+> rather than market-neutral, and its profit and loss includes price movement a
+> hedged version would largely cancel. Any figure the demo produces is a
+> demonstration of the pipeline, not of this strategy. The spot leg is a
+> prerequisite for paper trading, not an optimisation.
+
 **Urgency is `passive`, always.** This strategy earns basis points per day.
 Paying the spread to enter destroys a meaningful fraction of the edge, and
 there is no signal decay that justifies crossing: funding that is elevated now
