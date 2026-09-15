@@ -582,6 +582,53 @@ def _orders_go_where(mode: str) -> str:
     }[mode]
 
 
+def cmd_viability(args) -> int:
+    """What the market would have to pay for the carry strategy to clear its gate.
+
+    "It fails the cost gate" is a poor place to stop. This says by how much, and
+    what would have to change - which is either a specification for the next
+    thing to build or a demonstration that nothing reachable supplies it.
+    """
+    from .core.types import dec
+    from .research.viability import (
+        BINANCE_FUTURES_TIERS, COST_GATE, OBSERVED_FUNDING, carry_requirement,
+        CostStructure, survey,
+    )
+
+    hold = args.hold
+    print(f"  Funding carry against the {float(COST_GATE) * 100:.0f}% cost gate "
+          f"(SPEC section 11.1), held {hold} intervals ({hold / 3:.1f} days).")
+    print("  One leg crosses, because the hedge leg must (ADR 0004).\n")
+
+    requirements = survey(BINANCE_FUTURES_TIERS, hold_intervals=hold,
+                          crossing_legs=1)
+    for requirement in requirements:
+        print(f"    {requirement}")
+
+    print("\n  Against funding as it actually behaves:\n")
+    tier0 = requirements[0]
+    print(f"    {'regime':<26} {'rate/8h':>9}  {'vs tier-0 need':>14}")
+    for label, rate in OBSERVED_FUNDING:
+        multiple = rate / tier0.required_rate
+        verdict = "clears" if rate >= tier0.required_rate else "short"
+        print(f"    {label:<26} {float(rate) * 100:8.4f}%  "
+              f"{float(multiple):13.2f}x  {verdict}")
+
+    print("\n  What this says")
+    print(f"    At tier 0 the trade needs {float(tier0.required_rate) * 100:.4f}% "
+          f"per 8h sustained for {hold / 3:.0f} days")
+    print(f"    ({float(tier0.required_annualised) * 100:.0f}% annualised). Baseline "
+          "funding is a quarter of that.")
+    print("    Reaching VIP 9 - four billion USDT of 30-day volume - lowers the")
+    print(f"    requirement to {float(requirements[-1].required_rate) * 100:.4f}% per 8h, "
+          "which is still above baseline.")
+    print("\n    So the strategy needs a crowded market, and crowded is exactly")
+    print("    when price trends against the short perpetual. That is not a")
+    print("    coincidence to be optimised around; it is what funding is paying")
+    print("    for. ADR 0004 records the same finding from the execution side.")
+    return 0
+
+
 def cmd_verify_audit(args) -> int:
     from .layers.l7_observability.audit import AuditLog, ChainBroken
 
@@ -614,6 +661,11 @@ def main(argv=None) -> int:
     va = sub.add_parser("verify-audit", help="verify a hash-chained audit log")
     va.add_argument("path")
 
+    vi = sub.add_parser("viability",
+                        help="what funding the carry strategy would need to clear its gate")
+    vi.add_argument("--hold", type=int, default=21,
+                    help="holding period in funding intervals (default 21, seven days)")
+
     li = sub.add_parser("live", help="connect to Binance (testnet + shadow by default)")
     li.add_argument("--mode", default="shadow",
                     choices=["read_only", "shadow", "paper", "live"],
@@ -636,7 +688,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     return {"selfcheck": cmd_selfcheck, "demo": cmd_demo, "chaos": cmd_chaos,
             "session": cmd_session, "validate": cmd_validate,
-            "verify-audit": cmd_verify_audit, "live": cmd_live}[args.command](args)
+            "verify-audit": cmd_verify_audit, "live": cmd_live,
+            "viability": cmd_viability}[args.command](args)
 
 
 if __name__ == "__main__":

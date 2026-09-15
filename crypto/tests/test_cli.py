@@ -108,3 +108,13 @@ def test_live_says_plainly_when_orders_would_be_real(capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "THE VENUE" in out
     assert "passed validation" in out, "the warning must name the actual blocker"
+
+
+def test_viability_says_what_the_strategy_would_need(capsys):
+    """The command exists so "it fails the gate" has a next sentence."""
+    assert cli.main(["viability"]) == 0
+    out = capsys.readouterr().out
+    assert "cost gate" in out
+    assert "VIP 0" in out
+    assert "baseline" in out
+    assert "annualised" in out

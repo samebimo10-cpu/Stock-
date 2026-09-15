@@ -198,6 +198,36 @@ The honest reading is that **this strategy does not clear its costs at tier 0**,
 and the remaining levers are fee tier and entry threshold rather than
 execution. Refining `entry_z` is the last thing that would help.
 
+### 6.1 What it would take — `tradesys viability`
+
+The gate is cleared exactly when `N x rate >= 2.5c`, where `c` is the
+round-trip cost as a fraction of notional and `N` the number of funding
+intervals held. Solved for the rate, at a 21-interval (seven-day) hold with one
+leg crossing:
+
+| Futures fee tier | Round trip | Funding needed per 8h | Annualised |
+|---|---|---|---|
+| VIP 0 | 0.200% | 0.0238% | 26.1% |
+| VIP 3 (25m USDT) | 0.152% | 0.0181% | 19.8% |
+| VIP 6 (400m USDT) | 0.124% | 0.0148% | 16.2% |
+| VIP 9 (4bn USDT) | 0.094% | 0.0112% | 12.3% |
+
+Baseline funding is 0.01% per 8h. **Fee tier is not the lever:** even at VIP 9,
+a tier requiring four billion USDT of 30-day volume and therefore not one this
+operation will reach, the requirement is still above baseline.
+
+What does clear it is a mildly crowded market at 0.03% per 8h, sustained for
+seven days. That makes the strategy **conditional rather than hopeless**, and
+the condition is checkable in advance rather than in hindsight — which is what
+separates a filter from a hope.
+
+It is also the same finding as ADR 0004 seen from the other side. Crowded
+funding means longs are crowded, longs are crowded while price is rising, and a
+rising price is what hurts the short perpetual leg and what stops the passive
+hedge from filling. The condition that makes the trade worth doing is the
+condition that makes it hard to execute. That is not a coincidence to optimise
+around; it is what the funding is paying for.
+
 ## 7. Validation results
 
 **None. Nothing in this section has been run.**

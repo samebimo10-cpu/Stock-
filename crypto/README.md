@@ -84,7 +84,8 @@ src/tradesys/
                      leg groups and the unwinder
     l7_observability/ hash-chained audit log, alerts, metrics and indicators
   research/     trial registry, validation arithmetic, backtester, harness,
-                replay from the audit log
+                replay from the audit log, and the viability arithmetic that
+                says what a strategy would need in order to clear its gate
   costs.py      the cost model, shared by the backtest and the simulated venue
   accounting.py books, per-strategy attribution, capacity
   pipeline.py   the one path, used by backtest and live alike
@@ -104,12 +105,13 @@ ops/POSTMORTEM.md   the template, which requires a test
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 675 tests
+python -m pytest -q                              # 688 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys selfcheck    # the machine-checkable Phase 0 gates
 tradesys demo         # funding carry through the pipeline, with the cost model
 tradesys validate     # the full section 11.2 protocol. Exits 1: not validated.
+tradesys viability    # what funding the carry trade would need to clear its gate
 
 # Binance. Testnet and shadow mode unless told otherwise.
 export BINANCE_API_KEY=... BINANCE_API_SECRET=...   # trading on, WITHDRAWALS OFF
@@ -265,6 +267,19 @@ hedge is needed.**
 Measured costs are 69% of gross against a 40% gate. The honest reading is that
 this strategy does not clear its costs at tier 0, and the remaining levers are
 fee tier and entry threshold rather than execution.
+
+`tradesys viability` turns that into arithmetic. The gate is cleared exactly
+when `N x rate >= 2.5c`, so at tier-0 futures fees with one leg crossing the
+trade needs **0.024% per 8h sustained for seven days — 26% annualised**.
+Baseline funding is 0.01%, about 42% of that. Reaching VIP 9 (four billion
+USDT of 30-day volume, a tier this operation will not see) only lowers the
+requirement to 0.011%, still above baseline. **Fee tier is not the lever.**
+
+What does clear it is a mildly crowded market, 0.03% per 8h. So the strategy
+is not hopeless — it is conditional on something specific and checkable in
+advance, which makes it a filter rather than a hope. It is also the same
+condition from the other side: crowded funding is exactly when price trends
+against the short perpetual.
 
 One more simulator error surfaced on the way: a resting order only filled if
 the book crossed it, so an order sitting on the bid never traded against the
