@@ -48,6 +48,83 @@ The short version of what v2.0 adds:
 - **Books.** Per-strategy profit-and-loss attribution, without which no allocation decision is more
   than an opinion.
 
+## The code
+
+`src/tradesys/` is the Phase 0 foundation, built in the dependency order of
+[SPEC.md §20](SPEC.md#20-build-order). It is Track A: Python, one venue adapter
+plus a simulator, one strategy.
+
+```
+src/tradesys/
+  core/         Decimal money, nanosecond timestamps, correlation IDs, the
+                Annex A message set, the normalised venue error taxonomy
+  adapters/     the only code that knows a venue exists
+                base.py  the interface + filter rounding
+                sim.py   deterministic simulator with fault injection
+                binance.py  signing, filters, error mapping, listenKey, sequencing
+  layers/
+    l1_data/         local order book, sequence gaps, the eight quality gates
+    l2_features/     pure features, versioned by content hash, look-ahead audit
+    l3_strategy/     the strategy contract and funding carry
+    l4_portfolio/    netting, correlation on short samples, risk parity
+    l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
+    l6_execution/    order state machine, reconciliation, TCA, startup gate
+    l7_observability/ hash-chained audit log, alert taxonomy
+  research/     cost model, trial registry, validation arithmetic, backtester
+  pipeline.py   the one path, used by backtest and live alike
+  demo.py       a runnable scenario
+risk/limits.yaml   the limit register, loaded with bounds validation
+```
+
+### Run it
+
+```bash
+cd crypto
+pip install -e ".[dev]"
+
+python -m pytest -q                              # 200 tests
+python -m pytest --doctest-modules src/tradesys -q
+tradesys selfcheck                               # the machine-checkable Phase 0 gates
+tradesys demo                                    # funding carry through the live pipeline
+```
+
+### What the code enforces rather than describes
+
+Each of these is a specification rule that would otherwise be an intention.
+Every one has a test that fails when it is broken.
+
+| Rule | Where | How it is enforced |
+|---|---|---|
+| Strategies cannot reach a venue | SPEC §3.5 | An import-graph test. `l3_strategy` may not import `adapters`. |
+| Risk cannot depend on strategies | SPEC §3.5 | The same test, in the other direction. |
+| A timeout is not a rejection | SPEC §9.2 | The order state machine has no transition out of `QUERY` except resolution by the venue, so an order of unknown state can never place another. |
+| Absence of approval is not approval | SPEC §8.3 | The executor refuses a `None` risk decision by name. |
+| Risk reduces or refuses, never enlarges | SPEC §8.2 | Asserted in the service and re-checked in the executor, with a property test over generated sizes. |
+| A misplaced decimal must not load | SPEC §8.5 | Every limit declares a range; out-of-range fails at load, and the drawdown ladder must be ordered. |
+| Same code path for backtest and live | SPEC §14.2 | One `Pipeline`. A differential test replays a recorded session and demands identical decisions, plus a negative control that proves the comparison can fail. |
+| A backtest must register its trial | SPEC §11.3 | The backtester refuses to construct without a registry. Abandoned and crashed runs still count. |
+| Losing the audit path halts trading | SPEC §3.3 | The log buffers, then raises, then reports that trading must stop. |
+| Look-ahead bias is detected, not reviewed for | SPEC §5.4 | A causality check that catches full-sample normalisation, and a lag check for point features. |
+
+### Three things the build changed about the spec
+
+Writing the code found three places where the specification is degenerate at
+small scale. All three are corrected in the code with the reasoning recorded
+at the point of the fix, and they are the kind of thing only an implementation
+surfaces.
+
+1. **The 25% single-asset concentration limit makes the first trade
+   impossible.** One position is 100% of a one-position book. Measured against
+   `max(gross book, equity)` instead, the rule keeps its intent and a small
+   book can still open a position.
+2. **The 40% per-strategy weight cap is infeasible below three strategies.**
+   Two strategies cannot both sit under 40% of a budget summing to 100%. The
+   allocator relaxes the cap to equal weight and reports that it did, because
+   the real constraint is "you do not have enough strategies".
+3. **The default carry holding limit sat exactly at break-even.** Thirty
+   funding intervals is precisely what tier-0 fees need at baseline funding, so
+   the default admitted a trade with zero expected profit. It is 21 now.
+
 ## Where the build starts
 
 [SPEC.md §20](SPEC.md#20-build-order) is dependency-ordered. The first six items are infrastructure

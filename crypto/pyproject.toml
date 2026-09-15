@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tradesys"
+version = "0.1.0"
+description = "Crypto trading system built to crypto/SPEC.md. Phase 0 foundation: data, features, risk, execution, audit, research."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "hypothesis>=6.0"]
+
+[project.scripts]
+tradesys = "tradesys.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["tradesys*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning"]

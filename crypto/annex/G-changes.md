@@ -239,6 +239,59 @@ Some of v1.0 is better than what would replace it, and is preserved close to ver
 
 ---
 
+## 4a. Corrections the implementation found
+
+v2.0 was written before the code. Building the Phase 0 foundation in
+`src/tradesys/` surfaced three places where a limit is degenerate at small
+scale - each one a rule that reads correctly and cannot be satisfied by the
+book it would first apply to. They are corrected in the code, with the
+reasoning recorded at the point of the fix, and noted here because they are
+the class of defect only an implementation finds.
+
+### 4a.1 The 25% single-asset concentration limit blocks the first trade
+
+**The rule** (SPEC §8.2): single-asset concentration above 25% of the book is
+rejected.
+
+**The problem.** One position is 100% of a one-position book. Measured purely
+on gross, the limit rejects every opening order, and the system can never take
+its first position - not as an edge case but as the normal path from a flat
+start.
+
+**The fix.** Measure against `max(gross book, equity)`. A $600 position against
+$100k of equity is 0.6% and passes; a book that has grown past its equity is
+measured on gross as intended. The rule keeps its meaning - do not let one
+asset dominate - and stops being unsatisfiable at the moment it first applies.
+
+### 4a.2 The 40% per-strategy weight cap is infeasible below three strategies
+
+**The rule** (SPEC §7.1): no strategy above 40% of risk budget.
+
+**The problem.** Two strategies cannot both sit below 40% of a budget that must
+sum to 100%. The cap assumes the 5-10 strategy book §2.4 recommends, and Track
+A explicitly runs two or three. As written it makes the allocator unsolvable
+for the track this document added.
+
+**The fix.** The allocator relaxes the cap to equal weight when the book is too
+small for it, and **reports that it relaxed it**. Concentration on a
+two-strategy book is forced rather than chosen, and the binding constraint is
+"you do not have enough strategies" - a portfolio problem, not a solver
+problem, and one the operator should see rather than have smoothed over.
+
+### 4a.3 The carry strategy's default holding limit sat exactly at break-even
+
+**The problem.** Annex B §4.2 establishes that tier-0 fees at baseline funding
+need thirty funding intervals to break even. A maximum holding period of
+thirty intervals therefore admits a trade with exactly zero expected profit,
+which is the worst possible default: it looks like a considered number and it
+authorises trading for nothing.
+
+**The fix.** 21 intervals, seven days, which leaves the margin that makes the
+check worth having. The general point is worth keeping: **a threshold set
+equal to a break-even is not a threshold.**
+
+---
+
 ## 5. One thing v2.0 does not fix
 
 v1.0's §12 warns that most attempts fail, and that they fail in validation more often than in

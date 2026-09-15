@@ -28,3 +28,27 @@ jobs:
           node-version: "22"
       - name: Domain and event-log tests
         run: node --test "douvalue/tests/**/*.test.mjs"
+
+  tradesys:
+    name: Crypto trading system
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+        working-directory: crypto
+      - name: Tests
+        run: python -m pytest -q
+        working-directory: crypto
+      - name: Doctests
+        run: python -m pytest --doctest-modules src/tradesys -q
+        working-directory: crypto
+      - name: Phase 0 gates
+        run: python -m tradesys.cli selfcheck
+        working-directory: crypto

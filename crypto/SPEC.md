@@ -639,7 +639,9 @@ marginal contribution to portfolio volatility is equal. Full formulation and the
 [Annex B §6](annex/B-cost-model.md).
 
 Constraints on the solution:
-- No strategy above 40% of risk budget, whatever the optimiser says
+- No strategy above 40% of risk budget, whatever the optimiser says. On a book
+  of fewer than three strategies this cap is arithmetically infeasible and is
+  relaxed to equal weight, reported as relaxed ([Annex G §4a.2](annex/G-changes.md))
 - No strategy below 5% (below that it is not earning its operational complexity — retire it or
   size it properly)
 - Sum of gross exposure within the §8.2 limit
@@ -726,7 +728,7 @@ Formulas: [Annex B §7](annex/B-cost-model.md).
 | Weekly loss | 7% of equity | Halt | Mandatory review (§8.4) |
 | **Max drawdown** | **12%** | **Full stop, revalidation required** | **Two-person authorisation** |
 | Gross exposure | 3× equity | Reject new exposure | Automatic when below |
-| Single-asset concentration | 25% of book | Reject | Automatic |
+| Single-asset concentration | 25% of book, floored at equity | Reject | Automatic |
 | Order rate | Venue limit × 0.7 | Throttle | Automatic |
 | Live-vs-backtest divergence | 2σ over 30 days | Auto-disable that strategy | Review |
 | **Venue balance concentration** | **40% of capital on any one venue** | **Alert + sweep** | **Automatic** |
