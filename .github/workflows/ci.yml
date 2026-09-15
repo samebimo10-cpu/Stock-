@@ -52,3 +52,6 @@ jobs:
       - name: Phase 0 gates
         run: python -m tradesys.cli selfcheck
         working-directory: crypto
+      - name: Chaos scenarios
+        run: python -m tradesys.cli chaos
+        working-directory: crypto

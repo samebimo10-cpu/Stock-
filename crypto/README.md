@@ -62,15 +62,19 @@ src/tradesys/
                 base.py  the interface + filter rounding
                 sim.py   deterministic simulator with fault injection
                 binance.py  signing, filters, error mapping, listenKey, sequencing
+  security/     the signing service and log redaction
+  session.py    startup gate, reconciliation loop, dead-man, metrics
+  chaos.py      the failure-injection scenarios, runnable
   layers/
     l1_data/         local order book, sequence gaps, quality gates,
                      the write-once raw archive and its normaliser
     l2_features/     pure features, versioned by content hash, look-ahead audit
-    l3_strategy/     the strategy contract and funding carry
+    l3_strategy/     the strategy contract and hedged funding carry
     l4_portfolio/    netting, correlation on short samples, risk parity
     l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
-    l6_execution/    order state machine, reconciliation, TCA, startup gate
-    l7_observability/ hash-chained audit log, alert taxonomy
+    l6_execution/    order state machine, reconciliation, TCA, startup gate,
+                     leg groups and the unwinder
+    l7_observability/ hash-chained audit log, alerts, metrics and indicators
   research/     trial registry, validation arithmetic, backtester, harness,
                 replay from the audit log
   costs.py      the cost model, shared by the backtest and the simulated venue
@@ -79,6 +83,7 @@ src/tradesys/
   demo.py       a runnable scenario
 risk/limits.yaml    the limit register, loaded with bounds validation
 docs/strategies/    one specification per strategy, written before the code
+ops/runbooks/       the eight procedures section 13.3 requires
 ```
 
 ### Run it
@@ -87,7 +92,7 @@ docs/strategies/    one specification per strategy, written before the code
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 333 tests
+python -m pytest -q                              # 431 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys selfcheck    # the machine-checkable Phase 0 gates
@@ -128,6 +133,14 @@ Every one has a test that fails when it is broken.
 | Normalisation is a pure versioned function | SPEC §4.3 | Re-running a version on the same bytes is byte-identical, including when the input arrives in a different order. |
 | State is reconstructible from the log | SPEC §3.2 | Positions and fees rebuilt from the audit records alone match the live books exactly. |
 | The log reproduces every decision | SPEC §10.4 | A replay comparison against a fresh run, with a truncated-log negative control. |
+| A hedge that does not fill is not a hedge | SPEC §2.1 | Leg groups fill or unwind as a unit, and a broken group is flattened rather than chased. |
+| Carry without a spot leg is not carry | SPEC §6.1 | The strategy refuses to run outside research with no spot venue configured. |
+| The signer refuses what the key permits | SPEC §13.2 | Withdrawal endpoints are refused at the signer, and a key claiming withdrawal rights is refused at the door. |
+| Secrets never reach logs | SPEC §13.2 | Redaction by key name and by value shape, tested on the shapes that actually leak. |
+| A P1 without money at risk is a defect | SPEC §10.2 | The router refuses one, and the same breach is P2 flat and P1 with a position open. |
+| No strategy runs before the gate passes | SPEC §9.5 | The session refuses to start rather than starting degraded, and a discrepancy needs a named operator. |
+| Every failure mode has a rehearsal | SPEC §14.3 | Thirteen scenarios, runnable on demand, each stating its guarantee before it runs. |
+| Every incident has a runbook | SPEC §13.3 | All eight exist, each with a first action, a diagnostic and a recovery. |
 
 ### What the second increment added
 
@@ -167,6 +180,40 @@ The last Phase 0 item, plus the two follow-ups the second increment flagged:
 - **A scenario that actually round-trips.** The single-entry demo made every
   cost figure meaningless. Building one with entries and exits immediately
   exposed three real bugs, below.
+
+### What the fourth increment added
+
+The prerequisite the third increment flagged, and the operational layer:
+
+- **The carry strategy is hedged.** Both legs trade, tied in a leg group, and
+  the strategy refuses to run outside research without a spot venue. The book
+  is delta-neutral while a position is open.
+- **Leg groups and an unwinder, written before the strategy that needed them.**
+  A group that cannot complete is flattened rather than chased.
+- **A signing service.** Keys never reach the trading process, withdrawal
+  endpoints are refused whatever the key permits, and a key claiming withdrawal
+  rights is refused when it is added.
+- **Metrics, indicators and a session driver.** The startup gate, reconciliation
+  loop and dead-man switch now run as one system rather than as parts.
+- **Thirteen chaos scenarios, runnable.** Quarterly re-runs are a requirement,
+  and a suite nobody can run on demand is a suite nobody runs.
+- **Eight runbooks.**
+
+### Four bugs the hedge exposed
+
+Each is a real behaviour rather than a modelling error, which is why the fix
+was in the system rather than in the simulator.
+
+1. **A resting bid does not get hit in a rising market.** Legging in passively
+   filled the perpetual and left the spot behind, breaking seven of eight
+   groups. Hedges cross; paying the spread on one leg is the price of being
+   hedged, and it took costs from 26% of gross to 60%.
+2. **An aggressive order priced at mid rests inside the spread** and behaves
+   exactly like a passive one, so urgency existed only in the logs.
+3. **A leg timeout shorter than the data's cadence** expires every group before
+   its legs can fill, and the symptom is a strategy that appears not to trade.
+4. **The two scenario builders had drifted apart**, one still emitting on a
+   single venue after the system became two-venue.
 
 ### Three bugs a round-trip scenario found
 

@@ -237,8 +237,38 @@ def _check_raw_archive_immutable() -> Tuple[bool, str]:
     return False, "an existing raw part could be overwritten"
 
 
+def _check_chaos_suite() -> Tuple[bool, str]:
+    from .chaos import run_all
+
+    results = run_all()
+    failed = [r for r in results if not r.passed]
+    if failed:
+        return False, "; ".join(f"{r.scenario.name}: {r.detail}" for r in failed)
+    return True, f"{len(results)} failure-injection scenarios pass"
+
+
+def _check_signer_refuses_withdrawals() -> Tuple[bool, str]:
+    from .security import SigningRefused, SigningService
+
+    service = SigningService()
+    service.add_key("k", "s", "testnet", "secret", permissions=("spot",))
+    for endpoint in ("/sapi/v1/capital/withdraw/apply", "/v5/asset/withdraw/create"):
+        try:
+            service.sign("s", "testnet", endpoint, "x")
+        except SigningRefused:
+            continue
+        return False, f"the signer signed {endpoint}"
+    try:
+        service.add_key("k2", "s2", "testnet", "x", permissions=("withdraw",))
+    except SigningRefused:
+        return True, "withdrawal endpoints and withdrawal-capable keys both refused"
+    return False, "a key claiming withdrawal rights was accepted"
+
+
 GATES = [
     ("risk.import_graph", _check_import_rules),
+    ("test.chaos_suite", _check_chaos_suite),
+    ("sec.signer_refuses_withdrawals", _check_signer_refuses_withdrawals),
     ("data.normalisation_deterministic", _check_normalisation_deterministic),
     ("data.raw_archive_immutable", _check_raw_archive_immutable),
     ("data.multi_venue", _check_adapter_conformance),
@@ -400,6 +430,82 @@ def cmd_validate(args) -> int:
     return 0 if report.passes else 1
 
 
+def cmd_chaos(args) -> int:
+    """Run the SPEC section 14.3 scenarios, not merely test them."""
+    from .chaos import run_all
+
+    print("CHAOS SUITE - each scenario injects a failure that SPEC section 8.5")
+    print("ranks above strategy risk, and asserts what must happen.\n")
+    results = run_all()
+    for result in results:
+        print(result)
+        if not result.passed:
+            print(f"         guarantee broken: {result.scenario.guarantee}")
+    passed = sum(1 for r in results if r.passed)
+    print(f"\n  RESULT: {'PASS' if passed == len(results) else 'FAIL'} "
+          f"({passed} of {len(results)})")
+    if passed == len(results):
+        print("\n  Re-run these quarterly and after any change to risk or execution.")
+        print("  Chaos tests that ran once, a year ago, test a system that no")
+        print("  longer exists.")
+    return 0 if passed == len(results) else 1
+
+
+def cmd_session(args) -> int:
+    """Start a session against the simulator and drive the demo scenario."""
+    from .demo import build_cycling_events, build_pipeline
+    from .session import SessionConfig, TradingSession
+
+    pipeline, adapters, _ = build_pipeline()
+    clock = {"now": 1_700_000_000_000_000_000}
+    session = TradingSession(
+        pipeline, adapters,
+        config=SessionConfig(reconcile_interval_ns=8 * 3600 * 10**9,
+                             heartbeat_interval_ns=3600 * 10**9,
+                             strategy_settle_ns=0),
+        clock=lambda: clock["now"],
+    )
+
+    async def drive():
+        await session.start(operator=args.operator)
+        print("  startup gate passed:")
+        for step in session.startup_report:
+            print(f"    {step}")
+        print()
+        for event in build_cycling_events():
+            clock["now"] = event.emitted_at
+            for venue in adapters.values():
+                venue.apply_market_event(event)
+            await session.on_event(event)
+            for venue in adapters.values():
+                for fill in venue.step():
+                    pipeline.on_fill(fill)
+        if args.kill:
+            await session.manual_kill(args.operator or "operator")
+
+    asyncio.run(drive())
+
+    status = session.status()
+    print("  Session status")
+    for key in ("state", "equity", "open_positions", "open_orders",
+                "open_leg_groups", "reconciliation_clean"):
+        print(f"    {key:<24} {status[key]}")
+    print(f"    {'kill switch':<24} {status['kill_switch']['state']}")
+
+    print("\n  Indicators")
+    snapshot = session.metrics.snapshot()
+    for name in sorted(snapshot):
+        if name.startswith(("events_", "reconciliation_", "flatten", "equity",
+                            "drawdown", "open_", "kill_")):
+            print(f"    {name:<34} {snapshot[name]:g}")
+
+    pages = session.alerts.pages()
+    print(f"\n  Pages raised: {len(pages)}")
+    for alert in pages[:5]:
+        print(f"    P1 {alert.name}: {alert.detail}")
+    return 0
+
+
 def cmd_verify_audit(args) -> int:
     from .layers.l7_observability.audit import AuditLog, ChainBroken
 
@@ -419,6 +525,12 @@ def main(argv=None) -> int:
 
     sub.add_parser("selfcheck", help="run the machine-checkable Phase 0 gates")
     sub.add_parser("demo", help="run the demo backtest through the live pipeline")
+    sub.add_parser("chaos", help="run the failure-injection scenarios")
+
+    se = sub.add_parser("session", help="start a session and drive the demo scenario")
+    se.add_argument("--operator", help="acknowledge a startup discrepancy as this person")
+    se.add_argument("--kill", action="store_true", help="exercise the manual kill switch")
+
     v = sub.add_parser("validate", help="run the full validation protocol")
     v.add_argument("--holdout", metavar="WHO",
                    help="also evaluate the holdout, once, recorded against this name")
@@ -427,8 +539,8 @@ def main(argv=None) -> int:
     va.add_argument("path")
 
     args = parser.parse_args(argv)
-    return {"selfcheck": cmd_selfcheck, "demo": cmd_demo,
-            "validate": cmd_validate,
+    return {"selfcheck": cmd_selfcheck, "demo": cmd_demo, "chaos": cmd_chaos,
+            "session": cmd_session, "validate": cmd_validate,
             "verify-audit": cmd_verify_audit}[args.command](args)
 
 
