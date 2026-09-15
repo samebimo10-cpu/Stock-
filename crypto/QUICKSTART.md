@@ -28,7 +28,7 @@ will not reproduce on demand.
 tradesys doctor        # preflight: python, limits, credentials
 tradesys selfcheck     # 15 machine-checkable specification gates
 tradesys chaos         # inject each failure, assert the guarantee holds
-pytest -q              # 708 tests
+pytest -q              # 762 tests
 ```
 
 `tradesys chaos` is the one worth watching. It kills the feed mid-order, drops
@@ -39,10 +39,17 @@ suite that ran once, a year ago, tests a system that no longer exists.
 ## 3. See it trade, offline
 
 ```bash
+tradesys strategies    # all five strategies, predicted cost share vs measured
+tradesys viability     # the arithmetic that chose them
 tradesys demo          # the funding carry strategy through the full pipeline
 tradesys session       # the same, with the startup gate and reconciliation
-tradesys viability     # what the market would have to pay for it to be worth it
 ```
+
+`tradesys strategies` is the one to read first. It prints what each strategy
+*claims* about its own economics next to what it actually measured, because a
+prediction that disagrees with a measurement is the only part that teaches
+anything — and it tells you plainly that none of it is evidence the strategies
+make money.
 
 `tradesys validate` exits 1. That is the correct outcome, not a broken build:
 nothing here has passed validation, and the harness reports INCONCLUSIVE rather
