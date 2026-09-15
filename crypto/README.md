@@ -10,6 +10,12 @@ the system built to it. `SPEC.md` and its annexes are the frame;
 **[QUICKSTART.md](QUICKSTART.md)** — ten minutes from a clone to a system
 connected to Binance testnet, generating orders and sending none of them.
 
+**The next step is collecting data**, and
+[`ops/runbooks/getting-to-validated.md`](ops/runbooks/getting-to-validated.md)
+is the whole plan: six to nine months, most of it waiting, with the gates and
+the failure modes written down. `tradesys capture` is the command it starts
+with.
+
 **It is not ready for real money, and the blockers are specific.**
 `tradesys validate` exits 1 — **no strategy has passed the §11.2 protocol**,
 and none has ever seen a real market. §17.5's first three steps take six to
@@ -72,6 +78,7 @@ src/tradesys/
                 sim.py   deterministic simulator with fault injection
                 binance.py  signing, filters, error mapping, listenKey, sequencing
   live/         the only code that opens a socket
+                capture.py      raw messages to the write-once archive
                 websocket.py    a minimal RFC 6455 client, no dependency
                 streams.py      stream sources, backoff, and the fakes tests use
                 binance_live.py Binance payloads to domain events, gap resync
@@ -107,8 +114,9 @@ src/tradesys/
 risk/limits.yaml    the limit register, loaded with bounds validation
 docs/strategies/    one specification per strategy
 docs/adr/           decision records for every deviation from a SHOULD
-ops/runbooks/       the eight procedures section 13.3 requires, plus
-                    one for operating a live connection
+ops/runbooks/       the eight procedures section 13.3 requires, plus one for
+                    operating a live connection and one for the road from
+                    here to a validated strategy
 ops/dashboards/     the five dashboards, as code
 ops/POSTMORTEM.md   the template, which requires a test
 ```
@@ -119,7 +127,7 @@ ops/POSTMORTEM.md   the template, which requires a test
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 762 tests
+python -m pytest -q                              # 782 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys doctor       # preflight: python, limits, credentials, clock
@@ -129,6 +137,8 @@ tradesys demo         # funding carry through the pipeline, with the cost model
 tradesys validate     # the full section 11.2 protocol. Exits 1: not validated.
 tradesys viability    # the cost arithmetic: what each strategy needs to clear its gate
 tradesys strategies   # run every strategy against its scenario, predicted vs measured
+tradesys capture      # collect real market data to the write-once archive
+tradesys archive      # inspect and verify what was captured
 
 # Binance. Testnet and shadow mode unless told otherwise.
 export BINANCE_API_KEY=... BINANCE_API_SECRET=...   # trading on, WITHDRAWALS OFF

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..adapters.binance import BinanceAdapter, BinanceEndpoints, HmacSigner
@@ -99,6 +100,8 @@ def build_binance_live(
     base_notional: str = "200",
     confirm_live: bool = False,
     credentials: Optional[LiveCredentials] = None,
+    archive_root: Optional[str] = None,
+    liquidations: bool = False,
 ) -> Tuple[TradingSession, BinanceFeed, LiveRunner]:
     """Wire adapter, feed, pipeline, session and runner for one venue.
 
@@ -174,7 +177,8 @@ def build_binance_live(
     session = TradingSession(pipeline, adapters,
                              config=SessionConfig(reconcile_interval_ns=5_000_000_000))
 
-    specs = [StreamSpec(s, mark=futures) for s in symbols]
+    specs = [StreamSpec(s, mark=futures, liquidations=liquidations and futures)
+             for s in symbols]
     from .binance_live import market_stream_url, user_stream_url
 
     def market_source() -> WebsocketSource:
@@ -190,8 +194,14 @@ def build_binance_live(
             return WebsocketSource(lambda: user_stream_url(endpoints.ws, token),
                                    name=f"{venue}-user")
 
+    writer = None
+    if archive_root:
+        from .capture import ArchiveWriter, CaptureConfig
+
+        writer = ArchiveWriter(venue, CaptureConfig(root=Path(archive_root)))
+
     runner = LiveRunner(session, feed, market_source, user_source=user_source,
-                        keys=keys, config=LiveConfig(mode=mode))
+                        keys=keys, config=LiveConfig(mode=mode), writer=writer)
     return session, feed, runner
 
 

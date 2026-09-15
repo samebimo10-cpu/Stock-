@@ -185,3 +185,45 @@ def test_selfcheck_passes_with_no_repository_on_disk(monkeypatch, tmp_path, caps
     out = capsys.readouterr().out
     assert "RESULT: PASS" in out
     assert "built-in" in out, "it must say the limits were the built-in ones"
+
+
+def test_capture_dry_run_says_what_it_would_collect(capsys):
+    assert cli.main(["capture", "--dry-run", "--futures"]) == 0
+    out = capsys.readouterr().out
+    assert "forceOrder" in out, "the cascade strategy's only input must be named"
+    assert "testnet data is NOT research data" in out
+
+
+def test_capture_warns_that_spot_has_no_funding_or_liquidations(capsys):
+    cli.main(["capture", "--dry-run"])
+    assert "--futures" in capsys.readouterr().out
+
+
+def test_archive_refuses_a_directory_that_is_not_there(capsys):
+    assert cli.main(["archive", "--root", "/nonexistent-archive"]) == 2
+    assert "REFUSED" in capsys.readouterr().out
+
+
+def test_validate_refuses_an_archive_too_short_to_mean_anything(tmp_path, capsys):
+    """A Sharpe ratio computed on three days is noise with a decimal point."""
+    from tradesys.live.capture import ArchiveWriter, CaptureConfig
+
+    writer = ArchiveWriter(
+        "binance-futures",
+        CaptureConfig(root=tmp_path, batch=5, compress=False, min_part_records=1),
+        clock=lambda: 1_700_000_000_000_000_000)
+    for i in range(20):
+        writer.offer({"stream": "btcusdt@aggTrade",
+                      "data": {"e": "aggTrade", "E": 1000 + i, "T": 1000 + i,
+                               "s": "BTCUSDT", "p": "60000", "q": "1",
+                               "m": False, "a": i}})
+    writer.close()
+
+    assert cli.main(["validate", "--from-archive", str(tmp_path)]) == 2
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and "30" in out
+
+
+def test_validate_refuses_an_empty_archive_with_the_command_to_fix_it(tmp_path, capsys):
+    assert cli.main(["validate", "--from-archive", str(tmp_path)]) == 2
+    assert "tradesys capture" in capsys.readouterr().out

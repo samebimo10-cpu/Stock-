@@ -28,7 +28,7 @@ will not reproduce on demand.
 tradesys doctor        # preflight: python, limits, credentials
 tradesys selfcheck     # 15 machine-checkable specification gates
 tradesys chaos         # inject each failure, assert the guarantee holds
-pytest -q              # 762 tests
+pytest -q              # 782 tests
 ```
 
 `tradesys chaos` is the one worth watching. It kills the feed mid-order, drops
@@ -129,6 +129,27 @@ moves: `sequence_gaps`, `feed_staleness_ms`, `reconciliation_cycles`, and
 `drawdown`.
 
 ---
+
+## 8. The actual next step
+
+Everything above proves the machine works. None of it produces a strategy worth
+trusting, because there is no data.
+
+```bash
+tradesys capture --production --futures --out /var/lib/tradesys/archive \
+    --symbols BTCUSDT,ETHUSDT
+```
+
+Leave it running for three months under a supervisor. Then:
+
+```bash
+tradesys archive --root /var/lib/tradesys/archive --verify
+tradesys validate --from-archive /var/lib/tradesys/archive
+```
+
+[`ops/runbooks/getting-to-validated.md`](ops/runbooks/getting-to-validated.md)
+is the full plan with the gates, the timings and what to do when each one
+fails. Read it before starting, not during.
 
 ## Before real money
 

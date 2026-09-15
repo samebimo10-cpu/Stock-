@@ -1,7 +1,8 @@
 # Runbooks
 
 The eight situations SPEC §13.3 requires a written procedure for, plus one for
-operating a live connection — which is not an incident, and is the procedure
+operating a live connection and one for the road from here to a validated
+strategy — which is not an incident, and is the procedure
 that stops one. Each incident runbook has the same three headings, in the order
 you need them at 3am:
 
@@ -30,6 +31,7 @@ Two rules that apply to every runbook here:
 | [Clock drift](clock-drift.md) | SEV2, SEV1 above 100ms | Automatic after 5 minutes below 10ms |
 | [Audit failure](audit-failure.md) | SEV1 | Path restored and backlog flushed |
 | [Live connection](live-connection.md) | not an incident | Five checks before you run anything |
+| [Getting to validated](getting-to-validated.md) | the plan | Six to nine months, mostly waiting |
 
 ## Before you need them
 
@@ -38,6 +40,7 @@ tradesys selfcheck    # the machine-checkable gates
 tradesys chaos        # inject each failure and confirm the guarantee holds
 tradesys session      # status, indicators, pages
 tradesys live --dry-run   # what a live run would do, connecting to nothing
+tradesys capture --dry-run  # what a capture run would collect
 ```
 
 The chaos suite is the rehearsal. Run it quarterly and after any change to

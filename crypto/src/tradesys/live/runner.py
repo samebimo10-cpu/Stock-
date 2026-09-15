@@ -33,6 +33,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ..core.events import MarketEvent
 from ..core.types import Nanos, now_ns
 from .binance_live import BinanceFeed, decode_fill
+from .capture import ArchiveWriter, DiskFull
 from .streams import BackoffPolicy, StreamSource
 from .websocket import WebSocketClosed
 
@@ -127,6 +128,7 @@ class LiveRunner:
         config: Optional[LiveConfig] = None,
         clock: Callable[[], Nanos] = now_ns,
         sleep: Optional[Callable[[float], Any]] = None,
+        writer: Optional[ArchiveWriter] = None,
     ) -> None:
         self.session = session
         self.feed = feed
@@ -136,6 +138,11 @@ class LiveRunner:
         self.config = config or LiveConfig()
         self.clock = clock
         self._sleep = sleep or asyncio.sleep
+        #: Writes the raw stream to the archive. Optional, and the option is
+        #: the whole point of a read-only run: months of captured data is the
+        #: only thing standing between this system and a validated strategy,
+        #: and it does not accumulate by itself.
+        self.writer = writer
         self.report = RunReport()
         self._stop = False
         self._stop_event: Optional[asyncio.Event] = None
@@ -189,6 +196,11 @@ class LiveRunner:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self._release_token()
+            if self.writer is not None:
+                # The final flush. Without it the last minute of capture is
+                # lost on every stop, including every deployment - which over
+                # months is a great deal of data lost to tidiness.
+                self.writer.close()
         return self.report
 
     # ------------------------------------------------------------------
@@ -246,6 +258,16 @@ class LiveRunner:
 
     async def _on_market_message(self, message: dict) -> None:
         self.report.messages += 1
+        if self.writer is not None:
+            # Archive BEFORE decoding. A message the decoder chokes on is
+            # exactly the one worth having on disk, and archiving afterwards
+            # loses precisely those.
+            try:
+                self.writer.offer(message, local_recv_ts=self.clock())
+            except DiskFull as e:
+                self.report.errors.append(f"capture: {e}")
+                self.stop()
+                return
         events = await self.feed.decode(message)
         for event in events:
             await self._dispatch(event)

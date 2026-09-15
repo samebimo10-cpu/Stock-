@@ -33,6 +33,7 @@ from ..core.events import (
     BookSnapshot,
     Fill,
     Funding,
+    Liquidation,
     Mark,
     MarketEvent,
     QualityFlags,
@@ -76,6 +77,10 @@ class StreamSpec:
     depth: bool = True
     trades: bool = True
     mark: bool = False          # futures only; carries the funding rate too
+    #: Futures only. The liquidation stream, which the cascade strategy is
+    #: built on and which cannot be reconstructed from anything else: a forced
+    #: sale looks exactly like a voluntary one in the trade feed.
+    liquidations: bool = False
     depth_ms: int = 100
 
     def names(self) -> List[str]:
@@ -92,6 +97,8 @@ class StreamSpec:
             out.append(f"{low}@aggTrade")
         if self.mark:
             out.append(f"{low}@markPrice@1s")
+        if self.liquidations:
+            out.append(f"{low}@forceOrder")
         return out
 
 
@@ -237,6 +244,8 @@ class BinanceFeed:
             return self._on_trade(payload, symbol, recv)
         if kind == "markPriceUpdate":
             return self._on_mark(payload, symbol, recv)
+        if kind == "forceOrder":
+            return self._on_liquidation(payload, recv)
         self.stats.unknown_streams[kind] = self.stats.unknown_streams.get(kind, 0) + 1
         return []
 
@@ -344,6 +353,28 @@ class BinanceFeed:
                         next_settlement=ms_to_ns(int(payload.get("T", 0)))),
                 exchange_ts, recv))
         return out
+
+    def _on_liquidation(self, payload: Mapping[str, Any],
+                        recv: Nanos) -> List[MarketEvent]:
+        """A forced order. The one order placed by someone with no choice.
+
+        Binance nests it under ``o`` and reports the side of the order that
+        *closes* the position, so a liquidated long arrives as a sell. Reading
+        it as the side of the position would invert every cascade signal while
+        leaving the volume correct, which is the kind of error that survives a
+        review and shows up as a strategy that fades the wrong way.
+        """
+        order = payload.get("o", {})
+        if not order:
+            return []
+        symbol = str(order.get("s", ""))
+        exchange_ts = ms_to_ns(int(order.get("T", payload.get("E", 0)) or 0))
+        liquidation = Liquidation(
+            price=dec(str(order.get("ap") or order.get("p") or "0")),
+            quantity=dec(str(order.get("q", "0"))),
+            side=str(order.get("S", "SELL")).lower(),
+        )
+        return [self._event(symbol, "liquidation", liquidation, exchange_ts, recv)]
 
     def _event(self, symbol: str, kind: str, payload: Any, exchange_ts: Nanos,
                recv: Nanos, *, sequence: Optional[int] = None,

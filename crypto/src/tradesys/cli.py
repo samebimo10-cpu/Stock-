@@ -434,14 +434,41 @@ def cmd_demo(args) -> int:
 
 
 def cmd_validate(args) -> int:
-    """Run the SPEC section 11.2 protocol against the demo strategy."""
+    """Run the SPEC section 11.2 protocol.
+
+    Against the synthetic demo scenario by default, which cannot validate
+    anything and says so. Against a captured archive with ``--from-archive``,
+    which is the only version of this command whose verdict means anything.
+    """
     from .core.types import dec
     from .demo import build_events, make_backtest_runner
     from .research.harness import HoldoutStore, ValidationHarness
     from .research.registry import TrialRegistry
 
     registry = TrialRegistry()
-    events = build_events()
+    if args.from_archive:
+        from .research.archive_replay import ReplayReport, replay_events
+
+        report_ = ReplayReport()
+        events = asyncio.run(replay_events(
+            args.from_archive, args.venue, report=report_))
+        print(f"  archive: {report_}\n")
+        if not events:
+            print("  REFUSED: the archive produced no events. Capture first:")
+            print("    tradesys capture --production --futures --out <dir>")
+            return 2
+        if report_.span_days < 30:
+            # Not a warning to be scrolled past. SPEC section 11.2 requires
+            # 30 days of green data before a result counts, and a verdict
+            # computed on less is a verdict that will not repeat.
+            print(f"  REFUSED: {report_.span_days:.1f} days of data. The protocol "
+                  "needs at least 30,")
+            print("  and a Sharpe ratio computed on less is noise with a decimal "
+                  "point.")
+            print("  Keep capturing. This command is not the bottleneck; the data is.")
+            return 2
+    else:
+        events = build_events()
     store = HoldoutStore(events, registry, fraction=0.2)
     harness = ValidationHarness(registry, make_backtest_runner(registry),
                                 "funding_carry", code_hash="demo")
@@ -920,6 +947,149 @@ def cmd_strategies(args) -> int:
     return 0
 
 
+def cmd_capture(args) -> int:
+    """Capture raw market data to the write-once archive, for months.
+
+    This is the step everything else is waiting on. Every strategy here is
+    unvalidated for one reason - there is no archived data to validate against
+    - and data does not accumulate by itself.
+
+    Deliberately read-only: no strategy is enabled and no order can be
+    generated, so the process that has to run unattended for three months is
+    the one with the least that can go wrong.
+    """
+    import signal
+
+    from .live.capture import estimate_daily_bytes
+    from .live.runner import Mode
+    from .live.wiring import MissingCredentials, build_binance_live
+
+    symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()]
+    root = Path(args.out).expanduser()
+    try:
+        session, feed, runner = build_binance_live(
+            symbols, mode=Mode.READ_ONLY, testnet=not args.production,
+            futures=args.futures, archive_root=str(root),
+            liquidations=args.futures,
+        )
+    except (MissingCredentials, PermissionError) as e:
+        print(f"REFUSED: {e}")
+        return 2
+
+    print(f"  venue      {feed.venue}  "
+          f"({'PRODUCTION' if args.production else 'testnet'})")
+    print(f"  symbols    {', '.join(symbols)}")
+    print(f"  archive    {root}")
+    print(f"  streams    depth, trades"
+          + (", markPrice, forceOrder" if args.futures else ""))
+    if not args.futures:
+        print("  NOTE       spot has no funding and no liquidation stream. The")
+        print("             cascade and carry strategies need --futures.")
+    if not args.production:
+        print("  NOTE       testnet data is NOT research data. Its book is thin,")
+        print("             its flow is synthetic, and a strategy validated on it")
+        print("             is validated against a fiction. Use testnet to prove")
+        print("             the capture runs; use --production to collect.")
+    if args.dry_run:
+        print("\n  dry run: nothing connected, nothing written.")
+        return 0
+
+    stop_reason = {"why": "stopped"}
+
+    def _handle(signum, frame):                                # pragma: no cover
+        stop_reason["why"] = f"signal {signum}"
+        runner.stop()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handle)
+        except (ValueError, OSError):                          # pragma: no cover
+            pass
+
+    print("\n  capturing. Ctrl-C stops cleanly and flushes the buffer.\n")
+    try:
+        asyncio.run(runner.run())
+    except KeyboardInterrupt:                                  # pragma: no cover
+        runner.stop()
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  capture failed: {e}")
+        return 1
+
+    writer = runner.writer
+    if writer is None:                                         # pragma: no cover
+        print("  no archive writer was attached")
+        return 1
+    stats = writer.stats
+    print(f"  {stats}")
+    for name, count in sorted(stats.by_stream.items()):
+        print(f"    {name:<28} {count}")
+    daily = estimate_daily_bytes(stats)
+    if daily:
+        print(f"\n  extrapolated {daily / 1e9:.2f} GB/day, "
+              f"{daily * 180 / 1e9:.0f} GB for six months")
+    for error in runner.report.errors[:5]:
+        print(f"    error: {error}")
+    print(f"\n  verify what was written:  tradesys archive --root {root}")
+    return 0
+
+
+def cmd_archive(args) -> int:
+    """Inspect and verify a captured archive.
+
+    Verification is not a formality. The archive's whole claim is that the
+    bytes are the bytes that arrived, and six months of capture that turns out
+    to be corrupt in month two is six months lost - discovered, if nobody
+    checks, at the moment the research depends on it.
+    """
+    from .layers.l1_data.archive import RawArchive
+    from .research.archive_replay import ArchiveSource
+
+    root = Path(args.root).expanduser()
+    if not root.exists():
+        print(f"REFUSED: no archive at {root}")
+        return 2
+
+    archive = RawArchive(root)
+    venues = sorted({p.parts[len(root.parts)].split("=", 1)[1]
+                     for p in archive.parts()
+                     if len(p.parts) > len(root.parts)})
+    if not venues:
+        print(f"  {root} exists but holds no parts yet.")
+        return 0
+
+    total_parts = 0
+    total_bytes = 0
+    for venue in venues:
+        source = ArchiveSource(root, venue, verify=False)
+        parts = source.parts()
+        size = sum(p.stat().st_size for p in parts)
+        total_parts += len(parts)
+        total_bytes += size
+        streams = sorted({p.parts[len(root.parts) + 1].split("=", 1)[1] for p in parts})
+        days = sorted({p.parts[len(root.parts) + 2].split("=", 1)[1] for p in parts})
+        print(f"  {venue}")
+        print(f"    parts    {len(parts)}")
+        print(f"    size     {size / 1e6:.1f} MB")
+        print(f"    days     {len(days)}"
+              + (f"  ({days[0]} to {days[-1]})" if days else ""))
+        print(f"    streams  {', '.join(streams)}")
+
+    print(f"\n  {total_parts} parts, {total_bytes / 1e6:.1f} MB total")
+
+    if args.verify:
+        print("\n  verifying checksums...")
+        checked, failures = archive.verify_all()
+        if failures:
+            print(f"  CORRUPT: {len(failures)} of {checked} parts failed")
+            for failure in failures[:10]:
+                print(f"    {failure}")
+            return 1
+        print(f"  {checked} parts verified, all intact")
+    else:
+        print("  pass --verify to check every checksum")
+    return 0
+
+
 def cmd_verify_audit(args) -> int:
     from .layers.l7_observability.audit import AuditLog, ChainBroken
 
@@ -948,6 +1118,26 @@ def main(argv=None) -> int:
     v = sub.add_parser("validate", help="run the full validation protocol")
     v.add_argument("--holdout", metavar="WHO",
                    help="also evaluate the holdout, once, recorded against this name")
+    v.add_argument("--from-archive", metavar="DIR",
+                   help="validate against captured data instead of the demo scenario")
+    v.add_argument("--venue", default="binance-futures",
+                   help="which venue's capture to replay (with --from-archive)")
+
+    cap = sub.add_parser("capture",
+                         help="capture raw market data to the archive, for months")
+    cap.add_argument("--out", default="archive", help="archive root directory")
+    cap.add_argument("--symbols", default="BTCUSDT", help="comma separated")
+    cap.add_argument("--futures", action="store_true",
+                     help="USD-M futures: adds funding and the liquidation stream")
+    cap.add_argument("--production", action="store_true",
+                     help="capture real market data rather than testnet")
+    cap.add_argument("--dry-run", action="store_true",
+                     help="print the plan and exit without connecting")
+
+    arc = sub.add_parser("archive", help="inspect and verify a captured archive")
+    arc.add_argument("--root", default="archive", help="archive root directory")
+    arc.add_argument("--verify", action="store_true",
+                     help="check every checksum")
 
     va = sub.add_parser("verify-audit", help="verify a hash-chained audit log")
     va.add_argument("path")
@@ -995,7 +1185,8 @@ def main(argv=None) -> int:
             "session": cmd_session, "validate": cmd_validate,
             "verify-audit": cmd_verify_audit, "live": cmd_live,
             "viability": cmd_viability, "limits": cmd_limits,
-            "doctor": cmd_doctor, "strategies": cmd_strategies}[args.command](args)
+            "doctor": cmd_doctor, "strategies": cmd_strategies,
+            "capture": cmd_capture, "archive": cmd_archive}[args.command](args)
 
 
 if __name__ == "__main__":
