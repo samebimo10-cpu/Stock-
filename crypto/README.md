@@ -70,7 +70,8 @@ src/tradesys/
                      the write-once raw archive and its normaliser
     l2_features/     pure features, versioned by content hash, look-ahead audit
     l3_strategy/     the contract, hedged funding carry, and pairs stat-arb
-    l4_portfolio/    netting, correlation on short samples, risk parity
+    l4_portfolio/    netting, correlation on short samples, risk parity,
+                     and the allocator that applies the weights
     l5_risk/         limits, the thirteen ordered checks, kill switches, sizing
     l6_execution/    order state machine, reconciliation, TCA, startup gate,
                      leg groups and the unwinder
@@ -95,7 +96,7 @@ ops/POSTMORTEM.md   the template, which requires a test
 cd crypto
 pip install -e ".[dev]"
 
-python -m pytest -q                              # 485 tests
+python -m pytest -q                              # 505 tests
 python -m pytest --doctest-modules src/tradesys -q
 
 tradesys selfcheck    # the machine-checkable Phase 0 gates
@@ -147,6 +148,7 @@ Every one has a test that fails when it is broken.
 | A limit change needs two people | SPEC §13.2 | The register refuses a config without two distinct signers, and the one-person substitute is a timed delay. |
 | Every dashboard panel measures something real | SPEC §10.3 | Panels are code, and a test asserts every metric they name is one a live session publishes. |
 | Every deviation is written down | SPEC §14.4 | Decision records with context, decision and consequences, indexed and never edited after acceptance. |
+| Allocation weights are applied, not displayed | SPEC §7.1 | Weights scale a strategy's exposure in netting. A strategy missing from the weight map trades nothing rather than everything. |
 
 ### What the second increment added
 
@@ -216,6 +218,11 @@ The prerequisite the third increment flagged, and the operational layer:
 - **A second strategy.** Pairs stat-arb, with its specification written before
   the code this time. Risk parity across one strategy is arithmetic with
   nothing to decide.
+- **An allocator that applies its weights.** They were being computed and
+  never multiplied by anything. The session feeds daily per-strategy profit in,
+  which is what correlation must be estimated on: two strategies trading the
+  same asset can be uncorrelated, and two trading different assets can be
+  identical.
 - **Dashboards as code, a post-mortem template and decision records.**
 
 ### What the maker path did not fix

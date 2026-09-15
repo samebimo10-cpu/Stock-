@@ -35,6 +35,7 @@ from .core.events import (
 from .accounting import Books
 from .core.types import Decimal as Dec, Nanos, dec
 from .layers.l2_features.engine import FeatureEngine
+from .layers.l4_portfolio.allocator import Allocator
 from .layers.l4_portfolio.netting import net_targets
 from .layers.l5_risk.service import RiskContext, RiskService
 from .layers.l6_execution.executor import Executor
@@ -122,6 +123,7 @@ class Pipeline:
         books: Optional[Books] = None,
         leg_timeout_ns: Optional[int] = None,
         taker_fallback_ns: Optional[int] = None,
+        allocator: Optional[Allocator] = None,
     ) -> None:
         self.strategies = list(strategies)
         self.risk = risk
@@ -158,6 +160,10 @@ class Pipeline:
         #: How often a maker attempt had to cross. A fallback on every order
         #: means maker entry is not working in these conditions.
         self.fallbacks_fired = 0
+        #: Applies the risk-parity weights. Re-solves on a schedule rather than
+        #: on every event: chasing a correlation estimate that moved by noise is
+        #: the churn the turnover deadband exists to prevent.
+        self.allocator = allocator if allocator is not None else Allocator()
         #: Multi-leg trades in flight. Specified before any multi-leg strategy
         #: exists, because a group that fills one leg and not the other is
         #: holding exposure nobody sized.
@@ -223,8 +229,10 @@ class Pipeline:
             return result
 
         # L3 -> L4
-        netted = net_targets(result.signals, self.allocation_version,
-                             event.emitted_at, self.risk.allocation_multiplier())
+        self.allocator.solve([s.strategy_id for s in self.strategies], event.emitted_at)
+        netted = net_targets(result.signals, self.allocator.version,
+                             event.emitted_at, self.risk.allocation_multiplier(),
+                             weights=self.allocator.weights or None)
         result.targets = list(netted.targets)
         for t in netted.targets:
             self.recorder.add("target", f"{t.venue}:{t.symbol}", target=t.target)

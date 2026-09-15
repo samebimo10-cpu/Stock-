@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, Mapping, Sequence, Tuple
+from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 from ...core.events import Signal, TargetPosition
 from ...core.ids import new_correlation_id
@@ -42,7 +42,8 @@ class NettingError(AssertionError):
 
 
 def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
-                now: Nanos = 0, multiplier: Dec = dec(1)) -> NettingResult:
+                now: Nanos = 0, multiplier: Dec = dec(1),
+                weights: Optional[Mapping[str, Dec]] = None) -> NettingResult:
     """Net offsetting desired exposures across strategies.
 
     ``multiplier`` is the allocation multiplier from the risk service: 1.0
@@ -50,6 +51,11 @@ def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
     target rather than selecting which ones survive, so a drawdown reduces the
     whole book evenly instead of concentrating it in whichever strategy
     happened to signal last.
+
+    ``weights`` are the portfolio layer's per-strategy risk-parity weights.
+    They scale a strategy's desired exposure rather than gating it: a strategy
+    at a fifth of the risk budget trades at a fifth of its size, not one day in
+    five. A weight nobody multiplies a signal by is a number on a dashboard.
 
     Contributions are recorded per strategy so an internal crossing is still
     attributed correctly downstream (SPEC section 12.2) - netting improves the
@@ -60,7 +66,15 @@ def net_targets(signals: Sequence[Signal], allocation_version: int = 0,
     urgency_of: Dict[Tuple[str, str], str] = {}
     for sig in signals:
         key = (sig.venue, sig.symbol)
-        by_key.setdefault(key, {})[sig.strategy_id] = sig.target_position * multiplier
+        # A strategy missing from a supplied weight map gets zero, not one.
+        # Defaulting to full size would give an un-allocated strategy the whole
+        # book by omission, which is the safe-degradation rule of SPEC section
+        # 3.2 read backwards. No map at all means the allocator has not solved
+        # yet, and then everything trades at its own size.
+        weight = weights.get(sig.strategy_id, dec(0)) if weights else dec(1)
+        by_key.setdefault(key, {})[sig.strategy_id] = (
+            sig.target_position * multiplier * weight
+        )
         # The most urgent contributor wins. A passive order that is also
         # somebody's hedge must cross, or the hedge does not happen.
         order = {"passive": 0, "maker_preferred": 1, "normal": 2, "aggressive": 3}

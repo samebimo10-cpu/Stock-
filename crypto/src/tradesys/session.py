@@ -83,6 +83,8 @@ class TradingSession:
         self._last_reconcile: Nanos = 0
         self._last_heartbeat: Nanos = 0
         self.startup_report: List[str] = []
+        self._current_day: Optional[str] = None
+        self._day_start_pnl: Dict[str, Dec] = {}
         self._register_metrics()
 
     def _register_metrics(self) -> None:
@@ -293,6 +295,7 @@ class TradingSession:
         if at - self._last_reconcile >= self.config.reconcile_interval_ns:
             await self.reconcile()
 
+        self._roll_day(at)
         self.pipeline.risk.check_drawdown_ladder(at)
         self._publish_state()
 
@@ -302,6 +305,36 @@ class TradingSession:
 
         if self.pipeline.risk.killswitch.must_flatten and self.state == SessionState.RUNNING:
             await self._flatten(self.pipeline.risk.killswitch.blocking_reason() or "kill switch")
+
+    def _roll_day(self, at: Nanos) -> None:
+        """Close the day: feed each strategy's profit to the allocator.
+
+        Correlation is estimated on **daily strategy profit and loss**, not on
+        asset returns (SPEC section 7.2). Two strategies trading the same asset
+        can be uncorrelated and two trading different assets can be identical,
+        so the asset is the wrong thing to measure.
+        """
+        from datetime import datetime, timezone
+
+        day = datetime.fromtimestamp(at / 1e9, tz=timezone.utc).strftime("%Y-%m-%d")
+        if self._current_day is None:
+            self._current_day = day
+            self._day_start_pnl = {
+                sid: led.net_pnl for sid, led in self.pipeline.books.strategies.items()
+            }
+            return
+        if day == self._current_day:
+            return
+
+        for sid, led in self.pipeline.books.strategies.items():
+            opening = self._day_start_pnl.get(sid, dec(0))
+            self.pipeline.allocator.observe(sid, float(led.net_pnl - opening))
+        self._day_start_pnl = {
+            sid: led.net_pnl for sid, led in self.pipeline.books.strategies.items()
+        }
+        self._current_day = day
+        self.pipeline.risk.state.roll_day(day)
+        self.metrics.gauge("allocation_version").set(self.pipeline.allocator.version)
 
     def _publish_state(self) -> None:
         books = self.pipeline.books
@@ -451,6 +484,7 @@ class TradingSession:
             "open_orders": len(self.pipeline.executor.open_machines()),
             "open_leg_groups": self.pipeline.unwinder.open_groups,
             "reconciliation_clean": self.pipeline.executor.reconciliation_clean,
+            "allocation": self.pipeline.allocator.status(),
             "strategies": {
                 s.strategy_id: {"state": s.health.state, "enabled": s.health.enabled}
                 for s in self.pipeline.strategies
