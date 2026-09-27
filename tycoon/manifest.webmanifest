@@ -1,0 +1,16 @@
+{
+  "name": "Tycoon Rush",
+  "short_name": "Tycoon Rush",
+  "description": "A roguelite investing game: build a fortune from nothing to financial freedom in ten minutes.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#140e29",
+  "theme_color": "#140e29",
+  "lang": "en",
+  "categories": ["games", "education", "finance"],
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

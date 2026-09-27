@@ -7,6 +7,13 @@
 >
 > Open it at **https://samebimo10-cpu.github.io/Stock-/farm/**
 
+> **Also here: [Tycoon Rush](tycoon/)**, a roguelite investing game you can play offline on your
+> phone. Start at 22 with a salary, read the headlines, move your money between savings, an index
+> fund, single stocks, property, crypto, a business and dollars, and try to reach financial freedom
+> (passive income covering your living costs) before 60. Classic, Blitz, Daily Market, Eras, Duel
+> codes and a Weekly Challenge. Open it at **https://samebimo10-cpu.github.io/Stock-/tycoon/**, then
+> "Add to Home Screen" and it works without a connection.
+
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every
 stock in a configurable universe with a transparent multi-factor model, then builds a portfolio that

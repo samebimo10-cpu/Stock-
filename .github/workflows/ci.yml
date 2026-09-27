@@ -28,3 +28,14 @@ jobs:
           node-version: "22"
       - name: Domain and event-log tests
         run: node --test "douvalue/tests/**/*.test.mjs"
+
+  tycoon:
+    name: Tycoon Rush game
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Game rules tests
+        run: node --test "tycoon/tests/**/*.test.mjs"

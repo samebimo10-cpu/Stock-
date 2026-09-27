@@ -9,8 +9,9 @@
 #
 #   _site/          the stock selector and allocator   -> /Stock-/
 #   _site/farm/     DouValue Farm Manager              -> /Stock-/farm/
+#   _site/tycoon/   Tycoon Rush, the investing game    -> /Stock-/tycoon/
 #
-# Both apps reference their assets with relative paths, so the farm app works
+# All the apps reference their assets with relative paths, so the farm app works
 # from a sub-path with no rewriting.
 
 set -euo pipefail
@@ -45,6 +46,14 @@ if [ -d "$root/douvalue/web" ]; then
   fi
 else
   echo "::warning::douvalue/web is missing, so the farm app was not published."
+fi
+
+# The game is optional in the same way as the farm app.
+if [ -d "$root/tycoon" ]; then
+  mkdir -p "$out/tycoon"
+  cp "$root/tycoon/index.html" "$root/tycoon/sw.js" "$root/tycoon/manifest.webmanifest" "$root/tycoon/icon.svg" "$out/tycoon/"
+  cp -R "$root/tycoon/js" "$out/tycoon/js"
+  echo "Game       -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
 fi
 
 # Pages built through Actions does not run Jekyll, but this makes that explicit
