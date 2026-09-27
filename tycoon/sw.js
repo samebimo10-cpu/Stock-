@@ -1,10 +1,14 @@
 // Offline cache for Tycoon Rush.
 //
 // Bored on a bus with no signal is the whole point, so every file the game
-// needs is cached on first visit and served from the cache first. The network
-// is only used in the background to pick up a newer copy.
+// needs is kept on the phone. When there is a connection the game asks the
+// network first, so a new version shows up the next time it is opened; if the
+// network is slow or gone it falls back to the saved copy within a few seconds.
 
-const CACHE = 'tycoon-rush-v3';
+const CACHE = 'tycoon-rush-v4';
+
+// How long to wait for the network before using the saved copy.
+const NETWORK_WAIT_MS = 3000;
 
 const SHELL = [
   './',
@@ -23,9 +27,11 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
+  // cache: 'reload' skips the browser's HTTP cache, which GitHub Pages fills
+  // for ten minutes, so an update never installs yesterday's files.
   event.waitUntil(
     caches.open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
+      .then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
       .then(() => self.skipWaiting()),
   );
 });
@@ -42,21 +48,23 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-
   if (url.origin !== self.location.origin) return;
 
-  event.respondWith(
-    caches.match(request).then((hit) => {
-      const fromNetwork = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => hit);
-      return hit || fromNetwork;
-    }),
-  );
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    // 'no-cache' asks the server whether the file changed (a cheap 304 when
+    // it hasn't) instead of trusting a copy the browser kept.
+    const network = fetch(request, { cache: 'no-cache' }).then((response) => {
+      if (response && response.ok) cache.put(request, response.clone());
+      return response;
+    });
+    const saved = await cache.match(request);
+    if (!saved) return network;
+    const timeout = new Promise((resolve) => { setTimeout(() => resolve(null), NETWORK_WAIT_MS); });
+    try {
+      return (await Promise.race([network, timeout])) || saved;
+    } catch {
+      return saved;
+    }
+  })());
 });
