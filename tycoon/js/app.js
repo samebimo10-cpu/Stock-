@@ -245,7 +245,7 @@ function openSheet(html) {
   layer.innerHTML = `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
 }
 function openModal(html) {
-  const homeBtn = run && run.phase !== 'done' ? `<button class="icon-btn modal-home" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 24, '')}</button>` : '';
+  const homeBtn = run && run.phase !== 'done' ? `<button class="home-pill modal-home" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 22, '')}<span>Home</span></button>` : '';
   layer.innerHTML = `<div class="scrim full"><div class="modal" role="dialog" aria-modal="true">${homeBtn}${html}</div></div>`;
   layer.querySelector('.modal').scrollTop = 0;
 }
@@ -567,7 +567,7 @@ function setup(mode) {
     </section>` : '';
   app.innerHTML = `
   <main class="page">
-    <header class="page-h"><button class="icon-btn" data-act="home" aria-label="Back">‹</button><h1>${esc(E.MODES[setupMode].name)}</h1></header>
+    <header class="page-h"><button class="home-pill" data-act="home" aria-label="Home screen">‹ ${A.icon('house', 20, '')}<span>Home</span></button><h1>${esc(E.MODES[setupMode].name)}</h1></header>
     ${['journey', 'classic', 'blitz'].includes(setupMode) ? `<section class="field">
       <span class="lbl">How do you want to start?</span>
       <div class="seg start-seg">
@@ -780,7 +780,7 @@ function renderGame() {
     </section>
     ${curesHTML()}
     ${heldCards || lev ? `<section class="sec"><div class="sec-h"><h2>Your cards</h2></div><div class="held">${lev}${heldCards}</div></section>` : ''}
-    <footer class="actionbar"><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Guess first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></footer>
+    <footer class="actionbar"><div class="actions-row"><button class="home-big" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 28, '')}<span>Home</span></button><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Guess first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></div></footer>
   </div>`;
   requestAnimationFrame(drawSparks);
 }
@@ -1389,6 +1389,7 @@ function results(done) {
   const text = shareText(done);
   app.innerHTML = `
   <main class="results">
+    <button class="home-pill" data-act="home" aria-label="Home screen">‹ ${A.icon('house', 20, '')}<span>Home</span></button>
     <span class="kicker">${esc(E.MODES[done.mode].name)} · ${esc(CHARACTERS[done.char].name)}${done.asc ? ` · Ascension ${done.asc}` : ''}</span>
     <div class="res-scene">${resultScene(done)}</div>
     <h1 class="res-title ${tone_}">${esc(title)}</h1>
@@ -1467,7 +1468,11 @@ function learnResults(r) {
 function page(title, body, back = 'home') {
   stopTimer();
   closeLayer();
-  app.innerHTML = `<main class="page"><header class="page-h"><button class="icon-btn" data-act="${back}" aria-label="Back">‹</button><h1>${esc(title)}</h1></header>${body}</main>`;
+  const backBtn = back === 'home'
+    ? `<button class="home-pill" data-act="home" aria-label="Home screen">‹ ${A.icon('house', 20, '')}<span>Home</span></button>`
+    : `<button class="icon-btn" data-act="${back}" aria-label="Back">‹</button>`;
+  const homeRight = back !== 'home' && P.onboarded ? `<button class="home-pill page-home" data-act="home" aria-label="Home screen">${A.icon('house', 20, '')}<span>Home</span></button>` : '';
+  app.innerHTML = `<main class="page"><header class="page-h">${backBtn}<h1>${esc(title)}</h1>${homeRight}</header>${body}</main>`;
   window.scrollTo(0, 0);
 }
 
