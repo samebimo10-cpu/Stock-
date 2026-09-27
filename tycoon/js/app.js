@@ -4,8 +4,9 @@
 import * as E from './engine.js';
 import {
   CURRENCIES, LIFESTYLES, CHARACTERS, ASSETS, COMPANIES, STATE_INFO, SWANS, CARDS,
-  ERAS, CHALLENGES, ASCENSION, GLOSSARY, SCAM_TIPS, LESSONS, TIPS,
+  ERAS, CHALLENGES, ASCENSION, GLOSSARY, SCAM_TIPS, LESSONS, TIPS, REGIONS, PROFILE_BLURB,
 } from './content.js';
+import * as A from './art.js';
 import { BOOKS, PRINCIPLES, PLANS, AIMS } from './learn.js';
 
 const app = document.getElementById('app');
@@ -21,6 +22,7 @@ const DEFAULTS = {
   principles: [], fcAll: [],
   settings: { sound: true, timer: false, currency: 'NGN', calm: false, lens: false },
   setup: { char: 'graduate', asc: 0, aim: 45 },
+  onboarded: false, region: null, look: { skin: 3, hair: 'short', hairColor: 0, outfit: 0 },
   run: null,
 };
 let P = loadProfile();
@@ -32,6 +34,10 @@ function loadProfile() {
   const p = { ...DEFAULTS, ...(saved || {}) };
   p.settings = { ...DEFAULTS.settings, ...(p.settings || {}) };
   p.setup = { ...DEFAULTS.setup, ...(p.setup || {}) };
+  p.look = { ...DEFAULTS.look, ...(p.look || {}) };
+  if (!CURRENCIES[p.settings.currency]) p.settings.currency = 'NGN';
+  // Players from before the redesign skip the intro but keep their progress.
+  if (saved && saved.runs > 0 && saved.onboarded == null) { p.onboarded = true; p.region = p.region || (p.settings.currency === 'USD' ? 'europe_na' : 'westafrica'); }
   return p;
 }
 function saveProfile() {
@@ -241,45 +247,160 @@ function openModal(html) {
 function closeLayer() { layer.innerHTML = ''; sheetCtx = null; }
 let sheetCtx = null;
 
+// ------------------------------------------------------------------ people, places and plain words
+
+const region = () => REGIONS[P.region] || REGIONS.westafrica;
+const guideId = () => region().guide;
+const guideName = () => A.GUIDES[guideId()].name;
+
+// The guide talks in a speech bubble. `text` must already be safe HTML.
+function guideSay(text, expr = 'happy', extra = '') {
+  return `<div class="guide"><span class="guide-face">${A.castFace(guideId(), expr, 58, guideName())}</span><div class="bubble"><b>${esc(guideName())}</b><p>${text}</p>${extra}</div></div>`;
+}
+
+// A real finance word, shown small and tappable next to the plain one.
+const jtag = (word, term) => `<button class="jtag" data-act="term" data-id="${term}">${esc(word)} ⓘ</button>`;
+const ASSET_TERM = { save: 'realreturn', index: 'index', stocks: 'diversify', prop: 'mortgage', crypto: 'volatility', biz: 'passive', fx: 'devaluation' };
+
+function youExpr() {
+  if (!run) return 'happy';
+  if (run.joy < 25) return 'tired';
+  if (run.turn > 0 && run.market[run.turn - 1].state === 'crash') return 'shocked';
+  return run.joy >= 45 ? 'happy' : 'neutral';
+}
+
+function lastMood() {
+  return run && run.turn > 0 ? run.market[run.turn - 1].state : 'steady';
+}
+
+function sceneFor(r, opts = {}) {
+  const prog = clamp(E.passive(r).total / E.costs(r), 0, 1);
+  return A.homeScene({
+    stage: opts.stage ?? A.stageOf(prog), life: r.life, mood: opts.mood || lastMood(), look: P.look, char: r.char, age: r.age,
+    expr: opts.expr || youExpr(), prop: r.h.prop.v > 0, biz: r.h.biz.c > 0, farmer: r.char === 'farmer',
+    kids: !!r.flags.kids, car: !!r.flags.car, sea: E.atSea(r),
+  }, { label: opts.label || 'Your home. It grows as your fruit basket fills.' });
+}
+
+// Effects written with little pictures: pay slip, smile, bowl, coin.
+function fxIcons(note) {
+  return esc(note)
+    .replace(/\bjoy\b/g, `<span class="fx-i">${A.icon('smile', 16)}</span>joy`)
+    .replace(/\b(salary|income|pay)\b/g, (w) => `<span class="fx-i">${A.icon('payslip', 16)}</span>${w}`)
+    .replace(/\b([Cc]osts)\b/g, (w) => `<span class="fx-i">${A.icon('bowl', 16)}</span>${w}`);
+}
+
+function termSheet(id) {
+  const g = GLOSSARY[id];
+  if (!g) return;
+  openSheet(`${sheetHead('', g[0])}${guideSay(esc(g[1]))}<button class="btn wide" data-act="close">Got it</button>`);
+}
+
+function pricesSheet() {
+  const c = CURRENCIES[run.currency];
+  const bread = 1.2 * c.scale * run.prices;
+  const before = run.turn > 0 ? bread / Math.pow(1 + run.infl, run.ypt) : bread;
+  const real = (1 + run.rate) / (1 + run.infl) - 1;
+  const mood = lastMood();
+  openSheet(`
+    ${sheetHead('', 'Prices and rates')}
+    <div class="pr-row">${A.icon('bread', 48, 'A loaf of bread')}<div><b>A loaf of bread: ${f(bread)}</b><p class="muted">${run.turn > 0 ? `Last year it was ${f(before)}.` : 'Watch this price each year.'}</p><p>Prices are rising <b>${pctS(run.infl)}</b> a year. ${jtag('Inflation', 'inflation')}</p></div></div>
+    <div class="pr-row">${A.icon('counter', 48, 'Bank counter')}<div><b>The bank pays ${pctS(run.rate)} a year</b><p>on money in your safe box. ${jtag('Interest rate', 'rates')}</p><p class="${real >= 0 ? 'up' : 'down'}">${real >= 0 ? '▲' : '▼'} After rising prices, the safe box ${real >= 0 ? 'gains' : 'loses'} about ${pctS(Math.abs(real))} a year. ${jtag('Real return', 'realreturn')}</p></div></div>
+    <div class="pr-row">${A.moodIcon(mood, 48)}<div><b>Market weather ${run.turn > 0 ? 'last year' : 'so far'}: ${A.WEATHER[mood].word}</b><p class="muted">${esc(STATE_INFO[mood].name)}. ${esc(STATE_INFO[mood].line)}</p></div></div>
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+function townSheet() {
+  const open = ORDER.filter((id) => E.isOpen(run, id));
+  openSheet(`${sheetHead('', 'Your town')}<p class="muted">Each building is a place to put money. Tap one to go in.</p>${A.townScene(open, lastMood())}<button class="btn wide" data-act="close">Back to my home</button>`);
+}
+
+// ------------------------------------------------------------------ first launch: intro, region, look
+
+function intro(step = 0) {
+  stopTimer();
+  closeLayer();
+  const steps = [
+    { art: A.castFace(guideId(), 'cheer', 150, guideName()), text: `Hi! I'm <b>${esc(guideName())}</b>. I'll help you grow rich, one year at a time.` },
+    { art: `<div class="intro-pair">${A.coinJar(0.7, { size: 110 })}${A.icon('bread', 90, 'Bread with a price tag')}</div>`, text: 'This jar is your money. Prices go up every year, so coins that just sit there buy less bread.' },
+    { art: `<div class="intro-pair">${A.fruitTree(0.8, 110)}${A.icon('fruitbasket', 90, 'Fruit basket')}${A.icon('bowl', 90, 'Bowl')}</div>`, text: 'Money that comes by itself is fruit in your basket. Your living costs are the bowl. <b>Fill the bowl before 60 and you are free.</b>' },
+  ];
+  const s = steps[step];
+  app.innerHTML = `
+  <main class="intro">
+    <div class="intro-art">${s.art}</div>
+    ${guideSay(s.text, step === 0 ? 'cheer' : 'happy')}
+    <div class="dots">${steps.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>
+    <button class="btn primary wide" data-act="${step < steps.length - 1 ? 'intro' : 'region-screen'}" data-step="${step + 1}">${step < steps.length - 1 ? 'Next' : 'Choose where you live'}</button>
+    <button class="btn ghost wide" data-act="region-screen">Skip</button>
+  </main>`;
+}
+
+function regionScreen() {
+  const sel = P.region || 'westafrica';
+  page('Where do you live?', `
+    ${A.worldMap(REGIONS, sel)}
+    <div class="choice-list">${Object.entries(REGIONS).map(([id, r]) => `<button class="choice ${sel === id ? 'on' : ''}" data-act="region" data-id="${id}"><span class="av">${A.castFace(r.guide, 'happy', 44, '')}</span><span><b>${esc(r.name)}</b><small>Guide: ${esc(A.GUIDES[r.guide].name)} · ${r.currencies.map((c) => `${esc(CURRENCIES[c].sym.trim())} ${esc(CURRENCIES[c].name)}`).join(', ')}</small></span></button>`).join('')}</div>
+    <p class="note">Your region sets your money, your guide and your town. The markets work the same way everywhere.</p>
+    <div class="sticky-go"><button class="btn primary wide" data-act="look-screen">Next: how you look</button></div>`, P.onboarded ? 'settings' : 'intro');
+}
+
+function lookScreen() {
+  const l = P.look;
+  const swatch = (key, arr) => arr.map((c, i) => `<button class="swatch ${l[key] === i ? 'on' : ''}" style="--sw:${c}" data-act="look" data-k="${key}" data-v="${i}" aria-label="${key} ${i + 1}"></button>`).join('');
+  page('How do you look?', `
+    <div class="look-preview">${A.avatar(l, P.setup.char || 'graduate', { age: 22, expr: 'cheer', size: 180, label: 'Your character' })}</div>
+    <section class="field"><span class="lbl">Skin</span><div class="swatches">${swatch('skin', A.SKINS)}</div></section>
+    <section class="field"><span class="lbl">Hair</span><div class="hair-grid">${A.HAIRS.map((h) => `<button class="hair-btn ${l.hair === h ? 'on' : ''}" data-act="look" data-k="hair" data-v="${h}" aria-label="${h}">${A.person({ skin: A.SKINS[l.skin], hair: h, hairColor: A.HAIR_COLORS[l.hairColor || 0], outfit: A.OUTFITS[l.outfit], accent: A.OUTFITS[(l.outfit + 2) % 6], expr: 'happy' }, { size: 56 })}</button>`).join('')}</div></section>
+    <section class="field"><span class="lbl">Hair colour</span><div class="swatches">${swatch('hairColor', A.HAIR_COLORS.slice(0, 4))}</div></section>
+    <section class="field"><span class="lbl">Clothes</span><div class="swatches">${swatch('outfit', A.OUTFITS)}</div></section>
+    <div class="sticky-go"><button class="btn primary wide" data-act="look-done">${P.onboarded ? 'Save' : 'Start playing'}</button></div>`, 'region-screen');
+}
+
 // ------------------------------------------------------------------ home
 
 function home() {
   stopTimer();
   closeLayer();
+  if (!P.onboarded) return intro(0);
   run = P.run;
   const daily = P.daily[today()];
   const wk = weeklyChallenge();
   const wkDone = P.weekly[weekNo()];
   const resume = run && run.phase !== 'done'
-    ? `<button class="continue" data-act="resume"><span><span class="kicker">Continue run</span><b>${esc(E.MODES[run.mode].name)} · Age ${run.age}</b><span class="muted">${esc(CHARACTERS[run.char].name)} · ${f(E.netWorth(run))}</span></span><span class="kicker">Play ▸</span></button>` : '';
+    ? `<button class="continue" data-act="resume"><span class="c-face">${A.avatar(P.look, run.char, { age: run.age, expr: 'happy', size: 52, label: '' })}</span><span><span class="kicker">Continue</span><b>${esc(E.MODES[run.mode].name)} · Age ${run.age}</b><span class="muted">${f(E.netWorth(run))} owned</span></span><span class="kicker">▶</span></button>` : '';
+  const more = [
+    ['daily', 'calendar', 'Daily Market', daily ? 'Done today ✓' : 'Same market for everyone'],
+    ['duel', 'swords', 'Duel', 'Play a friend\'s market'],
+    ['eras', 'clock', 'Eras', 'Famous booms and busts'],
+    ['blitz', 'bolt', 'Blitz', '15 seconds a turn'],
+    ['weekly', 'trophy', `Weekly: ${wk.name}`, wkDone != null ? 'Badge earned ✓' : wk.text],
+    ['library', 'book', 'Library', 'The books behind the game'],
+    ['collection', 'star', 'Collection', 'Cards, people, words'],
+  ];
   app.innerHTML = `
   <main class="home">
+    <div class="home-scene">${A.homeScene({ stage: P.bestAge ? 4 : 1, life: 2, mood: 'boom', look: P.look, char: P.setup.char || 'graduate', age: 22, expr: 'cheer', prop: P.freedoms > 0, biz: P.runs > 2 }, { label: 'Your home' })}</div>
     <header class="brand">
       <div class="logo">TYCOON<span>RUSH</span></div>
-      <p class="tag">Retire rich before 60, in ten minutes.</p>
+      <p class="tag">Fill your bowl with fruit from your money tree, before 60.</p>
     </header>
-    <div class="ticker-strip" aria-hidden="true"><span>ZNK +2.1% · PLM −0.8% · BGP +0.4% · KUL +6.3% · NXO −3.2% · INDEX +1.2% · MOONCOIN −41% · T-BILL 13.5% · </span></div>
     ${resume}
-    <section class="modes">
-      <button class="mode hero" data-act="setup" data-mode="journey"><b>Wisdom Journey</b><small>Learn as you play. One year at a time: forecast the odds, follow a plan, and meet the ideas of six great money books.</small></button>
-      <button class="mode" data-act="setup" data-mode="classic"><b>Classic Run</b><small>2 years a turn, about 10 minutes. Ascension lives here.</small></button>
-      <button class="mode" data-act="setup" data-mode="blitz"><b>Blitz</b><small>4 years a turn, 15 seconds to decide.</small></button>
-      <button class="mode" data-act="daily"><b>Daily Market</b><small>Same market for everyone today. One try.</small>${daily ? `<span class="badge pill v-real">Done</span>` : ''}</button>
-      <button class="mode" data-act="eras"><b>Eras</b><small>Survive famous booms and busts.</small></button>
-      <button class="mode" data-act="duel"><b>Duel</b><small>Share a code, play the same market as friends.</small></button>
-      <button class="mode" data-act="library"><b>Library</b><small>The books, their ideas, and your forecasting record.</small></button>
-      <button class="mode" data-act="weekly" style="grid-column:1/-1"><b>Weekly: ${esc(wk.name)}</b><small>${esc(wk.text)}</small>${wkDone != null ? `<span class="badge pill v-real">Badge</span>` : ''}</button>
-    </section>
+    <button class="play-big" data-act="setup" data-mode="journey">${A.icon('play', 60, '')}<span><b>Play</b><small>Learn as you go, one year at a time</small></span></button>
+    <button class="btn wide" data-act="setup" data-mode="classic">${A.icon('coin', 26, '')} Quick game · about 10 minutes</button>
+    <details class="more"><summary>${A.icon('gift', 26, '')} More ways to play</summary>
+      <div class="more-grid">${more.map(([act, ic, name, sub]) => `<button class="more-b" data-act="${act === 'blitz' ? 'setup' : act}" ${act === 'blitz' ? 'data-mode="blitz"' : ''}>${A.icon(ic, 40, '')}<b>${esc(name)}</b><small>${esc(sub)}</small></button>`).join('')}</div>
+    </details>
     <div class="stats-row">
       <div class="stat"><b>${P.wisdom}</b><span>Wisdom</span></div>
       <div class="stat"><b>${P.best.toLocaleString()}</b><span>Best score</span></div>
-      <div class="stat"><b>${P.bestAge ?? '–'}</b><span>Freest at</span></div>
+      <div class="stat"><b>${P.bestAge ?? '–'}</b><span>Free at</span></div>
       <div class="stat"><b>${P.runs}</b><span>Runs</span></div>
     </div>
     <nav class="homebar">
-      <button class="btn small" data-act="collection">Collection</button>
+      <button class="btn small" data-act="look-screen">${A.icon('smile', 20, '')} Me</button>
       <button class="btn small" data-act="how">How to play</button>
-      <button class="btn small" data-act="settings">Settings</button>
+      <button class="btn small" data-act="settings">${A.icon('gear', 20, '')} Settings</button>
     </nav>
   </main>`;
 }
@@ -291,39 +412,45 @@ function setup(mode) {
   setupMode = mode || setupMode;
   const s = P.setup;
   const cur = P.settings.currency;
+  const regionCurs = region().currencies;
+  const otherCurs = Object.keys(CURRENCIES).filter((c) => !regionCurs.includes(c));
+  const opt = (c) => `<option value="${c}" ${c === cur ? 'selected' : ''}>${esc(CURRENCIES[c].sym.trim())} ${esc(CURRENCIES[c].name)}</option>`;
   const chars = Object.entries(CHARACTERS).map(([id, c]) => {
     const locked = c.unlock > P.wisdom;
-    return `<button class="choice ${s.char === id ? 'on' : ''} ${locked ? 'locked' : ''}" data-act="pick-char" data-id="${id}" ${locked ? 'disabled' : ''}>
-      <span class="av">${initials(c.name)}</span>
-      <span><b>${esc(c.name)}</b><small>${locked ? `Unlocks at ${c.unlock} wisdom` : esc(c.blurb)}</small></span></button>`;
+    return `<button class="char-card ${s.char === id ? 'on' : ''} ${locked ? 'locked' : ''}" data-act="pick-char" data-id="${id}" ${locked ? 'disabled' : ''}>
+      ${A.avatar(P.look, id, { age: 24, expr: locked ? 'neutral' : 'happy', size: 120, label: c.name })}
+      <b>${esc(c.name)}</b><small>${locked ? `Unlocks at ${c.unlock} wisdom` : esc(c.blurb)}</small></button>`;
   }).join('');
   const asc = setupMode === 'classic' ? `
     <section class="field">
-      <span class="lbl">Ascension</span>
+      <span class="lbl">Difficulty mountain</span>
+      <div class="mountain">${Array.from({ length: ASCENSION.length }, (_, i) => `<span class="flag ${i <= P.maxAsc ? 'got' : ''} ${i === s.asc ? 'on' : ''}" style="--i:${i * 3}" title="${esc(ASCENSION[i])}"></span>`).join('')}</div>
       <div class="stepper">
-        <button class="icon-btn" data-act="asc" data-d="-1" aria-label="Lower">−</button>
+        <button class="icon-btn" data-act="asc" data-d="-1" aria-label="Easier">−</button>
         <b>${s.asc}</b>
-        <button class="icon-btn" data-act="asc" data-d="1" aria-label="Higher" ${s.asc >= P.maxAsc ? 'disabled' : ''}>+</button>
-        <span class="note">${esc(ASCENSION[s.asc])}${P.maxAsc === 0 ? '. Reach freedom to unlock level 1.' : ''}</span>
+        <button class="icon-btn" data-act="asc" data-d="1" aria-label="Harder" ${s.asc >= P.maxAsc ? 'disabled' : ''}>+</button>
+        <span class="note">${esc(ASCENSION[s.asc])}${P.maxAsc === 0 ? '. Reach freedom to climb higher.' : ''}</span>
       </div>
     </section>` : '';
   app.innerHTML = `
   <main class="page">
     <header class="page-h"><button class="icon-btn" data-act="home" aria-label="Back">‹</button><h1>${esc(E.MODES[setupMode].name)}</h1></header>
-    <section class="field"><span class="lbl">Who are you?</span><div class="choice-list">${chars}</div></section>
+    <section class="field"><span class="lbl">Who are you? Swipe to see more</span><div class="char-strip">${chars}</div></section>
     <section class="field">
-      <span class="lbl">Currency</span>
-      <div class="seg">${Object.entries(CURRENCIES).map(([id, c]) => `<button class="${cur === id ? 'on' : ''}" data-act="cur" data-id="${id}">${c.sym} ${c.name}</button>`).join('')}</div>
-      <span class="note">${esc(CURRENCIES[cur].blurb)}</span>
+      <label class="lbl" for="cur">Your money</label>
+      <select id="cur" class="select">${regionCurs.map(opt).join('')}<optgroup label="Other currencies">${otherCurs.map(opt).join('')}</optgroup></select>
+      <span class="note">${esc(PROFILE_BLURB[CURRENCIES[cur].profile])}</span>
     </section>
     ${asc}
     ${setupMode === 'journey' ? `<section class="field">
-      <span class="lbl">Your definite chief aim</span>
-      <div class="seg">${AIMS.map((a) => `<button class="${P.setup.aim === a ? 'on' : ''}" data-act="aim" data-v="${a}">Free by ${a}</button>`).join('')}</div>
-      <span class="note">Think and Grow Rich starts here: a definite goal with a date. Meet it for a big bonus. Each turn is one year, with a forecast, a plan and a mentor's lesson. Your progress saves, so play a few years at a time.</span>
+      <span class="lbl">Your goal: free by what age?</span>
+      <div class="seg">${AIMS.map((a) => `<button class="${P.setup.aim === a ? 'on' : ''}" data-act="aim" data-v="${a}">${a}</button>`).join('')}</div>
+      ${guideSay('Write your goal down and keep it in sight. <i>Think and Grow Rich</i> starts here. Each turn is one year, and your progress saves, so play a few years at a time.')}
     </section>` : ''}
-    <div class="sticky-go"><button class="btn primary wide" data-act="start">Start at ${E.MODES[setupMode].startAge}</button></div>
+    <div class="sticky-go"><button class="btn primary wide" data-act="start">${A.icon('play', 24, '')} Start at ${E.MODES[setupMode].startAge}</button></div>
   </main>`;
+  const strip = app.querySelector('.char-strip .on');
+  if (strip) strip.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 function startRun(opts) {
@@ -341,24 +468,35 @@ function startRun(opts) {
 const ORDER = ['save', 'index', 'stocks', 'prop', 'crypto', 'biz', 'fx'];
 
 function tileHTML(id) {
-  const A = ASSETS[id];
-  if (id === 'fx' && run.currency !== 'NGN') return '';
+  const pl = A.PLAIN[id];
+  if (id === 'fx' && !E.isOpen(run, 'fx') && !E.challenge(run)) return '';
   const open = E.isOpen(run, id);
   const hv = E.holdings(run)[id];
   let change = run.last[id];
   if (id === 'stocks' && Array.isArray(change)) change = change.reduce((s, x) => s + x, 0) / change.length;
-  let foot = change != null ? `<span class="${cls(change)}">${E.pct(change, 1)}</span>` : '<span class="muted">New</span>';
-  if (id === 'biz' && run.h.biz.c > 0) foot = `<span class="up">${f(run.h.biz.profit)}/yr</span>`;
-  if (id === 'prop' && run.h.prop.v > 0) foot = `<span class="up">${f(run.h.prop.v * E.rentYield(run))}/yr</span>`;
-  if (id === 'save') foot = `<span class="${run.rate < run.infl ? 'down' : 'up'}">${pctS(run.rate)}/yr</span>`;
-  return `<button class="tile ${open ? '' : 'closed'}" style="--c:${A.color}" data-act="asset" data-id="${id}" ${open ? '' : 'disabled'}>
-    <span class="t-name">${esc(A.name)}</span>
-    <span class="t-sub">${open ? esc(A.sub) : 'Closed this week'}</span>
-    ${id === 'index' && open ? (() => { const mm = E.mrMarket(run); return `<span class="mm" style="color:${mm.v < 0.92 ? 'var(--gain)' : mm.v > 1.08 ? 'var(--orange)' : 'var(--sky)'}">${mm.v.toFixed(2)}× fair value</span>`; })() : ''}
+  const arrow = (x) => (x > 0.0005 ? '▲' : x < -0.0005 ? '▼' : '■');
+  let foot = change != null ? `<span class="${cls(change)}">${arrow(change)} ${E.pct(change, 1)}</span>` : '<span class="muted">New</span>';
+  if (id === 'biz' && run.h.biz.c > 0) foot = `<span class="up">▲ ${f(run.h.biz.profit)}/yr</span>`;
+  if (id === 'prop' && run.h.prop.v > 0) foot = `<span class="up">▲ ${f(run.h.prop.v * E.rentYield(run))}/yr</span>`;
+  if (id === 'save') foot = `<span class="${run.rate < run.infl ? 'down' : 'up'}">${run.rate < run.infl ? '▼' : '▲'} ${pctS(run.rate)}/yr</span>`;
+  return `<button class="tile ${open ? '' : 'closed'}" style="--c:${ASSETS[id].color}" data-act="asset" data-id="${id}" ${open ? '' : 'disabled'} aria-label="${esc(pl.label)}: ${esc(f(hv))}">
+    <span class="t-top">${A.icon(pl.icon, 40, '')}<span class="t-name">${esc(pl.label)}<small>${esc(ASSETS[id].name)}</small></span></span>
     <b class="t-val ${hv > 0 ? '' : 'zero'}">${f(hv)}</b>
+    <span class="t-cap">${open ? esc(pl.cap) : 'Closed this week'}</span>
+    ${id === 'index' && open ? (() => { const mm = E.mrMarket(run); return `<span class="mm" style="color:${mm.v < 0.92 ? 'var(--gain)' : mm.v > 1.08 ? 'var(--orange)' : 'var(--sky)'}">${mm.v < 0.92 ? '▼ Cheap' : mm.v > 1.08 ? '▲ Dear' : '■ Fair'} · ${mm.v.toFixed(2)}× value</span>`; })() : ''}
     <span class="t-foot">${foot}<canvas class="spark" data-id="${id}" width="64" height="24"></canvas></span>
   </button>`;
 }
+
+function headlinePic(n) {
+  if (n.kind === 'trap') return A.castFace('hype', 'sly', 44, 'The Hype Guy');
+  if (n.tag === 'co') return A.icon('companies', 40, 'A company');
+  if (n.tag === 'rate') return A.icon('bank', 40, 'The central bank');
+  if (n.tag === 'fx') return A.icon('swap', 40, 'Currency');
+  if (n.hint) return A.moodIcon(n.hint, 40);
+  return A.icon('tv', 40, 'News');
+}
+const STAMP = { real: ['tick', 'Real'], fake: ['cross', 'Fake'], noise: ['shrug', 'Noise'], scam: ['warn', 'Scam'] };
 
 function renderGame() {
   if (!run) return home();
@@ -371,71 +509,74 @@ function renderGame() {
   const locked = E.lifeLocked(run);
   const idle = run.flags.idle || 0;
   const tip = P.runs === 0 && run.turn < TIPS.length && !run.flags[`tip${run.turn}`]
-    ? `<div class="tip"><span>${esc(TIPS[run.turn])}</span><button data-act="tip">Got it</button></div>` : '';
+    ? `<div class="sec">${guideSay(esc(TIPS[run.turn]), 'happy', '<button class="btn small" data-act="tip">Got it</button>')}</div>` : '';
   const crystal = run.crystal[run.turn]
-    ? `<div class="chip-line" style="border-color:${STATE_INFO[m.state].color};color:${STATE_INFO[m.state].color}">Crystal ball: the next ${run.ypt} years look like a ${STATE_INFO[m.state].name.toUpperCase()}.</div>` : '';
+    ? `<div class="chip-line" style="border-color:${STATE_INFO[m.state].color};color:${STATE_INFO[m.state].color}">${A.moodIcon(m.state, 24)} Crystal ball: the next ${run.ypt === 1 ? 'year looks' : `${run.ypt} years look`} ${A.WEATHER[m.state].word.toLowerCase()} (${STATE_INFO[m.state].name}).</div>` : '';
   const revealAll = E.newsRevealed(run, {});
   const headlines = m.news.map((n, i) => {
     const shown = E.newsRevealed(run, n);
-    const src = n.tag === 'co' ? 'Markets' : n.tag === 'rate' ? 'Central bank' : n.tag === 'fx' ? 'Currency' : n.kind === 'trap' ? 'Sponsored' : 'Headline';
-    const verdict = !shown ? '' : n.kind === 'trap' ? '<span class="pill verdict v-scam">Scam</span>'
-      : n.kind === 'noise' ? '<span class="pill verdict v-noise">Noise</span>'
-        : n.real ? '<span class="pill verdict v-real">Real</span>' : '<span class="pill verdict v-fake">Fake</span>';
+    const src = n.tag === 'co' ? 'Markets' : n.tag === 'rate' ? 'Central bank' : n.tag === 'fx' ? 'Currency' : n.kind === 'trap' ? 'Sponsored' : 'News';
+    const key = n.kind === 'trap' ? 'scam' : n.kind === 'noise' ? 'noise' : n.real ? 'real' : 'fake';
+    const verdict = shown ? `<span class="stamp">${A.icon(STAMP[key][0], 30, STAMP[key][1])}<small>${STAMP[key][1]}</small></span>` : '';
     const getin = n.kind === 'trap' ? `<button class="getin" data-act="trap" data-i="${i}" ${n.taken ? 'disabled' : ''}>${n.taken ? 'You are in' : 'Get in early ▸'}</button>` : '';
-    const hint = run.learnMode && n.hint ? `<span class="pill hint-pill" style="--mc:${STATE_INFO[n.hint].color}">Sounds like: ${STATE_INFO[n.hint].name}</span>` : '';
-    return `<article class="headline"><span class="src">${src}</span>${verdict}<p>${esc(n.text)}</p>${hint}${getin}</article>`;
+    const hint = run.learnMode && n.hint ? `<span class="pill hint-pill" style="--mc:${STATE_INFO[n.hint].color}">Sounds like: ${A.WEATHER[n.hint].word}</span>` : '';
+    return `<article class="headline ${n.kind === 'trap' ? 'is-trap' : ''}"><div class="h-top"><span class="h-pic">${headlinePic(n)}</span><span class="src">${src}</span>${verdict}</div><p>${esc(n.text)}</p>${hint}${getin}</article>`;
   }).join('');
   const whisper = (run.charges.insider > 0 && !revealAll) ? `<button class="btn small" data-act="tool" data-tool="insider">Whisper (${run.charges.insider})</button>` : '';
   const ball = (run.charges.crystal > 0 && !run.crystal[run.turn]) ? `<button class="btn small" data-act="tool" data-tool="crystal">Crystal ball (${run.charges.crystal})</button>` : '';
-  const ponzi = run.h.ponzi ? `<button class="tile special" data-act="ponzi"><span class="t-name">Golden Circle</span><span class="t-sub">"Guaranteed 30%"</span><b class="t-val">${f(run.h.ponzi.v)}</b><span class="t-foot"><span class="up">+30.0%</span></span></button>` : '';
-  const heldCards = run.cards.map((id) => { const c = E.cardById(id); return `<span class="hc ${c.type === 'Tool' ? 'tool' : ''}">${esc(c.name)}${run.charges[id] ? ` ×${run.charges[id]}` : ''}</span>`; }).join('');
-  const lev = run.lev > 0 ? `<span class="hc" style="border-color:var(--orange);color:var(--orange)">Leverage: ${run.lev} turn${run.lev > 1 ? 's' : ''}</span>` : '';
-  const debtLine = run.cash < 0 ? `Debt at ${pctS(E.debtRate(run))} a year. Sell something to clear it.` : idle > 0 ? `Idle cash. Inflation takes ${pctS(run.infl)} a year.` : 'Cash earns nothing.';
+  const ponzi = run.h.ponzi ? `<button class="tile special" data-act="ponzi"><span class="t-top">${A.castFace('hype', 'sly', 40, 'The Hype Guy')}<span class="t-name">Golden Circle<small>"Guaranteed 30%"</small></span></span><b class="t-val">${f(run.h.ponzi.v)}</b><span class="t-foot"><span class="up">▲ +30.0%</span></span></button>` : '';
+  const heldCards = run.cards.map((id) => { const c = E.cardById(id); return `<span class="hc ${c.type === 'Tool' ? 'tool' : ''}">${A.icon(A.TYPE_ICON[c.type] === 'hype' ? 'warn' : A.TYPE_ICON[c.type], 16, '')} ${esc(c.name)}${run.charges[id] ? ` ×${run.charges[id]}` : ''}</span>`; }).join('');
+  const lev = run.lev > 0 ? `<span class="hc" style="border-color:var(--orange);color:var(--orange)">${A.icon('dice', 16, '')} Leverage: ${run.lev} turn${run.lev > 1 ? 's' : ''}</span>` : '';
+  const debtLine = run.cash < 0 ? `You owe this. It grows ${pctS(E.debtRate(run))} a year until you sell something to pay it.` : idle > 0 ? `Sitting idle: rising prices take ${pctS(run.infl)} a year.` : 'Coins in a jar earn nothing.';
   const saving = run.salary - C;
+  const mood = lastMood();
+  const L = LIFESTYLES;
 
   app.innerHTML = `
   <div class="game">
     <header class="hud">
       <div class="hud-row">
         <button class="icon-btn" data-act="menu" aria-label="Menu">☰</button>
-        <div class="age"><b>${run.age}</b><span>yrs · turn ${run.turn + 1}/${run.turns}</span></div>
-        <div class="macro"><span>Inflation <b>${pctS(run.infl)}</b></span><span>Interest <b>${pctS(run.rate)}</b></span></div>
+        <button class="me" data-act="town" aria-label="You, age ${run.age}. Open your town">${A.avatar(P.look, run.char, { age: run.age, expr: youExpr(), size: 46, label: '' })}<span class="agebadge">${run.age}</span></button>
+        <button class="hud-own" data-act="statement" aria-label="Everything you own: ${esc(f(nw))}">${A.icon('coins', 26, '')}<span><span class="lbl">Everything you own</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></span></button>
+        <button class="wx" data-act="prices" aria-label="Prices and rates">${A.moodIcon(mood, 34)}<small>Prices</small></button>
       </div>
-      <button class="nw-row" data-act="statement" aria-label="Your financial statement"><span class="lbl">Net worth ▸</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></button>
-      <button class="freedom" data-act="passive" aria-label="Passive income breakdown">
-        <div class="fbar"><i style="width:${(prog * 100).toFixed(1)}%"></i></div>
-        <div class="fmeta"><span>Passive <b>${f(p.total)}</b>/yr</span><span><b>${Math.round(prog * 100)}%</b> ${run.learnMode ? 'out of rat race' : 'free'}</span><span>Costs <b>${f(C)}</b>/yr</span></div>
+      <button class="freedom" data-act="passive" aria-label="Fruit basket against the bowl: ${Math.round(prog * 100)}%">
+        <span class="f-row">${A.fruitTree(prog, 34)}<span class="fbar"><i style="width:${(prog * 100).toFixed(1)}%"></i><b>${Math.round(prog * 100)}%</b></span>${A.icon('bowl', 30, '')}</span>
+        <span class="fmeta"><span>Fruit <b>${f(p.total)}</b>/yr</span><span>Bowl <b>${f(C)}</b>/yr</span></span>
       </button>
     </header>
-    ${run.aim ? `<div class="chip-line" style="border-color:var(--orange);color:var(--orange)">Chief aim: free by ${run.aim}. ${run.age < run.aim ? `${run.aim - run.age} years to go.` : 'The date has passed. Keep going.'}</div>` : ''}
+    <section class="scene-wrap"><button class="scene-btn" data-act="town" aria-label="Your home and town">${sceneFor(run)}</button>
+      <div class="scene-cap">${run.turn > 0 ? `Last year: <b>${A.WEATHER[mood].word}</b> (${esc(STATE_INFO[mood].name)})` : 'Age 22: your first home'} · tap to open your town</div></section>
+    ${run.aim ? `<div class="chip-line" style="border-color:var(--orange);color:var(--orange)">${A.icon('trophy', 22, '')} Goal: free by ${run.aim}. ${run.age < run.aim ? `${run.aim - run.age} years to go.` : 'The date has passed. Keep going.'}</div>` : ''}
     ${tip}${crystal}
-    ${sea ? '<div class="sea-note"><b>At sea.</b> You can\'t trade or change your lifestyle this turn. Your money keeps working while you sail.</div>' : ''}
-    ${E.era(run) ? `<div class="chip-line" style="border-color:var(--gold);color:var(--gold)">${esc(E.era(run).name)}: finish with ${E.era(run).target}× your yearly costs (${f(E.era(run).target * C)}), or reach freedom.</div>` : ''}
+    ${sea ? `<div class="sea-note">${A.icon('clock', 22, '')} <b>At sea.</b> You can't trade or change how you live this turn. Your money keeps working while you sail.</div>` : ''}
+    ${E.era(run) ? `<div class="chip-line" style="border-color:var(--gold);color:var(--gold)">${esc(E.era(run).name)}: finish owning ${E.era(run).target}× a year of costs (${f(E.era(run).target * C)}), or reach freedom.</div>` : ''}
     <section class="sec">
-      <div class="sec-h"><h2>Headlines</h2><div style="display:flex;gap:6px">${whisper}${ball}</div></div>
+      <div class="sec-h"><h2 class="news-h">${A.castFace('anchor', 'neutral', 30, 'The news anchor')} This year's news</h2><div style="display:flex;gap:6px">${whisper}${ball}</div></div>
       <div class="news-strip">${headlines}</div>
     </section>
     ${thinkHTML()}
     <section class="sec">
-      <div class="sec-h"><h2>Your money</h2><span class="note">Tap to buy or sell</span></div>
+      <div class="sec-h"><h2>Where your money goes</h2><span class="note">Tap to put in or take out</span></div>
       <div class="grid">${ORDER.map(tileHTML).join('')}${ponzi}</div>
     </section>
     <section class="sec">
       <div class="wallet">
-        <div class="cash-row"><span><span class="lbl">Cash</span><br><span class="cash-sub">${debtLine}</span></span><b class="${run.cash < 0 ? 'down' : ''}" style="filter:grayscale(${Math.min(1, idle * 0.25)});opacity:${1 - Math.min(0.45, idle * 0.12)}">${f(run.cash)}</b></div>
-        <div class="flowline">Salary <b>${f(run.salary)}</b> − costs <b>${f(C)}</b> = <b class="${saving >= 0 ? 'up' : 'down'}">${f(saving, true)}</b> a year</div>
+        <div class="cash-row">${A.coinJar(clamp(run.cash / Math.max(1, C), 0, 1), { debt: run.cash < 0, shrink: idle * 0.05, size: 56 })}<span class="cash-txt"><span class="lbl">Cash in your jar</span><b class="${run.cash < 0 ? 'down' : ''}" style="opacity:${1 - Math.min(0.45, idle * 0.12)}">${f(run.cash)}</b><span class="cash-sub">${debtLine}</span></span></div>
+        <div class="flowline">${A.icon('payslip', 20, 'Pay')} Pay <b>${f(run.salary)}</b> − ${A.icon('bowl', 20, 'Costs')} costs <b>${f(C)}</b> = <b class="${saving >= 0 ? 'up' : 'down'}">${saving >= 0 ? '▲' : '▼'} ${f(saving, true)}</b> a year</div>
         <div class="field">
-          <span class="lbl">Lifestyle${locked ? ' (locked)' : ''}</span>
-          <div class="seg">${LIFESTYLES.map((l, i) => `<button class="${run.life === i ? 'on' : ''}" data-act="life" data-lv="${i}" ${sea || locked ? 'disabled' : ''} aria-label="${l.name}">${l.name}</button>`).join('')}</div>
-          <span class="note">${esc(LIFESTYLES[run.life].blurb)} Joy ${LIFESTYLES[run.life].joy >= 0 ? '+' : ''}${LIFESTYLES[run.life].joy} a turn.</span>
+          <span class="lbl">How you live${locked ? ' (locked)' : ''}</span>
+          <div class="rooms">${L.map((l, i) => `<button class="room-b ${run.life === i ? 'on' : ''}" data-act="life" data-lv="${i}" ${sea || locked ? 'disabled' : ''} aria-label="${l.name}, joy ${l.joy >= 0 ? '+' : ''}${l.joy}">${A.room(i, 52)}<b>${l.name}</b><small>${A.icon(l.joy >= 0 ? 'smile' : 'sad', 14, '')}${l.joy >= 0 ? '+' : ''}${l.joy}</small></button>`).join('')}</div>
+          <span class="note">${esc(L[run.life].blurb)} Costs ×${L[run.life].mult}. Better living makes you happier but makes the bowl bigger.</span>
         </div>
         ${planHTML(sea)}
-        <div class="joy"><span>Joy</span><div class="jbar"><i style="width:${run.joy}%;background:${run.joy < 25 ? 'var(--loss)' : 'var(--pink)'}"></i></div><b class="num">${Math.round(run.joy)}</b></div>
+        <div class="joy">${A.joyFace(run.joy, 24)}<div class="jbar"><i style="width:${run.joy}%;background:${run.joy < 25 ? 'var(--loss)' : 'var(--pink)'}"></i></div><b class="num">${Math.round(run.joy)}</b></div>
       </div>
     </section>
     ${curesHTML()}
     ${heldCards || lev ? `<section class="sec"><div class="sec-h"><h2>Your cards</h2></div><div class="held">${lev}${heldCards}</div></section>` : ''}
-    <footer class="actionbar"><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Forecast first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></footer>
+    <footer class="actionbar"><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Guess first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></footer>
   </div>`;
   requestAnimationFrame(drawSparks);
 }
@@ -635,7 +776,10 @@ function drawCalib(c, buckets) {
 // ------------------------------------------------------------------ asset sheets
 
 function sheetHead(id, title) {
-  return `<header class="sh-h"><span class="dot" style="--c:${ASSETS[id] ? ASSETS[id].color : 'var(--gold)'}"></span><h2>${esc(title)}</h2><button class="icon-btn" data-act="close" aria-label="Close">✕</button></header>`;
+  const pl = A.PLAIN[id];
+  const pic = pl ? A.icon(pl.icon, 40, '') : `<span class="dot" style="--c:var(--gold)"></span>`;
+  const name = pl ? `${esc(pl.label)} ${jtag(ASSETS[id].name, ASSET_TERM[id])}` : esc(title);
+  return `<header class="sh-h">${pic}<h2>${name}</h2><button class="icon-btn" data-act="close" aria-label="Close">✕</button></header>`;
 }
 
 function assetSheet(id) {
@@ -816,7 +960,7 @@ let pendingPlay = null;
 
 function playout(res) {
   const info = STATE_INFO[res.state];
-  const rows = res.rows.map((r, i) => `<li style="animation-delay:${0.35 + i * 0.12}s"><span>${esc(ASSETS[r.id].name)}</span><span class="${cls(r.gain)}">${f(r.gain, true)}</span><span class="p ${cls(r.pct)}">${E.pct(r.pct, 1)}</span></li>`).join('');
+  const rows = res.rows.map((r, i) => `<li style="animation-delay:${0.35 + i * 0.12}s"><span class="r-name">${A.icon(A.PLAIN[r.id].icon, 26, '')}${esc(A.PLAIN[r.id].label)}</span><span class="${cls(r.gain)}">${f(r.gain, true)}</span><span class="p ${cls(r.pct)}">${r.pct >= 0 ? '▲' : '▼'} ${E.pct(r.pct, 1)}</span></li>`).join('');
   const flows = res.flows.map((x) => `<div><span>${esc(x.label)}</span><b class="${cls(x.v)}">${f(x.v, true)}</b></div>`).join('');
   const notes = res.notes.map((n) => `<p>${esc(n)}</p>`).join('');
   const planLine = [
@@ -835,11 +979,14 @@ function playout(res) {
     </div>`;
   }
   const moments = (res.moments || []).map((mo) => lessonHTML(mo.p, mo.text)).join('');
+  const delta0 = res.nw1 - res.nw0;
+  const W = A.WEATHER[res.state];
   openModal(`
     <div class="play">
       <div class="years">Age ${res.age0} → ${res.age1}</div>
-      <div class="mood" style="--mc:${info.color}">${info.name.toUpperCase()}</div>
-      <p class="mood-line">${esc(info.line)}</p>
+      <div class="play-scene ${delta0 >= 0 ? 'rise' : 'fall'}">${sceneFor(run, { mood: res.state, expr: res.state === 'crash' ? 'shocked' : delta0 >= 0 ? 'cheer' : 'tired', label: `${W.word} over your town` })}</div>
+      <div class="mood" style="--mc:${info.color}">${W.word.toUpperCase()}</div>
+      <p class="mood-line">${esc(info.name)}: ${esc(info.line)}</p>
       ${res.path && run.learnMode ? '<canvas class="path" id="path"></canvas>' : ''}
       ${rows ? `<ul class="rows">${rows}</ul>` : '<p class="note" style="text-align:center">You had nothing invested. The market moved without you.</p>'}
       <div class="flows">${flows}${planLine}</div>
@@ -857,16 +1004,27 @@ function playout(res) {
   if (delta > Math.abs(res.nw0) * 0.25 && delta > 0) setTimeout(() => coinBurst(50, innerWidth / 2, innerHeight * 0.75), 900);
 }
 
+function eventCast(id) {
+  const [who, prop] = A.EVENT_ART[id] || ['anchor', 'tv'];
+  const castId = who === 'guide' ? guideId() : who;
+  const expr = who === 'hype' ? 'sly' : ['layoff', 'burnout', 'blacktax', 'theft', 'hack', 'flood'].includes(id) ? 'tired' : ['wedding', 'baby', 'inherit', 'bonus', 'promo', 'raise'].includes(id) ? 'cheer' : 'happy';
+  const name = who === 'guide' ? guideName() : A.CAST[who].name;
+  return { castId, prop, expr, name, hype: who === 'hype' };
+}
+
 function showEvent() {
   const v = E.eventView(run);
   if (!v) return showCards();
+  const ec = eventCast(v.id);
   openModal(`
-    <div class="ev-card">
-      <span class="kicker">${esc(v.cat)} · Age ${run.age}</span>
+    <div class="ev-card ${ec.hype ? 'hype' : ''}">
+      <div class="ev-art"><span class="ev-cast">${A.castFace(ec.castId, ec.expr, 110, ec.name)}</span><span class="ev-prop">${A.icon(ec.prop, 84, esc(v.title))}</span></div>
+      <span class="kicker">${esc(ec.name)} · ${esc(v.cat)} · Age ${run.age}</span>
       <h2>${esc(v.title)}</h2>
       <p>${esc(v.text)}</p>
+      ${ec.hype ? `<p class="hype-note">${A.icon('warn', 18, '')} You've seen this face before.</p>` : ''}
     </div>
-    <div class="choices">${v.choices.map((c, i) => `<button class="choice-btn" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}><b>${esc(c.label)}</b><small>${c.ok ? esc(c.note) : 'Not enough cash'}</small></button>
+    <div class="choices">${v.choices.map((c, i) => `<button class="choice-btn" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}><b>${esc(c.label)}</b><small>${c.ok ? fxIcons(c.note) : 'Not enough cash'}</small></button>
       ${c.math ? `<button class="linkish math-btn" data-act="math" data-i="${i}">Show the maths</button><div class="math" id="math-${i}" hidden>${mathHTML(c.math)}</div>` : ''}`).join('')}</div>`);
 }
 
@@ -881,8 +1039,10 @@ function showOutcome(text) {
 const TYPE_COLOR = { Skill: 'var(--gain)', Tool: 'var(--sky)', Gamble: 'var(--orange)', Offer: 'var(--pink)', Legendary: 'var(--gold)' };
 
 function cardHTML(c, act, extra = '') {
+  const t = A.TYPE_ICON[c.type];
   return `<button class="gcard ${c.legendary ? 'legend' : ''} ${extra}" style="--tc:${TYPE_COLOR[c.type]}" ${act ? `data-act="${act}" data-id="${c.id}"` : 'disabled'}>
-    <span class="ty">${esc(c.type)}</span><b>${esc(c.name)}</b><p>${esc(c.text)}</p></button>`;
+    <span class="card-pic">${A.cardPic(c.id, 64)}</span>
+    <span class="card-body"><span class="ty">${t === 'hype' ? A.icon('warn', 14, '') : A.icon(t, 14, '')} ${esc(c.type)}</span><b>${esc(c.name)}</b><p>${fxIcons(c.text)}</p></span></button>`;
 }
 
 function showCards() {
@@ -917,7 +1077,7 @@ let timerRaf = 0;
 let timerEnd = 0;
 function timerSeconds() {
   if (!run || run.phase !== 'alloc') return 0;
-  if (E.MODES[run.mode].timer) return E.MODES[run.mode].timer;
+  if (E.MODES[run.mode].timer) return P.settings.noBlitzTimer ? 0 : E.MODES[run.mode].timer;
   return P.settings.timer && !run.learnMode ? 20 : 0;
 }
 function startTimer() {
@@ -1016,13 +1176,14 @@ function results(done) {
   const insights = [];
   if (r.best) insights.push(['var(--gain)', 'Biggest win', r.best]);
   if (r.worst) insights.push(['var(--loss)', 'Worst mistake', r.worst.text]);
-  insights.push(['var(--gold)', 'Lesson', LESSONS[r.lesson]]);
+  const lessonBubble = guideSay(esc(LESSONS[r.lesson]), won(r) ? 'cheer' : 'happy');
   if (r.earlier > 0) insights.push(['var(--sky)', 'Compound growth', `Starting just 4 years earlier would have grown your investments by about ${F(r.earlier)} more (${pctS(r.annual)} a year).`]);
   const share = ['daily', 'duel'].includes(done.mode) || r.reason === 'free';
   const text = shareText(done);
   app.innerHTML = `
   <main class="results">
     <span class="kicker">${esc(E.MODES[done.mode].name)} · ${esc(CHARACTERS[done.char].name)}${done.asc ? ` · Ascension ${done.asc}` : ''}</span>
+    <div class="res-scene">${resultScene(done)}</div>
     <h1 class="res-title ${tone_}">${esc(title)}</h1>
     <div class="score-box"><span class="lbl">Score</span><b>${r.score.toLocaleString()}</b></div>
     <div class="chart-wrap"><canvas class="chart" id="chart"></canvas>
@@ -1033,6 +1194,7 @@ function results(done) {
       <div><dt>Living costs</dt><dd>${F(r.costs)}/yr</dd></div>
       <div><dt>Joy</dt><dd>${Math.round(r.joy)}/100</dd></div>
     </dl>
+    ${lessonBubble}
     ${insights.map(([c, k, t]) => `<div class="insight" style="--ic:${c}"><span class="lbl">${k}</span><p>${esc(t)}</p></div>`).join('')}
     ${learnResults(r)}
     ${r.scammed ? `<div class="scam-card"><span class="kicker" style="color:var(--pink)">How to spot a scam</span><ol>${SCAM_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ol></div>` : ''}
@@ -1051,6 +1213,17 @@ function results(done) {
     const cc = document.getElementById('calib');
     if (cc && r.forecast) drawCalib(cc, r.forecast.buckets);
   });
+}
+
+const won = (r) => r.reason === 'free' || r.reason === 'target';
+
+function resultScene(done) {
+  const r = done.result;
+  const opts = r.reason === 'free' ? { stage: 4, mood: 'boom', expr: 'cheer', label: 'You relax on the beach, free' }
+    : r.reason === 'bankrupt' ? { stage: 0, mood: 'crash', expr: 'shocked', label: 'An empty room after going broke' }
+      : r.reason === 'target' ? { mood: 'recov', expr: 'cheer', label: 'You came through the storm' }
+        : { mood: 'steady', expr: 'tired', label: 'Still working' };
+  return sceneFor(done, opts);
 }
 
 function forecastVerdict(fs) {
@@ -1093,17 +1266,17 @@ function eras() {
     const locked = e.unlock > P.wisdom;
     const best = P.eras[e.id];
     return `<button class="choice ${locked ? 'locked' : ''}" data-act="era" data-id="${e.id}" ${locked ? 'disabled' : ''}>
-      <span class="av">${e.currency === 'NGN' ? '₦' : '$'}</span>
+      <span class="av">${A.icon('clock', 36, '')}</span>
       <span><b>${esc(e.name)} <span class="muted" style="font-weight:500">· ${esc(e.years)}</span></b>
       <small>${locked ? `Unlocks at ${e.unlock} wisdom` : esc(e.blurb)}${best ? ` · Best ${best.score.toLocaleString()}${best.won ? ' ✓' : ''}` : ''}</small></span></button>`;
   }).join('')}</div>`);
 }
 
 function randomCode() {
-  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const ALPH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let s = '';
-  for (let i = 0; i < 5; i++) s += A[Math.floor(Math.random() * A.length)];
-  return `${P.settings.currency === 'NGN' ? 'N' : 'D'}${s}`;
+  for (let i = 0; i < 5; i++) s += ALPH[Math.floor(Math.random() * ALPH.length)];
+  return `${(CURRENCIES[P.settings.currency] || CURRENCIES.NGN).duel}${s}`;
 }
 
 function duel(code) {
@@ -1113,7 +1286,7 @@ function duel(code) {
     <p class="muted">Everyone who plays the same code gets the same market, events and cards. Send the code to friends and compare scores.</p>
     <section class="field"><label class="lbl" for="code">Duel code</label><input class="text-in" id="code" maxlength="6" value="${esc(c)}" autocomplete="off" spellcheck="false"></section>
     <div class="share-actions"><button class="btn" data-act="duel-new">New code</button><button class="btn" data-act="duel-copy">Copy code</button></div>
-    <p class="note">Codes starting with N play in naira, D in dollars. Everyone plays The Graduate with the base cards.</p>
+    <p class="note">The first letter picks the money (N naira, D dollars, I rupees, K shillings…). Everyone plays The Graduate with the base cards.</p>
     ${past.length ? `<section class="field"><span class="lbl">Your duels</span><div class="gloss">${past.map(([k, v]) => `<div><b>${esc(k)}</b><p>Score ${v.score.toLocaleString()} · ${v.reason === 'free' ? `free at ${v.age}` : v.reason}</p></div>`).join('')}</div></section>` : ''}
     <div class="sticky-go"><button class="btn primary wide" data-act="duel-go">Play this code</button></div>`);
 }
@@ -1128,7 +1301,7 @@ function collection(tab = 'cards') {
       return cardHTML(c, null).replace('<button', '<div').replace('</button>', '</div>').replace(' disabled', '');
     }).join('')}</div>`;
   } else if (tab === 'people') {
-    body = `<div class="choice-list">${Object.values(CHARACTERS).map((c) => `<div class="choice ${c.unlock > P.wisdom ? 'locked' : ''}"><span class="av">${initials(c.name)}</span><span><b>${esc(c.name)}</b><small>${c.unlock > P.wisdom ? `Unlocks at ${c.unlock} wisdom` : esc(c.blurb)}</small></span></div>`).join('')}</div>`;
+    body = `<div class="choice-list">${Object.values(CHARACTERS).map((c) => `<div class="choice ${c.unlock > P.wisdom ? 'locked' : ''}"><span class="av">${A.avatar(P.look, Object.keys(CHARACTERS).find((k) => CHARACTERS[k] === c), { size: 44, label: '' })}</span><span><b>${esc(c.name)}</b><small>${c.unlock > P.wisdom ? `Unlocks at ${c.unlock} wisdom` : esc(c.blurb)}</small></span></div>`).join('')}</div>`;
   } else if (tab === 'words') {
     const learned = Object.keys(GLOSSARY).filter((k) => P.glossary.includes(k));
     body = `<p class="note">${learned.length} of ${Object.keys(GLOSSARY).length} words learned. New ones unlock when they happen to you.</p>
@@ -1184,7 +1357,7 @@ function how() {
       <li>Tap an asset to move cash into it or out of it. Each one behaves differently in booms and crashes.</li>
       <li>Press <b>Live 2 years</b>. Markets move, rent and profits arrive, and life throws you one event with a choice.</li>
       <li>Pick one of three cards. Skills, tools and gambles stack into combos.</li>
-      <li>You win when passive income covers your living costs. You lose if you go broke two turns in a row, or reach 60 still working.</li>
+      <li>You win when passive income covers your living costs. You lose if you are broke for four years in a row, or reach 60 still working.</li>
       <li>Higher lifestyle means more joy but a bigger Freedom Number. Too little joy leads to burnout.</li>
       <li>Every run earns wisdom, which unlocks cards, characters and eras.</li>
     </ol>
@@ -1197,8 +1370,11 @@ function settings(confirmReset = false) {
   page('Settings', `
     ${row('sound', 'Sound', 'Blips, coins and crash thuds.')}
     ${row('timer', 'The market doesn\'t wait', 'A 20-second clock on every Classic turn.')}
+    ${row('noBlitzTimer', 'No clock in Blitz', 'Take your time, even in Blitz.')}
     ${row('calm', 'Reduce motion', 'No shaking, bursts or rolling numbers.')}
-    <section class="field"><span class="lbl">Default currency</span><div class="seg">${Object.entries(CURRENCIES).map(([id, c]) => `<button class="${s.currency === id ? 'on' : ''}" data-act="set-cur" data-id="${id}">${c.sym} ${c.name}</button>`).join('')}</div></section>
+    <section class="field"><label class="lbl" for="cur">Your money</label><select id="cur" class="select">${Object.entries(CURRENCIES).map(([id, c]) => `<option value="${id}" ${s.currency === id ? 'selected' : ''}>${esc(c.sym.trim())} ${esc(c.name)}</option>`).join('')}</select></section>
+    <div class="share-actions"><button class="btn" data-act="region-screen">${A.icon('map', 22, '')} Region</button><button class="btn" data-act="look-screen">${A.icon('smile', 22, '')} My look</button></div>
+    <button class="btn wide" data-act="replay-intro">Watch the intro again</button>
     <div class="hr"></div>
     ${confirmReset ? `<p>This erases your wisdom, unlocks, records and any saved run.</p><div class="share-actions"><button class="btn danger" data-act="reset-yes">Erase everything</button><button class="btn" data-act="settings">Keep my progress</button></div>`
     : '<button class="btn danger wide" data-act="reset">Reset progress</button>'}
@@ -1209,7 +1385,7 @@ function dailyScreen() {
   const key = today();
   const rec = P.daily[key];
   if (!rec) {
-    return startRun({ mode: 'daily', char: 'graduate', currency: 'NGN', seed: `daily-${key}` });
+    return startRun({ mode: 'daily', char: 'graduate', currency: P.settings.currency, seed: `daily-${key}` });
   }
   const text = `Tycoon Rush Daily ${key}\n${rec.grid}\n${rec.reason === 'free' ? `Free at ${rec.age}` : rec.reason === 'bankrupt' ? `Bankrupt at ${rec.age}` : `Still working at ${rec.age}`} · Score ${rec.score.toLocaleString()}`;
   page('Daily Market', `
@@ -1238,6 +1414,15 @@ const ACT = {
   asc: (d) => { P.setup.asc = clamp(P.setup.asc + Number(d.d), 0, P.maxAsc); saveProfile(); setup(); },
   start: () => startRun({ mode: setupMode, char: P.setup.char, currency: P.settings.currency, asc: setupMode === 'classic' ? Math.min(P.setup.asc, P.maxAsc) : 0, aim: setupMode === 'journey' ? P.setup.aim : null }),
   aim: (d) => { P.setup.aim = Number(d.v); saveProfile(); setup(); },
+  intro: (d) => intro(Number(d.step)),
+  'region-screen': () => regionScreen(),
+  region: (d) => { P.region = d.id; P.settings.currency = REGIONS[d.id].currencies[0]; saveProfile(); SFX.tap(); regionScreen(); },
+  'look-screen': () => { if (!P.region) P.region = 'westafrica'; lookScreen(); },
+  look: (d) => { P.look[d.k] = d.k === 'hair' ? d.v : Number(d.v); saveProfile(); SFX.tap(); lookScreen(); },
+  'look-done': () => { if (!P.region) P.region = 'westafrica'; P.onboarded = true; saveProfile(); SFX.card(); home(); },
+  term: (d) => termSheet(d.id),
+  prices: () => pricesSheet(),
+  town: () => townSheet(),
   library: () => library(),
   principle: (d) => principleSheet(d.id),
   statement: () => statementSheet(),
@@ -1266,6 +1451,7 @@ const ACT = {
   },
   'quiz-done': () => { closeLayer(); renderGame(); startTimer(); },
   daily: () => dailyScreen(),
+  'replay-intro': () => { P.onboarded = false; saveProfile(); intro(0); },
   weekly: () => startRun({ mode: 'weekly', char: 'graduate', currency: P.settings.currency, challengeId: weeklyChallenge().id, seed: `week-${weekNo()}` }),
   eras: () => eras(),
   era: (d) => startRun({ mode: 'era', char: 'graduate', eraId: d.id }),
@@ -1275,7 +1461,8 @@ const ACT = {
   'duel-go': () => {
     const v = (document.getElementById('code').value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (v.length < 3) { toast('Enter a code of at least 3 letters.'); return; }
-    startRun({ mode: 'duel', char: 'graduate', currency: v[0] === 'D' ? 'USD' : 'NGN', seed: `duel-${v}` });
+    const cur = Object.keys(CURRENCIES).find((c) => CURRENCIES[c].duel === v[0]) || 'NGN';
+    startRun({ mode: 'duel', char: 'graduate', currency: cur, seed: `duel-${v}` });
   },
   collection: () => collection(),
   coll: (d) => collection(d.tab),
@@ -1376,7 +1563,10 @@ document.addEventListener('click', (e) => {
 document.addEventListener('input', (e) => {
   if (e.target.id === 'amt') { if (sheetCtx && sheetCtx.id === 'prop') updatePropSlider(); else updateSlider(); }
 });
-document.addEventListener('change', (e) => { if (e.target.id === 'mort') updatePropSlider(); });
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'mort') updatePropSlider();
+  if (e.target.id === 'cur') { P.settings.currency = e.target.value; saveProfile(); if (app.querySelector('.char-strip')) setup(); }
+});
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && layer.querySelector('.sheet')) closeLayer(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
 addEventListener('resize', () => { if (run && run.phase === 'alloc') drawSparks(); });

@@ -51,20 +51,37 @@ const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 
 // ---------------------------------------------------------------- formatting
 
-export function fmt(n, currency = 'USD', signed = false) {
-  const sym = CURRENCIES[currency].sym;
-  const a = Math.abs(n);
-  const units = [[1e15, 'Qa'], [1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
-  let body = String(Math.round(a));
-  for (const [v, u] of units) {
-    if (a >= v) {
-      const x = a / v;
-      body = (x >= 100 ? x.toFixed(0) : x.toFixed(1)) + u;
-      break;
+// Money in the currency's own number style: 1.2M, 12L (lakh), 120万, 1,2 Mio.
+const FORMATTERS = {};
+function compact(locale, a) {
+  const key = `${locale}|${a < 1000 ? 0 : 1}`;
+  if (!FORMATTERS[key]) {
+    try {
+      FORMATTERS[key] = new Intl.NumberFormat(locale, a < 1000 ? { maximumFractionDigits: 0 } : { notation: 'compact', maximumFractionDigits: 1, minimumFractionDigits: 0 });
+    } catch {
+      FORMATTERS[key] = null;
     }
   }
+  return FORMATTERS[key];
+}
+
+export function fmt(n, currency = 'USD', signed = false) {
+  const c = CURRENCIES[currency] || CURRENCIES.USD;
+  const a = Math.abs(n);
+  const nf = compact(c.locale, a);
+  let body;
+  if (nf) {
+    body = nf.format(a >= 100 && a < 1000 ? Math.round(a) : a);
+    // Indian English writes thousands as "T", which reads as trillions to most
+    // people; keep lakh (L) and crore (Cr) but say K for thousands.
+    if (a >= 1e3 && a < 1e5) body = body.replace(/T$/, 'K');
+  }
+  else {
+    body = String(Math.round(a));
+    for (const [v, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'k']]) if (a >= v) { body = (a / v).toFixed(1) + u; break; }
+  }
   const sign = n < 0 ? '−' : signed ? '+' : '';
-  return `${sign}${sym}${body}`;
+  return `${sign}${c.sym}${body}`;
 }
 
 export const pct = (x, digits = 0) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(digits)}%`;
@@ -108,22 +125,31 @@ export const REAL = {
 const BIZ_MOOD = { boom: 1.3, steady: 1, over: 1.1, crash: 0.45, recov: 0.9 };
 const INFL_MOOD = { boom: 0.006, steady: 0, over: 0.015, crash: -0.01, recov: -0.004 };
 
-function policyRate(infl, state, naira) {
-  if (naira) return clamp(infl - 0.035 + (state === 'over' ? 0.02 : 0) - (state === 'recov' ? 0.01 : 0), 0.04, 0.4);
+// Economy profiles. `volatile` is the original Naira market and `stable` the
+// original Dollar one, number for number; `moderate` sits between them.
+export const PROFILES = {
+  stable: { infl: 0.03, ascInfl: 0.01, sd: 0.008, mood: 1, lo: -0.01, hi: 0.18, rent: 0.05, fx: false, volatileRates: false },
+  moderate: { infl: 0.07, ascInfl: 0.015, sd: 0.015, mood: 1.5, lo: 0, hi: 0.35, rent: 0.055, fx: true, volatileRates: false, devGap: 0.025, devNoise: 0.03, jumpP: 0.06, jump: 0.2 },
+  volatile: { infl: 0.17, ascInfl: 0.02, sd: 0.03, mood: 2, lo: 0.05, hi: 0.7, rent: 0.06, fx: true, volatileRates: true, devGap: 0.03, devNoise: 0.04, jumpP: 0.1, jump: 0.3 },
+};
+export const profileOf = (currency) => PROFILES[(CURRENCIES[currency] || CURRENCIES.USD).profile];
+
+function policyRate(infl, state, prof) {
+  if (prof.volatileRates) return clamp(infl - 0.035 + (state === 'over' ? 0.02 : 0) - (state === 'recov' ? 0.01 : 0), 0.04, 0.4);
   return clamp(infl + 0.008 + (state === 'over' ? 0.012 : 0) - (state === 'crash' ? 0.015 : 0), 0.0025, 0.2);
 }
 
 export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
   const r = makeRng(hashStr(`${seed}|market`));
-  const naira = currency === 'NGN';
+  const prof = profileOf(currency);
   const k = ypt / 2;
   const sk = Math.sqrt(k);
   const grow = ([m, sd]) => Math.pow(Math.max(0.05, 1 + m + sd * r.normal()), k) - 1;
-  const meanInfl = (naira ? 0.17 : 0.03) + (asc >= 1 ? (naira ? 0.02 : 0.01) : 0);
+  const meanInfl = prof.infl + (asc >= 1 ? prof.ascInfl : 0);
   let infl = meanInfl;
   let state = era ? era.states[0] : r.weighted(INIT_MOOD);
   let val = 0.9 + 0.2 * r();
-  let rate = policyRate(infl, state, naira);
+  let rate = policyRate(infl, state, prof);
   let forceCrash = false;
   const out = [];
 
@@ -137,18 +163,18 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
     const swanRoll = r();
     const swanPick = r();
     if (!era && t > 1 && swanRoll < swanP) {
-      const pool = SWANS.filter((s) => !s.ngn || naira);
+      const pool = SWANS.filter((s) => !s.ngn || prof.fx);
       swan = pool[Math.floor(swanPick * pool.length)];
       if (swan.state) state = swan.state;
       if (swan.id === 'mania') forceCrash = true;
     }
 
     infl = clamp(
-      meanInfl + 0.5 * (infl - meanInfl) + r.normal() * (naira ? 0.03 : 0.008)
-        + INFL_MOOD[state] * (naira ? 2 : 1) + ((swan && swan.infl) || 0) + (adj.infl || 0),
-      naira ? 0.05 : -0.01, naira ? 0.7 : 0.18,
+      meanInfl + 0.5 * (infl - meanInfl) + r.normal() * prof.sd
+        + INFL_MOOD[state] * prof.mood + ((swan && swan.infl) || 0) + (adj.infl || 0),
+      prof.lo, prof.hi,
     );
-    const newRate = policyRate(infl, state, naira);
+    const newRate = policyRate(infl, state, prof);
     const dRate = newRate - rate;
     rate = newRate;
 
@@ -179,11 +205,11 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
     let devJump = false;
     const devRoll = r();
     const devNoise = r.normal();
-    if (naira) {
-      const perYear = infl - 0.03 + 0.04 * devNoise;
+    if (prof.fx) {
+      const perYear = infl - prof.devGap + prof.devNoise * devNoise;
       fxDev = Math.pow(Math.max(0.5, 1 + perYear), ypt) - 1;
-      devJump = devRoll < 0.1 * k || !!(adj.dev) || !!(swan && swan.dev);
-      if (devJump) fxDev = (1 + fxDev) * (1 + (adj.dev || (swan && swan.dev) || 0.3)) - 1;
+      devJump = devRoll < prof.jumpP * k || !!(adj.dev) || !!(swan && swan.dev);
+      if (devJump) fxDev = (1 + fxDev) * (1 + (adj.dev || (swan && swan.dev) || prof.jump)) - 1;
     }
 
     const toNom = (x) => Math.max(-0.99, (1 + x) * Math.pow(1 + infl, ypt) - 1);
@@ -195,11 +221,11 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
         prop: toNom(propReal),
         crypto: Math.max(-0.97, toNom(cryReal)),
         stocks: stockReal.map(toNom),
-        fx: naira ? Math.pow(1.04, ypt) * (1 + fxDev) - 1 : 0,
+        fx: prof.fx ? Math.pow(1.04, ypt) * (1 + fxDev) - 1 : 0,
       },
       fxDev, bizMult, hustle, companyNews, devJump, rug: rugRoll < 0.05 * k,
     };
-    m.news = genNews(r, m, naira, asc);
+    m.news = genNews(r, m, prof.fx, asc);
     out.push(m);
   }
   return out;
@@ -288,7 +314,7 @@ export function newRun(opts) {
     },
     cards: [], charges: {}, lev: 0,
     flags: { weather: c.weather || 1, skillAge: startAge },
-    prices: 1, infl: currency === 'NGN' ? 0.17 : 0.03, rate: 0,
+    prices: 1, infl: profileOf(currency).infl, rate: 0,
     px: { save: [1], index: [1], stocks: [1], prop: [1], crypto: [1], biz: [1], fx: [1] },
     last: {},
     market: [],
@@ -306,7 +332,7 @@ export function newRun(opts) {
     seenP: [], recentMoments: [], quiz: null, quizAsked: [], quizRight: 0,
   };
   run.market = genMarket({ seed, turns, ypt, currency, asc, era });
-  run.rate = policyRate(run.infl, 'steady', currency === 'NGN');
+  run.rate = policyRate(run.infl, 'steady', profileOf(currency));
   run.h.biz.profit = bizProfit(run, 1);
   learn(run, 'freedom');
   run.hist.push(snapshot(run));
@@ -323,7 +349,7 @@ export const atSea = (run) => !!CHARACTERS[run.char].sailor && run.turn % 2 === 
 export const lifeLocked = (run) => { const ch = challenge(run); return !!(ch && ch.lockLife != null); };
 
 export function isOpen(run, asset) {
-  if (asset === 'fx' && run.currency !== 'NGN') return false;
+  if (asset === 'fx' && !profileOf(run.currency).fx) return false;
   const ch = challenge(run);
   return !(ch && ch.off && ch.off.includes(asset));
 }
@@ -348,7 +374,7 @@ export function netWorth(run) {
     + h.biz.c + (h.ponzi ? h.ponzi.v : 0) + (h.angel ? h.angel.amt : 0) + (h.scam || 0);
 }
 
-export const rentYield = (run) => (run.currency === 'NGN' ? 0.06 : 0.05) * (has(run, 'landlord') ? 1.25 : 1);
+export const rentYield = (run) => profileOf(run.currency).rent * (has(run, 'landlord') ? 1.25 : 1);
 export const mortRate = (run) => run.rate + 0.03;
 export const debtRate = (run) => run.rate + 0.15;
 export const bizManaged = (run) => run.h.biz.managed || has(run, 'manager_pro');
@@ -585,16 +611,16 @@ function normCdf(x) {
 // back toward fair value.
 export function pUp(run, s) {
   const k = run.ypt / 2;
-  const naira = run.currency === 'NGN';
-  const meanInfl = (naira ? 0.17 : 0.03) + (run.asc >= 1 ? (naira ? 0.02 : 0.01) : 0);
-  const infl = meanInfl + 0.5 * (run.infl - meanInfl) + INFL_MOOD[s] * (naira ? 2 : 1);
-  const dRate = policyRate(infl, s, naira) - run.rate;
+  const prof = profileOf(run.currency);
+  const meanInfl = prof.infl + (run.asc >= 1 ? prof.ascInfl : 0);
+  const infl = meanInfl + 0.5 * (run.infl - meanInfl) + INFL_MOOD[s] * prof.mood;
+  const dRate = policyRate(infl, s, prof) - run.rate;
   const A = -REVERT * (valuation(run) - 1) * k - 2.5 * dRate;
   const need = 1 - A;
   if (need <= 0) return 1;
   const thr = Math.pow(need, 1 / k) - 1;
   const [m, sd] = REAL.index[s];
-  const noise = 2.5 * (naira ? 0.03 : 0.008) / k;
+  const noise = 2.5 * prof.sd / k;
   return normCdf((m - thr) / Math.sqrt(sd * sd + noise * noise));
 }
 
@@ -821,7 +847,7 @@ function mathView(run, m) {
 function drawEvent(run) {
   const m = run.market[run.turn];
   const r = rngFor(run.seed, 'ev', run.turn);
-  if (m.devJump && run.currency === 'NGN') return 'deval';
+  if (m.devJump && profileOf(run.currency).fx) return 'deval';
   if (run.joy < 20 && r() < 0.65) return 'burnout';
   const recent = run.seenEv.slice(-5);
   const pool = {};
@@ -1012,7 +1038,7 @@ export function live(run) {
   run.prices *= Math.pow(1 + m.infl, y);
   run.baseCosts *= Math.pow(1 + m.infl, y);
   const realGrowth = Math.max(0, 0.026 - 0.0009 * (run.age - 22)) - (run.asc >= 5 ? 0.01 : 0);
-  if (has(run, 'remote_job') && run.currency === 'NGN') run.salary *= (1 + m.fxDev) * Math.pow(1 + realGrowth, y);
+  if (has(run, 'remote_job') && profileOf(run.currency).fx) run.salary *= (1 + m.fxDev) * Math.pow(1 + realGrowth, y);
   else run.salary *= Math.pow((1 + realGrowth) * (1 + m.infl), y);
   let dj = LIFESTYLES[run.life].joy;
   if (has(run, 'side_hustle')) dj -= 3;
