@@ -333,6 +333,8 @@ export function newRun(opts) {
     forecast: null, fc: [],
     cures: [false, false, false, false, false, false, false], cureYears: [0, 0, 0, 0, 0, 0, 0], curesLit: [],
     seenP: [], recentMoments: [], quiz: null, quizAsked: [], quizRight: 0,
+    // A diary of every year and every decision, for the end-of-game report.
+    journal: [],
   };
   run.market = genMarket({ seed, turns, ypt, currency, asc, era });
   run.rate = policyRate(run.infl, 'steady', profileOf(currency));
@@ -1190,6 +1192,20 @@ export function live(run) {
   run.recentMoments = res.moments.map((x) => x.id);
   run.lastResult = res;
 
+  // Diary entry for the report: what the player did this turn and how it went.
+  const round = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v > 0).map(([k, v]) => [k, Math.round(v)]));
+  if (!run.journal) run.journal = [];
+  run.journal.push({
+    t, age0: res.age0, age1: res.age1, mood: m.state, swan: m.swan || null,
+    nw0: Math.round(nw0), nw1: Math.round(res.nw1), passive: Math.round(res.passive), bowl: Math.round(res.bowl),
+    joy: Math.round(run.joy), life: run.life, lifeFrom: lifeStart,
+    buys: round(run.flow.buy), sells: round(run.flow.sell), pyf: Math.round(pyf || 0),
+    val: Math.round(valNow * 100) / 100,
+    fc: fc ? { p: fc.p, ideal: Math.round(fc.ideal * 100) / 100, up: fc.up } : null,
+    moments: (res.moments || []).map((x) => x.id), notes: res.notes.slice(),
+    event: null, card: null,
+  });
+
   // One-year turns keep life at the same pace as two-year ones: an event and
   // a card every other year, with a quiet year in between.
   if (y === 1 && t % 2 === 1 && !m.devJump) {
@@ -1220,6 +1236,11 @@ export function chooseEvent(run, i) {
   run.eventLesson = lesson || null;
   if (lesson) seeP(run, lesson);
   if (choice.math) seeP(run, 'x_ev');
+  const entry = run.journal && run.journal[run.journal.length - 1];
+  if (entry) {
+    const view = typeof choice.label === 'function' ? choice.label(run.pending.v, h) : choice.label;
+    entry.event = { id: ev.id, title: ev.title, choice: view, note: choice.note || '', outcome: text, lesson: lesson || null };
+  }
   run.pending = null;
   run.phase = 'cards';
   return text;
@@ -1259,6 +1280,8 @@ export function pickCard(run, id) {
     if (!card.stack || !has(run, id)) run.cards.push(id);
     if (card.take) card.take(run, helpers(run, rngFor(run.seed, 'take', run.turn)));
     if (card.trap) run.flags.scammed = true;
+    const entry = run.journal && run.journal[run.journal.length - 1];
+    if (entry) entry.card = { id, name: card.name, type: card.type, trap: !!card.trap };
   }
   run.offer = null;
   return endTurn(run);
@@ -1337,6 +1360,7 @@ export function finish(run, reason) {
     learnMode: run.learnMode, aim: run.aim, aimMet, bonus, forecast: fstats,
     cureYears: run.cureYears.slice(), years: run.age - run.startAge,
     seenP: run.seenP.slice(), quizRight: run.quizRight, quizAsked: run.quizAsked.length,
+    journal: (run.journal || []).slice(),
   };
   run.phase = 'done';
   return run.result;
