@@ -4,9 +4,48 @@
 // live in engine.js. Money amounts are in US dollars and are scaled by the
 // currency's `scale` when a run starts, so one table serves both modes.
 
+// Each currency has a price scale (a graduate's first salary in it, over
+// US$24,000) and an economy profile. Profiles, not currencies, drive the market:
+//   stable   calm prices, savings roughly keep up with inflation
+//   moderate a few points of inflation and a slowly sliding currency
+//   volatile Naira-like: high inflation, negative real rates, devaluation shocks
 export const CURRENCIES = {
-  NGN: { sym: '₦', scale: 100, name: 'Naira', blurb: 'High inflation and devaluation shocks. Holding dollars becomes a strategy.' },
-  USD: { sym: '$', scale: 1, name: 'Dollar', blurb: 'Calmer prices and lower rates. A gentler market to learn in.' },
+  NGN: { sym: '₦', scale: 100, name: 'Naira', profile: 'volatile', locale: 'en-NG', duel: 'N' },
+  GHS: { sym: 'GH₵', scale: 1.6, name: 'Cedi', profile: 'volatile', locale: 'en-GH', duel: 'H' },
+  KES: { sym: 'KSh', scale: 25, name: 'Shilling', profile: 'moderate', locale: 'en-KE', duel: 'K' },
+  INR: { sym: '₹', scale: 21, name: 'Rupee', profile: 'moderate', locale: 'en-IN', duel: 'I' },
+  PKR: { sym: 'Rs', scale: 38, name: 'Pakistani rupee', profile: 'volatile', locale: 'en-PK', duel: 'P' },
+  CNY: { sym: '¥', scale: 3.5, name: 'Yuan', profile: 'stable', locale: 'zh-CN', duel: 'C' },
+  JPY: { sym: '¥', scale: 150, name: 'Yen', profile: 'stable', locale: 'ja-JP', duel: 'Y' },
+  KRW: { sym: '₩', scale: 1400, name: 'Won', profile: 'stable', locale: 'ko-KR', duel: 'W' },
+  PHP: { sym: '₱', scale: 13, name: 'Peso', profile: 'moderate', locale: 'en-PH', duel: 'F' },
+  MXN: { sym: 'MX$', scale: 8, name: 'Mexican peso', profile: 'moderate', locale: 'es-MX', duel: 'M' },
+  BRL: { sym: 'R$', scale: 2.2, name: 'Real', profile: 'moderate', locale: 'pt-BR', duel: 'B' },
+  JMD: { sym: 'J$', scale: 50, name: 'Jamaican dollar', profile: 'moderate', locale: 'en-JM', duel: 'J' },
+  USD: { sym: '$', scale: 1, name: 'Dollar', profile: 'stable', locale: 'en-US', duel: 'D' },
+  EUR: { sym: '€', scale: 1.1, name: 'Euro', profile: 'stable', locale: 'de-DE', duel: 'E' },
+  GBP: { sym: '£', scale: 1, name: 'Pound', profile: 'stable', locale: 'en-GB', duel: 'G' },
+  AED: { sym: 'AED ', scale: 3.8, name: 'Dirham', profile: 'stable', locale: 'en-AE', duel: 'A' },
+  EGP: { sym: 'E£', scale: 6, name: 'Egyptian pound', profile: 'volatile', locale: 'en-EG', duel: 'Q' },
+};
+
+export const PROFILE_BLURB = {
+  stable: 'Calm prices and steady rates. A gentler market to learn in.',
+  moderate: 'Prices rise a few points a year and the currency slowly slides. Foreign money helps.',
+  volatile: 'High inflation and devaluation shocks. Holding foreign money becomes a strategy.',
+};
+
+// The player's home region sets the default currency, the guide, and the look
+// of the town. It never changes the maths. Cities are invented and unnamed.
+export const REGIONS = {
+  westafrica: { name: 'West Africa', currencies: ['NGN', 'GHS'], guide: 'ada', bus: 'danfo bus', food: 'jollof rice', x: 47, y: 55 },
+  eastafrica: { name: 'East Africa', currencies: ['KES'], guide: 'wanjiru', bus: 'matatu', food: 'nyama choma', x: 58, y: 60 },
+  southasia: { name: 'South Asia', currencies: ['INR', 'PKR'], guide: 'priya', bus: 'auto-rickshaw', food: 'biryani', x: 70, y: 45 },
+  eastasia: { name: 'East Asia', currencies: ['CNY', 'JPY', 'KRW', 'PHP'], guide: 'wei', bus: 'scooter', food: 'dumplings', x: 81, y: 37 },
+  latam: { name: 'Latin America', currencies: ['MXN', 'BRL'], guide: 'rosa', bus: 'colectivo', food: 'tamales', x: 28, y: 62 },
+  caribbean: { name: 'Caribbean', currencies: ['JMD'], guide: 'marcia', bus: 'minibus', food: 'jerk chicken', x: 27, y: 46 },
+  europe_na: { name: 'Europe & North America', currencies: ['USD', 'EUR', 'GBP'], guide: 'joe', bus: 'city bus', food: 'sandwiches', x: 32, y: 28 },
+  middleeast: { name: 'Middle East', currencies: ['AED', 'EGP'], guide: 'samira', bus: 'minibus', food: 'falafel', x: 58, y: 43 },
 };
 
 export const LIFESTYLES = [
@@ -32,7 +71,7 @@ export const ASSETS = {
   prop: { name: 'Property', sub: 'Rent + growth', color: '#ffb35c', fee: 0.06, blurb: 'Pays rent every year. Slow to sell, and you can borrow to buy.' },
   crypto: { name: 'Crypto', sub: 'Wild ride', color: '#ff7ad9', fee: 0.015, blurb: 'Can triple or go to nearly zero. Hype moves it. Pays nothing.' },
   biz: { name: 'Business', sub: 'Your venture', color: '#ffd54a', fee: 0, blurb: 'Pays profit every year but wears out without new cash. Hire a manager to make it passive.' },
-  fx: { name: 'Dollar fund', sub: 'Foreign currency', color: '#7fe3ff', fee: 0.01, blurb: 'Earns dollar interest and gains whenever the naira falls.' },
+  fx: { name: 'Foreign money', sub: 'Dollar fund', color: '#7fe3ff', fee: 0.01, blurb: 'Earns dollar interest and gains whenever your own currency falls.' },
 };
 
 export const COMPANIES = [
@@ -121,7 +160,7 @@ export const SWANS = [
   { id: 'meltdown', name: 'Market Meltdown', text: 'A giant bank collapses overnight. Every market falls at once.', state: 'crash', index: -0.18, prop: -0.08, crypto: -0.2 },
   { id: 'pandemic', name: 'Pandemic', text: 'A new virus shuts the world down. Offices close, markets plunge and pay is cut.', state: 'crash', index: -0.08, salary: 0.7 },
   { id: 'mania', name: 'Crypto Mania', text: 'A coin frenzy grips the planet. Crypto goes vertical. It will not last.', state: 'over', crypto: 2.5 },
-  { id: 'hyper', name: 'Hyperinflation Scare', text: 'Prices spiral and the naira loses half its value in months.', ngn: true, infl: 0.3, dev: 0.8 },
+  { id: 'hyper', name: 'Hyperinflation Scare', text: 'Prices spiral and the currency loses half its value in months.', ngn: true, infl: 0.3, dev: 0.8 },
 ];
 
 // Cards. `take` runs once when picked; everything else is checked by the engine
@@ -153,7 +192,7 @@ export const CARDS = [
     take: (run, h) => { const amt = 0.4 * run.salary; h.expense(amt, true); h.scam(amt); h.joy(-8); },
   },
   { id: 'health_cover', name: 'Health Cover', type: 'Skill', unlock: 20, text: 'Medical bills are covered in full.' },
-  { id: 'remote_job', name: 'Remote Job', type: 'Skill', unlock: 40, text: 'Paid in dollars: +10% salary, and in Naira mode your pay keeps up with devaluation.', take: (run, h) => { h.salary(1.1); h.skill(); } },
+  { id: 'remote_job', name: 'Remote Job', type: 'Skill', unlock: 40, text: 'Paid in dollars: +10% salary, and in a sliding currency your pay keeps up with devaluation.', take: (run, h) => { h.salary(1.1); h.skill(); } },
   { id: 'crystal', name: 'Crystal Ball', type: 'Tool', unlock: 40, stack: true, text: 'Twice: see the market mood for the next two years.', take: (run) => { run.charges.crystal = (run.charges.crystal || 0) + 2; } },
   { id: 'manager_pro', name: 'Born Manager', type: 'Skill', unlock: 60, text: 'Your business counts as passive income with no manager fee.' },
   { id: 'franchise', name: 'Franchise', type: 'Skill', unlock: 60, text: 'Business profit +30%.' },
@@ -271,7 +310,7 @@ export const EVENTS = [
     setup: (run) => ({ amt: 1.4 * run.salary }),
     text: (v, h) => `A great-aunt leaves you ${h.f(v.amt)}.`,
     choices: [
-      { label: 'Invest it in the index fund', note: 'Straight into the market', fx: (run, h, v) => { h.add('index', v.amt); h.term('index'); return 'Every naira and dollar goes to work.'; } },
+      { label: 'Invest it in the index fund', note: 'Straight into the market', fx: (run, h, v) => { h.add('index', v.amt); h.term('index'); return 'Every coin goes to work.'; } },
       { label: 'Celebrate and spend most of it', note: '+15 joy, keep 30%', fx: (run, h, v) => { h.cash(0.3 * v.amt); h.joy(15); return 'A trip to remember.'; } },
       { label: 'Keep it in cash', note: 'Into your wallet', fx: (run, h, v) => { h.cash(v.amt); return 'Safe in the current account, for now.'; } },
     ],
@@ -337,15 +376,15 @@ export const EVENTS = [
     ],
   },
   {
-    id: 'deval', cat: 'World', title: 'Naira devalued overnight', w: 0, forced: true,
+    id: 'deval', cat: 'World', title: 'Currency devalued overnight', w: 0, forced: true,
     setup: (run) => ({ amt: 0.5 * Math.max(0, run.cash) }),
-    text: () => 'The central bank lets the naira float. Import prices jump. Anyone holding dollars just got richer.',
+    text: () => 'The central bank lets the currency fall. Import prices jump. Anyone holding foreign money just got richer.',
     choices: [
       {
-        label: (v, h) => `Move ${h.f(v.amt)} of cash into dollars`, note: '5% exchange spread', need: (run, v) => v.amt > 0,
-        fx: (run, h, v) => { h.cash(-v.amt); h.add('fx', 0.95 * v.amt); h.costMult(1.06); h.term('devaluation'); return 'Your dollars will hold their value.'; },
+        label: (v, h) => `Move ${h.f(v.amt)} of cash into foreign money`, note: '5% exchange spread', need: (run, v) => v.amt > 0,
+        fx: (run, h, v) => { h.cash(-v.amt); h.add('fx', 0.95 * v.amt); h.costMult(1.06); h.term('devaluation'); return 'Your foreign money will hold its value.'; },
       },
-      { label: 'Stay in naira', note: 'Costs +6%', fx: (run, h) => { h.costMult(1.06); h.term('devaluation'); return 'Prices keep climbing.'; } },
+      { label: 'Keep your local money', note: 'Costs +6%', fx: (run, h) => { h.costMult(1.06); h.term('devaluation'); return 'Prices keep climbing.'; } },
     ],
   },
   {
@@ -484,7 +523,7 @@ export const EVENTS = [
   {
     id: 'pension', cat: 'Career', title: 'Employer pension match', w: 1.2, once: true,
     setup: (run) => ({ amt: 0.15 * run.salary }),
-    text: () => 'HR says: put some pay into the company pension and they will match it naira for naira.',
+    text: () => 'HR says: put some pay into the company pension and they will match every coin you put in.',
     choices: [
       { label: (v, h) => `Join (${h.f(v.amt)} from you)`, note: 'Company doubles it', lesson: 'b_purse', need: (run, v) => run.cash >= v.amt, fx: (run, h, v) => { h.cash(-v.amt); h.add('index', 2 * v.amt); h.term('compound'); return 'Free money: the company doubled it.'; } },
       { label: 'Keep all my take-home', note: 'No change', fx: () => 'You leave the match on the table.' },

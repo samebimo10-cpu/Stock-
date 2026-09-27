@@ -4,7 +4,7 @@
 // needs is cached on first visit and served from the cache first. The network
 // is only used in the background to pick up a newer copy.
 
-const CACHE = 'tycoon-rush-v2';
+const CACHE = 'tycoon-rush-v3';
 
 const SHELL = [
   './',
@@ -15,6 +15,11 @@ const SHELL = [
   './js/engine.js',
   './js/content.js',
   './js/learn.js',
+  './js/art.js',
+  './fonts/bungee.woff2',
+  './fonts/figtree-400.woff2',
+  './fonts/figtree-700.woff2',
+  './fonts/figtree-800.woff2',
 ];
 
 self.addEventListener('install', (event) => {
@@ -38,16 +43,13 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
 
-  // Fonts come from Google. Keep a copy so the game looks right offline too;
-  // without one it falls back to system fonts, which is fine.
-  const isFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
-  if (url.origin !== self.location.origin && !isFont) return;
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
     caches.match(request).then((hit) => {
       const fromNetwork = fetch(request)
         .then((response) => {
-          if (response && (response.ok || response.type === 'opaque')) {
+          if (response && response.ok) {
             const copy = response.clone();
             caches.open(CACHE).then((cache) => cache.put(request, copy));
           }

@@ -53,6 +53,7 @@ if [ -d "$root/tycoon" ]; then
   mkdir -p "$out/tycoon"
   cp "$root/tycoon/index.html" "$root/tycoon/sw.js" "$root/tycoon/manifest.webmanifest" "$root/tycoon/icon.svg" "$out/tycoon/"
   cp -R "$root/tycoon/js" "$out/tycoon/js"
+  cp -R "$root/tycoon/fonts" "$out/tycoon/fonts"
   echo "Game       -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
 fi
 

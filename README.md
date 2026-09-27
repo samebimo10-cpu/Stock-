@@ -19,6 +19,12 @@
 > margin of safety, Babylon's seven cures, Rich Dad's statement and cashflow quadrant, a written
 > chief aim from Think and Grow Rich, expected value and Kelly sizing on risky choices, and mentor
 > quizzes. The ideas are paraphrased and credited in the in-game Library.
+>
+> Everything is shown in pictures first: an avatar you design who ages and reacts, a guide from
+> your region, a recurring cast who bring every event (every scam comes from the same Hype Guy), a
+> home that grows as you get richer, market moods as weather, and plain words with the real finance
+> term a tap away. All art is SVG drawn in code, fonts ship with the game, and there are 17
+> currencies with local number styles across 8 regions.
 
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every
