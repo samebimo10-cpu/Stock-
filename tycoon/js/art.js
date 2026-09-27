@@ -145,7 +145,7 @@ export const CAST = {
 };
 
 export const GUIDES = {
-  ada: { name: 'Mama Ada', skin: SKINS[4], hair: 'wrap', outfit: '#2f9e6a', accent: P_.orange, acc: ['earrings', 'glasses'], age: 62 },
+  ebi: { name: 'Mama Ebi', skin: SKINS[4], hair: 'wrap', outfit: '#2f9e6a', accent: P_.orange, acc: ['earrings', 'glasses'], age: 62 },
   wanjiru: { name: 'Mama Wanjiru', skin: SKINS[5], hair: 'short', outfit: '#c24a3a', accent: P_.gold, acc: ['earrings', 'shawl'], age: 62 },
   priya: { name: 'Nani Priya', skin: SKINS[2], hair: 'bun', outfit: '#c2408a', accent: P_.gold, acc: ['earrings', 'shawl', 'glasses'], age: 64 },
   wei: { name: 'Grandpa Wei', skin: SKINS[1], hair: 'bald', outfit: '#3a5a8a', accent: P_.sky, acc: ['glasses', 'beard'], age: 66 },

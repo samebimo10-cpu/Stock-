@@ -38,7 +38,7 @@ export const PROFILE_BLURB = {
 // The player's home region sets the default currency, the guide, and the look
 // of the town. It never changes the maths. Cities are invented and unnamed.
 export const REGIONS = {
-  westafrica: { name: 'West Africa', currencies: ['NGN', 'GHS'], guide: 'ada', bus: 'danfo bus', food: 'jollof rice', x: 47, y: 55 },
+  westafrica: { name: 'West Africa', currencies: ['NGN', 'GHS'], guide: 'ebi', bus: 'danfo bus', food: 'jollof rice', x: 47, y: 55 },
   eastafrica: { name: 'East Africa', currencies: ['KES'], guide: 'wanjiru', bus: 'matatu', food: 'nyama choma', x: 58, y: 60 },
   southasia: { name: 'South Asia', currencies: ['INR', 'PKR'], guide: 'priya', bus: 'auto-rickshaw', food: 'biryani', x: 70, y: 45 },
   eastasia: { name: 'East Asia', currencies: ['CNY', 'JPY', 'KRW', 'PHP'], guide: 'wei', bus: 'scooter', food: 'dumplings', x: 81, y: 37 },
