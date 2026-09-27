@@ -32,7 +32,7 @@ for (const currency of ['NGN', 'USD']) {
       while (!res) {
         if (E.canAct(run)) bot(run);
         E.live(run);
-        let ci = name === 'hoarder' ? 2 : 0; while (E.chooseEvent(run, ci) === null && ci < 3) ci = (ci + 1) % 3;
+        let ci = name === 'hoarder' ? 2 : 0; while (run.phase === 'event' && E.chooseEvent(run, ci) === null && ci < 3) ci = (ci + 1) % 3;
         E.makeOffer(run, unlocked);
         res = E.pickCard(run, run.offer[0]);
       }

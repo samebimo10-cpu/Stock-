@@ -4,7 +4,7 @@
 // needs is cached on first visit and served from the cache first. The network
 // is only used in the background to pick up a newer copy.
 
-const CACHE = 'tycoon-rush-v1';
+const CACHE = 'tycoon-rush-v2';
 
 const SHELL = [
   './',
@@ -14,6 +14,7 @@ const SHELL = [
   './js/app.js',
   './js/engine.js',
   './js/content.js',
+  './js/learn.js',
 ];
 
 self.addEventListener('install', (event) => {

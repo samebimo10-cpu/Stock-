@@ -8,13 +8,15 @@ function play(opts, bot = () => {}) {
   const run = E.newRun(opts);
   let res = null;
   let guard = 0;
-  while (!res && guard++ < 40) {
+  while (!res && guard++ < 60) {
+    if (run.quiz) E.answerQuiz(run, 0);
     if (E.canAct(run)) bot(run);
+    if (run.learnMode) E.setForecast(run, E.upOdds(run).ideal);
     assert.ok(E.live(run));
     let ci = 0;
-    while (E.chooseEvent(run, ci) === null) ci += 1;
+    while (run.phase === 'event' && E.chooseEvent(run, ci) === null) ci += 1;
     E.makeOffer(run, E.unlockedCards(999));
-    res = E.pickCard(run, run.offer[0]);
+    res = E.pickCard(run, run.quiet ? null : run.offer[0]);
   }
   return { run, res };
 }
@@ -38,6 +40,8 @@ test('player choices never change the market path', () => {
 test('every mode, character, era and challenge finishes with finite numbers', () => {
   const setups = [
     ...['graduate', 'heir', 'farmer', 'hustler', 'sailor'].map((char) => ({ mode: 'classic', char, currency: 'NGN' })),
+    { mode: 'journey', char: 'graduate', currency: 'NGN', aim: 45 },
+    { mode: 'journey', char: 'sailor', currency: 'USD', aim: 40 },
     { mode: 'blitz', char: 'graduate', currency: 'USD' },
     { mode: 'classic', char: 'graduate', currency: 'NGN', asc: 12 },
     ...ERAS.map((e) => ({ mode: 'era', char: 'graduate', eraId: e.id })),
@@ -87,4 +91,64 @@ test('sailors cannot trade while at sea', () => {
 test('content ids are unique', () => {
   assert.equal(new Set(CARDS.map((c) => c.id)).size, CARDS.length);
   assert.equal(new Set(EVENTS.map((e) => e.id)).size, EVENTS.length);
+});
+
+// ---------------------------------------------------------------- learning layer
+
+test('Kelly matches the textbook even-money answer', () => {
+  const k = E.kelly([{ p: 0.6, m: 2 }, { p: 0.4, m: 0 }]);
+  assert.ok(Math.abs(k.f - 0.2) < 0.011, String(k.f));
+  assert.equal(E.kelly([{ p: 0.5, m: 2 }, { p: 0.5, m: 0 }]).f, 0);
+});
+
+test('the probability lens is calibrated against the real market', () => {
+  const buckets = Array.from({ length: 5 }, () => ({ said: 0, hit: 0, n: 0 }));
+  for (let i = 0; i < 150; i++) {
+    const run = E.newRun({ mode: 'journey', char: 'graduate', currency: i % 2 ? 'USD' : 'NGN', seed: `cal${i}` });
+    for (let t = 0; t < run.turns; t++) {
+      run.turn = t;
+      const { post } = E.posterior(run);
+      for (const s of E.MOODS) {
+        const b = buckets[Math.min(4, Math.floor(post[s] * 5))];
+        b.said += post[s]; b.hit += run.market[t].state === s ? 1 : 0; b.n += 1;
+      }
+    }
+  }
+  for (const b of buckets) if (b.n > 300) assert.ok(Math.abs(b.said / b.n - b.hit / b.n) < 0.05, JSON.stringify(b));
+});
+
+test('buying below fair value really does pay more (margin of safety)', () => {
+  const cheap = [];
+  const dear = [];
+  for (let i = 0; i < 200; i++) {
+    for (const m of E.genMarket({ seed: `v${i}`, turns: 38, ypt: 1, currency: 'USD' })) {
+      const real = (1 + m.ret.index) / (1 + m.infl) - 1;
+      if (m.val < 0.85) cheap.push(real);
+      if (m.val > 1.2) dear.push(real);
+    }
+  }
+  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  assert.ok(avg(cheap) > avg(dear) + 0.04, `${avg(cheap)} vs ${avg(dear)}`);
+});
+
+test('paying yourself first never borrows', () => {
+  // Pay covers living costs but not a 50% plan on top: the plan gets what is left.
+  const run = E.newRun({ mode: 'journey', char: 'heir', currency: 'USD', seed: 'pyf', aim: 45 });
+  run.cash = 0;
+  E.setLife(run, 1);
+  E.setPlan(run, { pyf: 0.5 });
+  E.setForecast(run, 0.5);
+  const res = E.live(run);
+  assert.ok(res.pyfShort > 0);
+  assert.ok(res.pyf > 0);
+  assert.ok(run.cash >= -1e-6, String(run.cash));
+});
+
+test('journey years alternate between events and quiet years, with forecasts scored', () => {
+  const { run, res } = play({ mode: 'journey', char: 'graduate', currency: 'NGN', seed: 'j1', aim: 45 }, (r) => {
+    E.setPlan(r, { pyf: 0.2, mix: 'growth', rebalance: true });
+  });
+  assert.ok(run.seenEv.length <= Math.ceil(run.fc.length / 2) + 2);
+  assert.ok(res.seenP.length > 5);
+  assert.equal(res.learnMode, true);
 });

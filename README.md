@@ -13,6 +13,12 @@
 > (passive income covering your living costs) before 60. Classic, Blitz, Daily Market, Eras, Duel
 > codes and a Weekly Challenge. Open it at **https://samebimo10-cpu.github.io/Stock-/tycoon/**, then
 > "Add to Home Screen" and it works without a connection.
+>
+> Its **Wisdom Journey** mode teaches as you play, one year per turn: a probability lens (base
+> rates, then Bayesian updating on headlines), a scored forecast every year, Graham's Mr. Market and
+> margin of safety, Babylon's seven cures, Rich Dad's statement and cashflow quadrant, a written
+> chief aim from Think and Grow Rich, expected value and Kelly sizing on risky choices, and mentor
+> quizzes. The ideas are paraphrased and credited in the in-game Library.
 
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every

@@ -127,7 +127,7 @@ export const SWANS = [
 // Cards. `take` runs once when picked; everything else is checked by the engine
 // through has(run, id). `trap` cards show as "Offer" until you take one.
 export const CARDS = [
-  { id: 'side_hustle', name: 'Side Hustle', type: 'Skill', unlock: 0, text: '+15% salary. −3 joy every turn from the extra hours.', take: (run, h) => h.salary(1.15) },
+  { id: 'side_hustle', name: 'Side Hustle', type: 'Skill', unlock: 0, text: '+15% salary. −3 joy every turn from the extra hours.', take: (run, h) => { h.salary(1.15); h.skill(); } },
   { id: 'diamond_hands', name: 'Diamond Hands', type: 'Skill', unlock: 0, text: 'In a crash, your losses are halved if you sold nothing risky that turn.' },
   { id: 'landlord', name: 'Landlord', type: 'Skill', unlock: 0, text: 'Property rent +25%.' },
   { id: 'contrarian', name: 'Contrarian', type: 'Skill', unlock: 0, text: 'Money you put into stocks or the index right after a crash earns a 12% bonus.' },
@@ -136,7 +136,7 @@ export const CARDS = [
   { id: 'leverage', name: 'Leverage', type: 'Gamble', unlock: 0, stack: true, text: 'Double gains and double losses on index, stocks and crypto for 2 turns.', take: (run, h) => { run.lev = 2; h.term('leverage'); } },
   { id: 'compound', name: 'Compound Nerd', type: 'Skill', unlock: 0, text: 'Savings earn +2% a year.', take: (run, h) => h.term('compound') },
   { id: 'efund_pro', name: 'Rainy Day Pro', type: 'Skill', unlock: 0, text: 'If your savings cover a year of costs, life bills cost 40% less.', take: (run, h) => h.term('efund') },
-  { id: 'networker', name: 'Networker', type: 'Skill', unlock: 0, text: '+8% salary now, and promotions come twice as often.', take: (run, h) => h.salary(1.08) },
+  { id: 'networker', name: 'Networker', type: 'Skill', unlock: 0, text: '+8% salary now, and promotions come twice as often.', take: (run, h) => { h.salary(1.08); h.skill(); } },
   { id: 'dividend', name: 'Dividend Hunter', type: 'Skill', unlock: 0, text: 'Index fund and stocks earn +1% a year.' },
   {
     id: 'ponzi', name: 'Golden Circle Club', type: 'Offer', trap: true, unlock: 0, stack: true,
@@ -153,7 +153,7 @@ export const CARDS = [
     take: (run, h) => { const amt = 0.4 * run.salary; h.expense(amt, true); h.scam(amt); h.joy(-8); },
   },
   { id: 'health_cover', name: 'Health Cover', type: 'Skill', unlock: 20, text: 'Medical bills are covered in full.' },
-  { id: 'remote_job', name: 'Remote Job', type: 'Skill', unlock: 40, text: 'Paid in dollars: +10% salary, and in Naira mode your pay keeps up with devaluation.', take: (run, h) => h.salary(1.1) },
+  { id: 'remote_job', name: 'Remote Job', type: 'Skill', unlock: 40, text: 'Paid in dollars: +10% salary, and in Naira mode your pay keeps up with devaluation.', take: (run, h) => { h.salary(1.1); h.skill(); } },
   { id: 'crystal', name: 'Crystal Ball', type: 'Tool', unlock: 40, stack: true, text: 'Twice: see the market mood for the next two years.', take: (run) => { run.charges.crystal = (run.charges.crystal || 0) + 2; } },
   { id: 'manager_pro', name: 'Born Manager', type: 'Skill', unlock: 60, text: 'Your business counts as passive income with no manager fee.' },
   { id: 'franchise', name: 'Franchise', type: 'Skill', unlock: 60, text: 'Business profit +30%.' },
@@ -182,7 +182,7 @@ export const EVENTS = [
     id: 'promo', cat: 'Career', title: 'Promotion on the table', w: 2.4, cond: (run) => run.age < 57,
     text: () => 'Your boss offers you the team lead role. More pay, more meetings, later nights.',
     choices: [
-      { label: 'Take it', note: '+25% salary, −6 joy', fx: (run, h) => { h.salary(1.25); h.joy(-6); return 'New title, new pay slip.'; } },
+      { label: 'Take it', note: '+25% salary, −6 joy', lesson: 'h_knowledge', fx: (run, h) => { h.salary(1.25); h.joy(-6); h.skill(); return 'New title, new pay slip.'; } },
       { label: 'Stay where you are', note: '+4 joy', fx: (run, h) => { h.joy(4); return 'You keep your evenings.'; } },
     ],
   },
@@ -192,7 +192,8 @@ export const EVENTS = [
     choices: [
       { label: 'Take the first job offered', note: 'Salary −20% from now on', fx: (run, h) => { h.salary(0.8); h.joy(-4); return 'Back at work within a month, on less money.'; } },
       {
-        label: 'Hold out for a better role', note: 'No pay for a year; 60% chance of +15%',
+        label: 'Hold out for a better role', note: 'No pay for a year; 60% chance of +15%', lesson: 'x_ev',
+        math: () => ({ kind: 'text', text: 'Expected pay change: 0.6 × (+15%) + 0.4 × (−5%) = +7%, against −20% for the first job. The price is one year of pay now, so it pays off after about 4 years at the better rate.' }),
         fx: (run, h) => {
           h.cash(-run.salary); h.joy(-6);
           if (h.r() < 0.6) { h.salary(1.15); return 'Eleven months later: a better job at 15% more.'; }
@@ -228,7 +229,8 @@ export const EVENTS = [
         fx: (run, h, v) => (h.has('health_cover') ? 'Covered in full. Insurance did its job.' : `Back on your feet quickly. ${h.expense(v.best)}`),
       },
       {
-        label: (v, h) => `Cheaper clinic (${h.f(v.cheap)})`, note: '30% chance of complications',
+        label: (v, h) => `Cheaper clinic (${h.f(v.cheap)})`, note: '30% chance of complications', lesson: 'x_ev',
+        math: (run, v) => ({ kind: 'cost', rows: [{ p: 0.7, v: -v.cheap, label: 'It goes fine' }, { p: 0.3, v: -(v.cheap + v.best), label: 'Complications: you pay both' }], compare: -v.best, compareLabel: 'Best hospital, for certain' }),
         fx: (run, h, v) => {
           const n = h.expense(v.cheap);
           if (h.r() < 0.3) { h.joy(-8); return `Complications. You ended up at the big hospital anyway. ${h.expense(v.best)}`; }
@@ -260,8 +262,8 @@ export const EVENTS = [
     id: 'raise', cat: 'Career', title: 'You got a raise', w: 2.2,
     text: () => 'A 10% raise. Your friends are already moving to nicer places.',
     choices: [
-      { label: 'Upgrade your lifestyle', note: 'Lifestyle up a level, +6 joy', fx: (run, h) => { h.salary(1.1); h.life(1); h.joy(6); h.term('creep'); return 'Bigger flat, better view. Higher costs, and a higher Freedom Number.'; } },
-      { label: 'Live the same, invest the raise', note: '−2 joy', fx: (run, h) => { h.salary(1.1); h.joy(-2); h.term('creep'); return 'Same flat. The raise goes to work for you.'; } },
+      { label: 'Upgrade your lifestyle', note: 'Lifestyle up a level, +6 joy', lesson: 'r_doodads', fx: (run, h) => { h.salary(1.1); h.life(1); h.joy(6); h.term('creep'); return 'Bigger flat, better view. Higher costs, and a higher Freedom Number.'; } },
+      { label: 'Live the same, invest the raise', note: '−2 joy', lesson: 'p_enough', fx: (run, h) => { h.salary(1.1); h.joy(-2); h.term('creep'); return 'Same flat. The raise goes to work for you.'; } },
     ],
   },
   {
@@ -278,7 +280,7 @@ export const EVENTS = [
     id: 'gig', cat: 'Career', title: 'Weekend gig', w: 1.4, cond: (run) => !run.flags.gig,
     text: () => 'A client wants you for weekend consulting. Good money, no rest.',
     choices: [
-      { label: 'Take it', note: '+12% income, −3 joy each turn', fx: (run, h) => { h.salary(1.12); h.flag('gig'); return 'Saturdays belong to the client now.'; } },
+      { label: 'Take it', note: '+12% income, −3 joy each turn', fx: (run, h) => { h.salary(1.12); h.flag('gig'); h.skill(); return 'Saturdays belong to the client now.'; } },
       { label: 'Protect your weekends', note: '+3 joy', fx: (run, h) => { h.joy(3); return 'You rest. It shows at work.'; } },
     ],
   },
@@ -287,7 +289,7 @@ export const EVENTS = [
     setup: (run) => ({ cost: 0.35 * run.salary }),
     text: (v, h) => `A professional certificate costs ${h.f(v.cost)}. Graduates earn more.`,
     choices: [
-      { label: (v, h) => `Enrol (${h.f(v.cost)})`, note: 'Salary +15%', need: (run, v) => run.cash >= v.cost, fx: (run, h, v) => { h.cash(-v.cost); h.salary(1.15); return 'Certified. Your pay goes up.'; } },
+      { label: (v, h) => `Enrol (${h.f(v.cost)})`, note: 'Salary +15%', need: (run, v) => run.cash >= v.cost, lesson: 'b_earn', fx: (run, h, v) => { h.cash(-v.cost); h.salary(1.15); h.skill(); return 'Certified. Your pay goes up.'; } },
       { label: 'Skip it', note: 'No change', fx: () => 'Maybe next year.' },
     ],
   },
@@ -316,6 +318,7 @@ export const EVENTS = [
     choices: [
       {
         label: 'Lend it', note: '50/50 you see it again',
+        math: (run, v) => ({ kind: 'cost', rows: [{ p: 0.5, v: 0, label: 'Paid back' }, { p: 0.5, v: -v.amt, label: 'Never repaid' }] }),
         fx: (run, h, v) => {
           h.cash(-v.amt);
           if (h.r() < 0.5) { h.cash(v.amt); h.joy(4); return 'Paid back in full, with a thank-you card.'; }
@@ -359,7 +362,7 @@ export const EVENTS = [
     text: () => 'A WhatsApp voice note says your bank is about to collapse. Queues form outside branches.',
     choices: [
       { label: 'Withdraw your savings to cash', note: 'Cash earns nothing', fx: (run, h) => { h.cash(run.h.save); run.h.save = 0; return 'You queue for hours. The bank was fine, and your cash now earns nothing.'; } },
-      { label: 'Stay calm', note: 'Deposits are insured', fx: (run, h) => { h.joy(2); return 'The rumour was fake. Voice notes are not news.'; } },
+      { label: 'Stay calm', note: 'Deposits are insured', lesson: 'h_persist', fx: (run, h) => { h.joy(2); return 'The rumour was fake. Voice notes are not news.'; } },
     ],
   },
   {
@@ -367,7 +370,7 @@ export const EVENTS = [
     setup: (run) => ({ price: 0.9 * run.salary, worth: 1.35 * run.salary }),
     text: (v, h) => `A seller needs cash fast: land worth ${h.f(v.worth)} for ${h.f(v.price)}. The documents check out.`,
     choices: [
-      { label: (v, h) => `Buy it (${h.f(v.price)})`, note: 'Instant equity', need: (run, v) => run.cash >= v.price, fx: (run, h, v) => { h.cash(-v.price); h.buyProp(v.worth); return 'The title deed is yours.'; } },
+      { label: (v, h) => `Buy it (${h.f(v.price)})`, note: 'Instant equity', lesson: 'g_margin', need: (run, v) => run.cash >= v.price, fx: (run, h, v) => { h.cash(-v.price); h.buyProp(v.worth); return 'The title deed is yours.'; } },
       { label: 'Pass', note: 'Keep your cash', fx: () => 'Someone else snaps it up.' },
     ],
   },
@@ -385,7 +388,8 @@ export const EVENTS = [
     setup: (run) => ({ amt: 0.4 * run.salary }),
     text: (v, h) => `Your friend is building a delivery app and wants ${h.f(v.amt)} for a small stake.`,
     choices: [
-      { label: (v, h) => `Invest ${h.f(v.amt)}`, note: 'Most startups fail. A few go huge.', need: (run, v) => run.cash >= v.amt, fx: (run, h, v) => { h.angel(v.amt); return 'You own a sliver of a dream. Results in 3 turns.'; } },
+      { label: (v, h) => `Invest ${h.f(v.amt)}`, note: 'Most startups fail. A few go huge.', need: (run, v) => run.cash >= v.amt, lesson: 'x_kelly',
+        math: (run, v) => ({ kind: 'stake', stake: v.amt, rows: [{ p: 0.15, m: 12, label: 'Bought by a giant' }, { p: 0.25, m: 1.5, label: 'Sold for a small profit' }, { p: 0.6, m: 0, label: 'Shuts down' }] }), fx: (run, h, v) => { h.angel(v.amt); return 'You own a sliver of a dream. Results in 3 turns.'; } },
       { label: 'Wish them luck', note: 'No change', fx: () => 'You send a thumbs-up emoji.' },
     ],
   },
@@ -394,8 +398,9 @@ export const EVENTS = [
     setup: (run) => ({ amt: Math.max(0.3 * Math.max(0, run.cash), 0.1 * run.salary) }),
     text: () => 'A slick trader on Instagram posts screenshots of huge profits. "Send any amount. Withdraw anytime."',
     choices: [
-      { label: (v, h) => `Send ${h.f(v.amt)}`, note: 'Could be life-changing', fx: (run, h, v) => { h.cash(-v.amt); h.scam(v.amt); return `Week one: +10%. Week three: account blocked. ${h.f(v.amt)} gone.`; } },
-      { label: 'Block and report', note: '+3 joy', fx: (run, h) => { h.joy(3); h.term('ponzi'); return 'Guaranteed returns plus pressure to act is the classic scam pattern.'; } },
+      { label: (v, h) => `Send ${h.f(v.amt)}`, note: 'Could be life-changing', lesson: 'b_guard',
+        math: () => ({ kind: 'text', text: '10% a week compounds to about 14,000% a year. The best investors in history averaged about 20% a year. A promise 700 times better than the best is not an investment.' }), fx: (run, h, v) => { h.cash(-v.amt); h.scam(v.amt); return `Week one: +10%. Week three: account blocked. ${h.f(v.amt)} gone.`; } },
+      { label: 'Block and report', note: '+3 joy', lesson: 'g_investor', fx: (run, h) => { h.joy(3); h.term('ponzi'); return 'Guaranteed returns plus pressure to act is the classic scam pattern.'; } },
     ],
   },
   {
@@ -403,7 +408,8 @@ export const EVENTS = [
     setup: (run) => ({ amt: 0.3 * Math.max(0, run.cash) }),
     text: () => 'Your barber, your pastor and your group chat are all in. It is up 400% this month.',
     choices: [
-      { label: (v, h) => `Buy ${h.f(v.amt)} of crypto`, note: 'Into your crypto', need: (run, v) => v.amt > 0, fx: (run, h, v) => { h.cash(-v.amt); h.add('crypto', v.amt); h.term('volatility'); return 'You are in. Hold on tight.'; } },
+      { label: (v, h) => `Buy ${h.f(v.amt)} of crypto`, note: 'Into your crypto', need: (run, v) => v.amt > 0, lesson: 'g_investor',
+        math: () => ({ kind: 'text', text: 'When everyone you know is buying, the market is usually Overheating. From Overheating, a Crash follows 55% of the time in this game, and crypto falls about 60% in a crash.' }), fx: (run, h, v) => { h.cash(-v.amt); h.add('crypto', v.amt); h.term('volatility'); return 'You are in. Hold on tight.'; } },
       { label: 'Sit this one out', note: 'No change', fx: () => 'Fear of missing out is loud. You stay calm.' },
     ],
   },
@@ -432,7 +438,8 @@ export const EVENTS = [
     choices: [
       { label: (v, h) => `Buy insurance (${h.f(v.ins)})`, note: 'Safe', fx: (run, h, v) => `Insured. The rain comes and goes. ${h.expense(v.ins)}` },
       {
-        label: 'Take the chance', note: '50% chance of heavy damage',
+        label: 'Take the chance', note: '50% chance of heavy damage', lesson: 'p_room',
+        math: (run, v) => ({ kind: 'cost', rows: [{ p: 0.5, v: 0, label: 'The rain misses you' }, { p: 0.5, v: -0.3 * (run.flags.weather || 1) * run.h.biz.c, label: 'Flood damage' }], compare: -v.ins, compareLabel: 'Insurance, for certain' }),
         fx: (run, h) => {
           if (h.r() < 0.5) { const hit = 0.3 * (run.flags.weather || 1); h.scale('biz', 1 - hit); return `The water came in. Your business lost ${Math.round(hit * 100)}% of its value.`; }
           return 'The rains missed you.';
@@ -453,7 +460,7 @@ export const EVENTS = [
     id: 'mentor', cat: 'Luck', title: 'A mentor appears', w: 0.9, once: true,
     text: () => 'A retired fund manager offers to have coffee with you.',
     choices: [
-      { label: 'Listen and take notes', note: '+1 Crystal Ball use', fx: (run) => { run.charges.crystal = (run.charges.crystal || 0) + 1; return 'Her advice: "Read the cycle, not the noise."'; } },
+      { label: 'Listen and take notes', note: '+1 Crystal Ball use', lesson: 'h_mastermind', fx: (run) => { run.charges.crystal = (run.charges.crystal || 0) + 1; return 'Her advice: "Read the cycle, not the noise."'; } },
       { label: 'Too busy', note: 'No change', fx: () => 'You reschedule. It never happens.' },
     ],
   },
@@ -463,14 +470,15 @@ export const EVENTS = [
     text: (v, h) => `A developer sells flats before building them. Pay ${h.f(v.dep)} today for one worth ${h.f(v.worth)} when finished.`,
     choices: [
       {
-        label: (v, h) => `Pay the deposit (${h.f(v.dep)})`, note: 'Pay today, keys later', need: (run, v) => run.cash >= v.dep,
+        label: (v, h) => `Pay the deposit (${h.f(v.dep)})`, note: 'Pay today, keys later', need: (run, v) => run.cash >= v.dep, lesson: 'x_kelly',
+        math: (run, v) => ({ kind: 'stake', stake: v.dep, rows: [{ p: 0.65, m: v.worth / v.dep, label: 'Flat is built' }, { p: 0.35, m: 0, label: 'Developer vanishes' }] }),
         fx: (run, h, v) => {
           h.cash(-v.dep);
           if (h.r() < 0.35) { h.scam(v.dep); return 'The developer vanished with everyone\'s deposits.'; }
           h.buyProp(v.worth); return 'The building went up. The flat is yours.';
         },
       },
-      { label: 'Visit the site first', note: 'Do your homework', fx: (run, h) => { h.term('ponzi'); return h.r() < 0.35 ? 'The "site" is an empty field. Good thing you checked.' : 'Building is real but slow. You decide to wait.'; } },
+      { label: 'Visit the site first', note: 'Do your homework', lesson: 'g_investor', fx: (run, h) => { h.term('ponzi'); return h.r() < 0.35 ? 'The "site" is an empty field. Good thing you checked.' : 'Building is real but slow. You decide to wait.'; } },
     ],
   },
   {
@@ -478,7 +486,7 @@ export const EVENTS = [
     setup: (run) => ({ amt: 0.15 * run.salary }),
     text: () => 'HR says: put some pay into the company pension and they will match it naira for naira.',
     choices: [
-      { label: (v, h) => `Join (${h.f(v.amt)} from you)`, note: 'Company doubles it', need: (run, v) => run.cash >= v.amt, fx: (run, h, v) => { h.cash(-v.amt); h.add('index', 2 * v.amt); h.term('compound'); return 'Free money: the company doubled it.'; } },
+      { label: (v, h) => `Join (${h.f(v.amt)} from you)`, note: 'Company doubles it', lesson: 'b_purse', need: (run, v) => run.cash >= v.amt, fx: (run, h, v) => { h.cash(-v.amt); h.add('index', 2 * v.amt); h.term('compound'); return 'Free money: the company doubled it.'; } },
       { label: 'Keep all my take-home', note: 'No change', fx: () => 'You leave the match on the table.' },
     ],
   },
@@ -488,10 +496,11 @@ export const EVENTS = [
     text: () => 'Your office runs a lottery syndicate. Everyone is chipping in.',
     choices: [
       {
-        label: (v, h) => `Chip in (${h.f(v.amt)})`, note: 'The odds are terrible',
+        label: (v, h) => `Chip in (${h.f(v.amt)})`, note: 'The odds are terrible', lesson: 'x_ev',
+        math: (run, v) => ({ kind: 'stake', stake: v.amt, rows: [{ p: 0.002, m: 20 * run.salary / v.amt, label: 'Jackpot' }, { p: 0.998, m: 0, label: 'Nothing' }] }),
         fx: (run, h, v) => {
           h.cash(-v.amt);
-          if (h.r() < 0.02) { h.cash(20 * run.salary); return 'YOU WON. Twenty years of salary. This almost never happens.'; }
+          if (h.r() < 0.002) { h.cash(20 * run.salary); return 'YOU WON. Twenty years of salary. This almost never happens.'; }
           return 'No luck. The house always wins.';
         },
       },
@@ -504,7 +513,7 @@ export const EVENTS = [
     text: () => 'The exchange holding your crypto freezes withdrawals after a hack.',
     choices: [
       { label: 'Wait it out', note: 'Lose 30% of your crypto', fx: (run, h) => { h.scale('crypto', 0.7); return 'You got 70% back after months of waiting.'; } },
-      { label: (v, h) => `Pay a "recovery expert" (${h.f(v.fee)})`, note: 'They promise to get it all back', fx: (run, h, v) => { h.cash(-v.fee); h.scam(v.fee); h.scale('crypto', 0.7); return 'The expert disappeared too. Recovery "experts" are almost always scammers.'; } },
+      { label: (v, h) => `Pay a "recovery expert" (${h.f(v.fee)})`, note: 'They promise to get it all back', lesson: 'b_guard', fx: (run, h, v) => { h.cash(-v.fee); h.scam(v.fee); h.scale('crypto', 0.7); return 'The expert disappeared too. Recovery "experts" are almost always scammers.'; } },
     ],
   },
 ];

@@ -8,6 +8,7 @@ import {
   CURRENCIES, LIFESTYLES, CHARACTERS, ASSETS, COMPANIES, NEWS, SWANS, CARDS, EVENTS,
   ERAS, CHALLENGES, GLOSSARY,
 } from './content.js';
+import { PRINCIPLES, MOMENTS, PLANS, QUIZ } from './learn.js';
 
 // ---------------------------------------------------------------- randomness
 
@@ -72,7 +73,7 @@ export const pct = (x, digits = 0) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100
 
 export const MOODS = ['boom', 'steady', 'over', 'crash', 'recov'];
 
-function transitions(state, asc) {
+export function transitions(state, asc) {
   const t = {
     steady: { steady: 0.45, boom: 0.33, over: 0.1, crash: 0.12 },
     boom: { boom: 0.35, over: 0.38, steady: 0.2, crash: 0.07 },
@@ -84,8 +85,22 @@ function transitions(state, asc) {
   return t;
 }
 
+// How the first mood of a run is drawn, before any history exists.
+export const INIT_MOOD = { steady: 0.5, boom: 0.25, recov: 0.25 };
+
+// Mr. Market: the index price drifts around a fair value that grows about 4% a
+// year in real terms. Returns lean back toward fair value, so buying below it
+// (a margin of safety) really does pay more on average.
+const TREND = 1.04;
+const REVERT = 0.2;
+
+// A mood headline is right this often. When wrong, it points to one of the four
+// other moods at random, so each gets a quarter of the misses.
+export const HINT_TRUE = 0.8;
+export const HINT_FALSE = 0.05;
+
 // Real (after-inflation) return over one 2-year turn: [mean, spread].
-const REAL = {
+export const REAL = {
   index: { boom: [0.26, 0.1], steady: [0.1, 0.09], over: [0.16, 0.13], crash: [-0.32, 0.1], recov: [0.3, 0.12] },
   prop: { boom: [0.08, 0.05], steady: [0.03, 0.04], over: [0.15, 0.06], crash: [-0.15, 0.06], recov: [0.02, 0.05] },
   crypto: { boom: [0.6, 0.5], steady: [-0.05, 0.35], over: [0.8, 0.7], crash: [-0.6, 0.12], recov: [0.3, 0.45] },
@@ -106,7 +121,8 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
   const grow = ([m, sd]) => Math.pow(Math.max(0.05, 1 + m + sd * r.normal()), k) - 1;
   const meanInfl = (naira ? 0.17 : 0.03) + (asc >= 1 ? (naira ? 0.02 : 0.01) : 0);
   let infl = meanInfl;
-  let state = era ? era.states[0] : r.weighted({ steady: 0.5, boom: 0.25, recov: 0.25 });
+  let state = era ? era.states[0] : r.weighted(INIT_MOOD);
+  let val = 0.9 + 0.2 * r();
   let rate = policyRate(infl, state, naira);
   let forceCrash = false;
   const out = [];
@@ -136,7 +152,9 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
     const dRate = newRate - rate;
     rate = newRate;
 
-    const idxReal = grow(REAL.index[state]) - 2.5 * dRate + ((swan && swan.index) || 0) + (adj.index || 0);
+    const valNow = val;
+    const idxReal = grow(REAL.index[state]) - 2.5 * dRate - REVERT * (val - 1) * k + ((swan && swan.index) || 0) + (adj.index || 0);
+    val = clamp(val * (1 + idxReal) / Math.pow(TREND, ypt), 0.3, 3);
     const propReal = grow(REAL.prop[state]) - 2 * dRate + ((swan && swan.prop) || 0) + (adj.prop || 0);
     let cryReal = grow(REAL.crypto[state]) + ((swan && swan.crypto) || 0) + (adj.crypto || 0);
     const rugRoll = r();
@@ -170,7 +188,7 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
 
     const toNom = (x) => Math.max(-0.99, (1 + x) * Math.pow(1 + infl, ypt) - 1);
     const m = {
-      t, state, infl, rate, dRate, swan: swan && swan.id,
+      t, state, infl, rate, dRate, swan: swan && swan.id, val: valNow,
       ret: {
         save: Math.pow(1 + rate, ypt) - 1,
         index: toNom(idxReal),
@@ -190,9 +208,15 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
 function genNews(r, m, naira, asc) {
   const items = [];
   const others = MOODS.filter((s) => s !== m.state);
-  // Slot 1: the market mood. Usually honest.
-  if (r() < 0.8) items.push({ kind: 'signal', real: true, text: r.pick(NEWS[m.state]) });
-  else items.push({ kind: 'signal', real: false, text: r.pick(NEWS[r.pick(others)]) });
+  // Mood headlines each point at a mood. Each is independently right 80% of the
+  // time, which keeps the maths in the probability lens exact.
+  const moodItem = (avoid) => {
+    const real = r() < HINT_TRUE;
+    const hint = real ? m.state : r.pick(others);
+    const pool = NEWS[hint].filter((x) => x !== avoid);
+    return { kind: 'signal', real, hint, text: r.pick(pool) };
+  };
+  items.push(moodItem(null));
   // Slot 2: currency, a company, or interest rates.
   const honest = r() < 0.8;
   if (m.devJump && naira) {
@@ -211,10 +235,7 @@ function genNews(r, m, naira, asc) {
   const trapP = asc >= 6 ? 0.32 : 0.2;
   if (x < trapP) items.push({ kind: 'trap', real: false, text: r.pick(NEWS.trap) });
   else if (x < trapP + 0.45) items.push({ kind: 'noise', real: false, text: r.pick(NEWS.noise) });
-  else {
-    const pool = NEWS[m.state].filter((s) => s !== items[0].text);
-    items.push({ kind: 'signal', real: true, text: r.pick(pool) });
-  }
+  else items.push(moodItem(items[0].text));
   for (let i = items.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
     [items[i], items[j]] = [items[j], items[i]];
@@ -225,6 +246,7 @@ function genNews(r, m, naira, asc) {
 // ---------------------------------------------------------------- run setup
 
 export const MODES = {
+  journey: { name: 'Wisdom Journey', ypt: 1, startAge: 22, timer: 0, learn: true },
   classic: { name: 'Classic', ypt: 2, startAge: 22, timer: 0 },
   blitz: { name: 'Blitz', ypt: 4, startAge: 24, timer: 15 },
   daily: { name: 'Daily Market', ypt: 2, startAge: 22, timer: 0 },
@@ -265,7 +287,7 @@ export function newRun(opts) {
       ponzi: null, angel: null, scam: 0,
     },
     cards: [], charges: {}, lev: 0,
-    flags: { weather: c.weather || 1 },
+    flags: { weather: c.weather || 1, skillAge: startAge },
     prices: 1, infl: currency === 'NGN' ? 0.17 : 0.03, rate: 0,
     px: { save: [1], index: [1], stocks: [1], prop: [1], crypto: [1], biz: [1], fx: [1] },
     last: {},
@@ -275,12 +297,20 @@ export function newRun(opts) {
     negTurns: 0, lastResult: null, pending: null, offer: null, result: null,
     flow: { buy: {}, sell: {} },
     salaryStart: c.salary * scale,
+    // The learning layer.
+    learnMode: !!mode.learn,
+    aim: opts.aim || null,
+    plan: { pyf: 0, mix: 'balanced', rebalance: false },
+    forecast: null, fc: [],
+    cures: [false, false, false, false, false, false, false], cureYears: [0, 0, 0, 0, 0, 0, 0], curesLit: [],
+    seenP: [], recentMoments: [], quiz: null, quizAsked: [], quizRight: 0,
   };
   run.market = genMarket({ seed, turns, ypt, currency, asc, era });
   run.rate = policyRate(run.infl, 'steady', currency === 'NGN');
   run.h.biz.profit = bizProfit(run, 1);
   learn(run, 'freedom');
   run.hist.push(snapshot(run));
+  if (run.aim) seeP(run, 'h_aim');
   return run;
 }
 
@@ -508,6 +538,207 @@ export const newsRevealed = (run, item) => {
   return false;
 };
 
+// ---------------------------------------------------------------- thinking tools
+
+export const valuation = (run) => run.market[Math.min(run.turn, run.market.length - 1)].val;
+
+export function mrMarket(run) {
+  const v = valuation(run);
+  const mood = v < 0.8 ? 'Terrified' : v < 0.92 ? 'Gloomy' : v <= 1.08 ? 'Calm' : v <= 1.25 ? 'Cheerful' : 'Euphoric';
+  return { v, mood, gap: v - 1 };
+}
+
+// The base rate for this turn's mood: what usually follows the last mood.
+export function prior(run) {
+  const base = run.turn === 0 ? INIT_MOOD : transitions(run.market[run.turn - 1].state, run.asc);
+  const out = {};
+  for (const s of MOODS) out[s] = base[s] || 0;
+  return out;
+}
+
+// Base rate × how well each mood explains the headlines, normalised (Bayes).
+export function posterior(run) {
+  const pr = prior(run);
+  const hints = run.market[run.turn].news.filter((n) => n.hint).map((n) => n.hint);
+  const post = {};
+  let z = 0;
+  for (const s of MOODS) {
+    let p = pr[s];
+    for (const hnt of hints) p *= hnt === s ? HINT_TRUE : HINT_FALSE;
+    post[s] = p; z += p;
+  }
+  for (const s of MOODS) post[s] = z > 0 ? post[s] / z : pr[s];
+  return { prior: pr, post, hints };
+}
+
+function normCdf(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+
+// Chance the index fund beats inflation this turn (a positive real return), if
+// the mood is `s`.
+// It folds in what that mood does to inflation and interest rates (central
+// banks cut in crashes and hike when things overheat), and Mr. Market's pull
+// back toward fair value.
+export function pUp(run, s) {
+  const k = run.ypt / 2;
+  const naira = run.currency === 'NGN';
+  const meanInfl = (naira ? 0.17 : 0.03) + (run.asc >= 1 ? (naira ? 0.02 : 0.01) : 0);
+  const infl = meanInfl + 0.5 * (run.infl - meanInfl) + INFL_MOOD[s] * (naira ? 2 : 1);
+  const dRate = policyRate(infl, s, naira) - run.rate;
+  const A = -REVERT * (valuation(run) - 1) * k - 2.5 * dRate;
+  const need = 1 - A;
+  if (need <= 0) return 1;
+  const thr = Math.pow(need, 1 / k) - 1;
+  const [m, sd] = REAL.index[s];
+  const noise = 2.5 * (naira ? 0.03 : 0.008) / k;
+  return normCdf((m - thr) / Math.sqrt(sd * sd + noise * noise));
+}
+
+export function upOdds(run) {
+  const { prior: pr, post } = posterior(run);
+  let base = 0;
+  let ideal = 0;
+  const per = {};
+  for (const s of MOODS) { per[s] = pUp(run, s); base += pr[s] * per[s]; ideal += post[s] * per[s]; }
+  return { base, ideal, per };
+}
+
+export function setForecast(run, p) {
+  if (run.phase !== 'alloc') return false;
+  run.forecast = clamp(p, 0, 1);
+  return true;
+}
+
+export function setPlan(run, patch) {
+  if (!canAct(run)) return false;
+  const was = run.plan.pyf;
+  run.plan = { ...run.plan, ...patch };
+  run.plan.pyf = clamp(run.plan.pyf, 0, 0.6);
+  if (!was && run.plan.pyf > 0) seeP(run, 'h_plan');
+  if (patch.rebalance || patch.mix) seeP(run, 'g_defensive');
+  return true;
+}
+
+export function forecastStats(fc) {
+  if (!fc.length) return null;
+  const n = fc.length;
+  const brier = fc.reduce((s, f) => s + Math.pow(f.p - (f.up ? 1 : 0), 2), 0) / n;
+  const ideal = fc.reduce((s, f) => s + Math.pow(f.ideal - (f.up ? 1 : 0), 2), 0) / n;
+  const gap = fc.reduce((s, f) => s + Math.abs(f.p - f.ideal), 0) / n;
+  const buckets = [];
+  for (let b = 0; b < 5; b++) {
+    const lo = b * 0.2;
+    const hi = lo + 0.2;
+    const inB = fc.filter((f) => f.p >= lo && (f.p < hi || (b === 4 && f.p <= 1)));
+    if (inB.length) buckets.push({ lo, hi, said: inB.reduce((s, f) => s + f.p, 0) / inB.length, happened: inB.filter((f) => f.up).length / inB.length, n: inB.length });
+  }
+  return { n, brier, ideal, gap, buckets };
+}
+
+// Kelly: the share of wealth to stake that grows wealth fastest.
+// rows: [{ p, m }] where m is what the stake becomes (0 = lost).
+export function kelly(rows) {
+  const ev = rows.reduce((s, r) => s + r.p * r.m, 0);
+  if (ev <= 1) return { ev, f: 0 };
+  let best = 0;
+  let bestG = -Infinity;
+  for (let f = 0; f <= 0.99; f += 0.005) {
+    let g = 0;
+    for (const r of rows) g += r.p * Math.log(Math.max(1e-12, 1 + f * (r.m - 1)));
+    if (g > bestG) { bestG = g; best = f; }
+  }
+  return { ev, f: best };
+}
+
+// Rich Dad's statement: where money comes from, where it goes, what you own.
+export function statement(run) {
+  const h = run.h;
+  const p = passive(run);
+  const managed = bizManaged(run);
+  const invest4 = p.invest;
+  const income = [
+    ['Salary', run.salary, 'E'],
+    [managed ? 'Business (managed)' : 'Business (you run it)', h.biz.c > 0 ? h.biz.profit : 0, managed ? 'B' : 'S'],
+    ['Rent', p.rent, 'I'],
+    ['Investments at 4%', invest4, 'I'],
+  ].filter((r) => r[1] > 0);
+  const expenses = [
+    ['Living costs', costs(run)],
+    ['Mortgage interest', p.mort],
+    ['Debt interest', p.debt],
+  ].filter((r) => r[1] > 0);
+  const rentNet = p.rent - p.mort;
+  const assets = [
+    ['Savings', h.save], ['Index fund', h.index], ['Stocks', stocksTotal(run)], ['Dollar fund', h.fx],
+    ['Business', h.biz.c], [rentNet >= 0 ? 'Property (pays you)' : 'Property (costs you)', h.prop.v],
+    ['Crypto (pays nothing)', h.crypto],
+  ].filter((r) => r[1] > 0);
+  const liabilities = [['Mortgage', h.prop.debt], ['Borrowing', run.cash < 0 ? -run.cash : 0]].filter((r) => r[1] > 0);
+  const q = { E: 0, S: 0, B: 0, I: 0 };
+  for (const r of income) q[r[2]] += r[1];
+  q.I = Math.max(0, q.I - p.mort);
+  return { income, expenses, assets, liabilities, quadrant: q, rentNet };
+}
+
+export function seeP(run, id) {
+  if (PRINCIPLES[id] && !run.seenP.includes(id)) run.seenP.push(id);
+}
+
+// ---------------------------------------------------------------- mentor quizzes
+
+export function quizView(run) {
+  if (!run.quiz) return null;
+  if (run.quiz.id === 'bayes') return run.quiz.q;
+  const q = QUIZ[run.quiz.id];
+  return { q: q.q, opts: q.opts, p: q.p };
+}
+
+function makeQuiz(run) {
+  const r = rngFor(run.seed, 'quiz', run.turn);
+  if (run.quizAsked.length % 3 === 2 && !run.eraId) {
+    // A live Bayes question built from this turn's real numbers.
+    const pr = prior(run);
+    const target = MOODS.slice().sort((a, b) => pr[b] - pr[a])[1];
+    const base = pr[target];
+    const post = (base * HINT_TRUE) / (base * HINT_TRUE + (1 - base) * HINT_FALSE);
+    const right = `${Math.round(post * 100)}%`;
+    const opts = [right, `${Math.round(base * 100)}%`, '80%', `${Math.round(Math.min(99, post * 100 + 25))}%`];
+    const order = [0, 1, 2, 3].sort(() => r() - 0.5);
+    const names = { boom: 'Boom', steady: 'Steady', over: 'Overheating', crash: 'Crash', recov: 'Recovery' };
+    run.quiz = {
+      id: 'bayes',
+      a: order.indexOf(0),
+      q: {
+        q: `The base rate of a ${names[target]} next is ${Math.round(base * 100)}%. One headline that sounds like a ${names[target]} appears. Mood headlines are right 80% of the time, and a wrong one points at each other mood 5% of the time. What is the chance of a ${names[target]} now?`,
+        opts: order.map((i) => opts[i]),
+        p: 'x_bayes',
+      },
+      why: `Bayes: ${Math.round(base * 100)}% × 0.8 = ${(base * 0.8).toFixed(3)}, against ${Math.round((1 - base) * 100)}% × 0.05 = ${((1 - base) * 0.05).toFixed(3)}. The share is ${(base * 0.8).toFixed(3)} ÷ ${(base * 0.8 + (1 - base) * 0.05).toFixed(3)} = ${right}. One good headline moves the odds a lot, but not to 80%.`,
+    };
+  } else {
+    const pool = QUIZ.map((_, i) => i).filter((i) => !run.quizAsked.includes(i));
+    const id = pool.length ? pool[Math.floor(r() * pool.length)] : Math.floor(r() * QUIZ.length);
+    run.quiz = { id, a: QUIZ[id].a, why: QUIZ[id].why };
+  }
+  run.quizAsked.push(run.quiz.id);
+}
+
+export function answerQuiz(run, i) {
+  if (!run.quiz) return null;
+  const right = i === run.quiz.a;
+  const p = run.quiz.id === 'bayes' ? 'x_bayes' : QUIZ[run.quiz.id].p;
+  const correct = run.quiz.id === 'bayes' ? run.quiz.q.opts[run.quiz.a] : QUIZ[run.quiz.id].opts[run.quiz.a];
+  const out = { right, why: run.quiz.why, p, correct };
+  if (right) { run.quizRight += 1; run.joy = clamp(run.joy + 3, 0, 100); run.cash += 0.05 * run.salary; }
+  seeP(run, p);
+  run.quiz = null;
+  return out;
+}
+
 // ---------------------------------------------------------------- event helpers
 
 function helpers(run, r) {
@@ -522,6 +753,7 @@ function helpers(run, r) {
     flag: (k, v = true) => { run.flags[k] = v; },
     marry: () => { run.flags.married = true; run.salary *= 1.35; run.costMult *= 1.3; },
     kid: () => { run.flags.kids = (run.flags.kids || 0) + 1; },
+    skill: () => { run.flags.skillAge = run.age; },
     term: (id) => learn(run, id),
     scam: (n) => { run.log.scam += n / run.salary; run.flags.scammed = true; learn(run, 'ponzi'); },
     add: (asset, n) => {
@@ -546,6 +778,7 @@ function helpers(run, r) {
         run.cash -= amt - fromSave;
         run.log.efund += saved;
         learn(run, 'efund');
+        run.eventLesson = run.eventLesson || 'p_room';
         return `Your emergency fund covered it and saved you ${h.f(saved)}.`;
       }
       run.cash -= amt;
@@ -568,8 +801,21 @@ export function eventView(run) {
       label: typeof c.label === 'function' ? c.label(v, h) : c.label,
       note: c.note || '',
       ok: !c.need || c.need(run, v),
+      math: c.math ? mathView(run, c.math(run, v, h)) : null,
     })),
   };
+}
+
+// Turn a choice's odds into expected value (and Kelly size, for stakes).
+function mathView(run, m) {
+  if (m.kind === 'text') return m;
+  if (m.kind === 'cost') {
+    const ev = m.rows.reduce((s, r) => s + r.p * r.v, 0);
+    return { ...m, ev };
+  }
+  const k = kelly(m.rows);
+  const nw = Math.max(1, netWorth(run));
+  return { ...m, ev: m.stake * (k.ev - 1), mult: k.ev, kelly: k.f, share: m.stake / nw, kellyAmt: k.f * nw };
 }
 
 function drawEvent(run) {
@@ -604,6 +850,13 @@ export function live(run) {
   const before = holdings(run);
   const nw0 = netWorth(run);
   const res = { t, age0: run.age, age1: run.age + y, state: m.state, swan: m.swan, rows: [], flows: [], notes: [], nw0 };
+  // Snapshot what the player knew before the dice roll, for the review.
+  const odds = !run.eraId ? upOdds(run) : null;
+  const fc = run.forecast != null && odds ? { t, p: run.forecast, ideal: odds.ideal, base: odds.base } : null;
+  const priorNow = prior(run);
+  const valNow = m.val;
+  const scam0 = run.log.scam;
+  const lifeStart = run.lifeStart != null ? run.lifeStart : run.startLife;
 
   // Salary and living costs over the period.
   const drift = Math.pow(1 + m.infl, (y - 1) / 2);
@@ -613,6 +866,27 @@ export function live(run) {
   const spend = costs(run) * y * drift;
   run.cash += pay - spend;
   res.flows.push({ label: 'Salary', v: pay }, { label: 'Living costs', v: -spend });
+
+  // The plan runs by itself: pay yourself first, then rebalance to the mix.
+  const mix = PLANS[run.plan.mix] || PLANS.balanced;
+  const idxOpen = isOpen(run, 'index');
+  let pyf = 0;
+  if (run.plan.pyf > 0) {
+    // Never borrow to pay yourself: if costs ate the pay, the plan gets less.
+    const want = pay * run.plan.pyf;
+    pyf = Math.min(want, Math.max(0, run.cash));
+    if (pyf < want * 0.99) res.pyfShort = want - pyf;
+    const toIdx = idxOpen ? pyf * mix.index : 0;
+    run.cash -= pyf;
+    h.index += toIdx;
+    h.save += pyf - toIdx;
+    res.pyf = pyf;
+  }
+  if (run.plan.rebalance && idxOpen) {
+    const tot = h.save + h.index;
+    const d = tot * mix.index - h.index;
+    if (tot > 0 && Math.abs(d) > tot * 0.02) { h.index += d; h.save -= d; res.rebal = d; }
+  }
   run.log.creep += Math.max(0, costs(run) - costs({ ...run, life: run.startLife })) * y / run.salary;
 
   // Market returns, bent by cards.
@@ -747,7 +1021,7 @@ export function live(run) {
   if (run.asc >= 8) dj -= 2;
   if (c.sailor) dj -= 2;
   if (m.state === 'crash' && nw0 > 0 && netWorth(run) < nw0 * 0.8) dj -= 4;
-  run.joy = clamp(run.joy + dj, has(run, 'stoic') ? 30 : 0, 100);
+  run.joy = clamp(run.joy + dj * Math.min(1, y / 2), has(run, 'stoic') ? 30 : 0, 100);
   run.age += y;
   if (run.lev > 0) run.lev -= 1;
   if (run.cash > 0.2 * Math.max(netWorth(run), 1)) run.flags.idle = (run.flags.idle || 0) + 1; else run.flags.idle = 0;
@@ -755,8 +1029,113 @@ export function live(run) {
   res.nw1 = netWorth(run);
   res.passive = passive(run).total;
   res.costs = costs(run);
+
+  // Forecast scoring.
+  if (fc) {
+    fc.up = (1 + m.ret.index) / Math.pow(1 + m.infl, y) > 1;
+    fc.ret = m.ret.index;
+    fc.real = (1 + m.ret.index) / Math.pow(1 + m.infl, y) - 1;
+    fc.infl = m.infl;
+    run.fc.push(fc);
+    res.fc = fc;
+    run.forecast = null;
+  }
+
+  // A month-by-month path for the index, ending where the year really ended.
+  const pr = rngFor(run.seed, 'path', t);
+  const steps = 12 * y;
+  const endLog = Math.log(1 + m.ret.index);
+  const vol = REAL.index[m.state][1] * Math.sqrt(y / 2) / Math.sqrt(steps) * 1.4;
+  let w = 0;
+  const walk = [0];
+  for (let i = 1; i <= steps; i++) { w += pr.normal() * vol; walk.push(w); }
+  res.path = walk.map((x, i) => Math.exp(x - (walk[steps] - endLog) * (i / steps)));
+
+  // Arkad's seven cures, checked every year.
+  const hv = holdings(run);
+  const productive = hv.save + hv.index + hv.stocks + hv.fx + Math.max(0, hv.prop) + hv.biz;
+  const investedAll = productive + hv.crypto;
+  const biggest = Math.max(hv.save, hv.index, hv.stocks, hv.fx, Math.max(0, hv.prop), hv.biz, hv.crypto);
+  const cures = [
+    pay - spend >= 0.1 * pay,
+    costs(run) <= 0.75 * run.salary,
+    productive >= 0.6 * Math.max(1, productive + Math.max(0, run.cash) + hv.crypto),
+    run.log.scam === scam0 && run.cash >= 0 && !(investedAll > run.salary && biggest > 0.6 * investedAll && biggest !== hv.save),
+    h.prop.v > 0,
+    passive(run).total >= 0.2 * costs(run),
+    run.flags.skillAge != null && run.age - run.flags.skillAge <= 6,
+  ];
+  res.newCures = [];
+  cures.forEach((on, i) => {
+    if (on) run.cureYears[i] += y;
+    if (on && !run.curesLit.includes(i)) { run.curesLit.push(i); res.newCures.push(i); }
+  });
+  run.cures = cures;
+  if (cures.every(Boolean) && !run.flags.allCures) { run.flags.allCures = true; run.joy = clamp(run.joy + 10, 0, 100); }
+
+  // Mentor moments: what this year teaches, tied to a principle.
+  const mo = [];
+  const money = (n) => fmt(n, run.currency);
+  const riskyHeld = before.index + before.stocks + before.crypto > 0;
+  const boughtIdx = (run.flow.buy.index || 0) + (run.flow.buy.stocks || 0);
+  if (m.state === 'crash' && riskyHeld && !soldRisk) { run.flags.held = (run.flags.held || 0) + 1; mo.push(['held_crash']); if (run.flags.held === 2 || run.flags.held === 4) mo.push(['persist', run.flags.held]); }
+  if ((m.state === 'crash' || prev === 'crash') && soldRisk) mo.push(['sold_panic']);
+  if (boughtIdx > 0 && valNow < 0.85) mo.push(['mos_buy', `${Math.round((1 - valNow) * 100)}%`]);
+  if (boughtIdx > 0 && valNow > 1.25) mo.push(['euphoric_buy', `${Math.round((valNow - 1) * 100)}%`]);
+  if (res.rebal) mo.push([res.rebal < 0 ? 'rebalance' : 'rebalance_buy', money(Math.abs(res.rebal))]);
+  if (pyf > 0 && !run.flags.pyfSeen) { run.flags.pyfSeen = true; mo.push(['pyf_on', money(pyf)]); }
+  if (res.pyfShort) mo.push(['pyf_short', money(res.pyfShort)]);
+  if (!pyf && run.learnMode && t >= 1 && !run.flags.pyfNag) { run.flags.pyfNag = true; mo.push(['pyf_off']); }
+  if (run.life > lifeStart) mo.push(['life_up', money(freedomNumber(run))]);
+  if (run.cash > costs(run) && m.infl > 0.02) mo.push(['idle_cash', money(run.cash), money(run.cash * (1 - 1 / Math.pow(1 + m.infl, y)))]);
+  if (run.log.scam > scam0) mo.push(['scam_loss']);
+  if (run.flow.buy.prop > 0 || (h.prop.v > 0 && !run.flags.propSeen)) {
+    run.flags.propSeen = true;
+    const net = h.prop.v * rentYield(run) - h.prop.debt * mortRate(run);
+    mo.push(net >= 0 ? ['house_asset', money(net)] : ['house_liab', money(-net)]);
+  }
+  if (bizManaged(run) && h.biz.c > 0 && !run.flags.bSeen) { run.flags.bSeen = true; mo.push(['manager']); }
+  if (res.passive >= 0.5 * res.costs && !run.flags.halfSeen) { run.flags.halfSeen = true; mo.push(['half_free']); }
+  if (res.rows.some((r) => -r.gain > 0.25 * Math.max(nw0, 1))) mo.push(['conc_loss']);
+  if (fc) {
+    const hit = fc.up ? fc.p : 1 - fc.p;
+    const idealHit = fc.up ? fc.ideal : 1 - fc.ideal;
+    if ((fc.p >= 0.85 || fc.p <= 0.15) && hit < 0.5) mo.push(['overconf', `${Math.round(Math.max(fc.p, 1 - fc.p) * 100)}%`]);
+    else if (Math.abs(fc.p - fc.ideal) <= 0.1 && idealHit < 0.5) mo.push(['good_call_bad_luck']);
+    else if (hit > 0.5 && idealHit < 0.4) mo.push(['lucky_call']);
+    else if (Math.abs(fc.p - fc.ideal) <= 0.1) mo.push(['good_calib']);
+  }
+  if (m.state === 'crash' && priorNow.crash <= 0.15 && !m.swan) mo.push(['rare_crash', `${Math.round(priorNow.crash * 100)}%`]);
+  const investedNow = hv.save + hv.index + hv.stocks + hv.fx;
+  if (investedNow > 3 * run.salary && !run.flags.compSeen) { run.flags.compSeen = true; mo.push(['compound', '3']); }
+  if (run.cash < 0) mo.push(['debt', `${Math.round(debtRate(run) * 100)}%`]);
+  if (run.aim && run.age >= run.aim - 5 && run.age - y < run.aim - 5) mo.push(['aim_near', String(run.aim), `${Math.round(Math.min(1, res.passive / res.costs) * 100)}%`]);
+  if (run.learnMode && t === 0) mo.push(['base_intro']);
+  if (run.learnMode && t === 1) mo.push(['bayes_intro']);
+  if (run.flags.allCures && !run.flags.allCuresSeen) { run.flags.allCuresSeen = true; mo.push(['all_cures']); }
+
+  // Show new ideas first, and never the same moment two years running.
+  const recent = run.recentMoments;
+  const ranked = mo.filter((x) => !recent.includes(x[0]))
+    .sort((a, b) => (run.seenP.includes(MOMENTS[a[0]].p) ? 1 : 0) - (run.seenP.includes(MOMENTS[b[0]].p) ? 1 : 0));
+  res.moments = ranked.slice(0, run.learnMode ? 2 : 1).map(([id, x, yy]) => {
+    const M = MOMENTS[id];
+    seeP(run, M.p);
+    return { id, p: M.p, text: M.text.replace('{x}', x == null ? '' : x).replace('{y}', yy == null ? '' : yy) };
+  });
+  run.recentMoments = res.moments.map((x) => x.id);
   run.lastResult = res;
 
+  // One-year turns keep life at the same pace as two-year ones: an event and
+  // a card every other year, with a quiet year in between.
+  if (y === 1 && t % 2 === 1 && !m.devJump) {
+    run.pending = null;
+    run.quiet = true;
+    run.phase = 'cards';
+    res.quiet = true;
+    return res;
+  }
+  run.quiet = false;
   const evId = drawEvent(run);
   const ev = EVENTS.find((e) => e.id === evId);
   run.pending = { id: evId, v: ev.setup ? ev.setup(run) : {} };
@@ -771,7 +1150,12 @@ export function chooseEvent(run, i) {
   const choice = ev.choices[i];
   if (!choice || (choice.need && !choice.need(run, run.pending.v))) return null;
   const h = helpers(run, rngFor(run.seed, 'evo', run.turn));
+  run.eventLesson = null;
   const text = choice.fx(run, h, run.pending.v) || '';
+  const lesson = choice.lesson || run.eventLesson;
+  run.eventLesson = lesson || null;
+  if (lesson) seeP(run, lesson);
+  if (choice.math) seeP(run, 'x_ev');
   run.pending = null;
   run.phase = 'cards';
   return text;
@@ -819,14 +1203,18 @@ export function pickCard(run, id) {
 function endTurn(run) {
   run.turn += 1;
   run.flow = { buy: {}, sell: {} };
+  run.lifeStart = run.life;
+  run.eventLesson = null;
   run.hist.push(snapshot(run));
   const nw = netWorth(run);
   run.negTurns = nw < 0 ? run.negTurns + 1 : 0;
   const e = era(run);
   if (passive(run).total >= costs(run)) return finish(run, 'free');
-  if (run.negTurns >= 2) return finish(run, 'bankrupt');
+  // Broke for four years in a row (two 2-year turns) ends the run.
+  if (run.negTurns * run.ypt >= 4) return finish(run, 'bankrupt');
   if (run.turn >= run.turns) return finish(run, e ? (nw >= e.target * costs(run) ? 'target' : 'missed') : 'clock');
   run.phase = 'alloc';
+  if (run.learnMode && run.turn % 4 === 0) makeQuiz(run);
   return null;
 }
 
@@ -849,6 +1237,15 @@ export function finish(run, reason) {
   else if (reason === 'clock') score = Math.round(700 * ratio) + Math.round(run.joy * 2);
   else if (reason === 'bankrupt') score = Math.round(100 * ratio);
   else score = 0;
+  // The learning layer adds to the score: meeting your written aim, thinking
+  // clearly about odds, and passing the mentors' tests.
+  const fstats = forecastStats(run.fc);
+  const aimMet = !!(run.aim && reason === 'free' && run.age <= run.aim);
+  let bonus = 0;
+  if (aimMet) bonus += 300;
+  if (fstats && fstats.n >= 3) bonus += Math.round(Math.max(0, 0.25 - fstats.brier) * 4 * 300);
+  bonus += run.quizRight * 25;
+  score += bonus;
   score = Math.round(score * (1 + 0.15 * run.asc));
 
   // The worst mistake, measured in years of salary.
@@ -872,7 +1269,10 @@ export function finish(run, reason) {
     reason, score, age: run.age, nw, passive: p.total, costs: C, ratio, joy: run.joy,
     worst, best, lesson: worst ? worst.key : 'none', earlier, annual,
     hist: run.hist.slice(), learned: run.learned.slice(), scammed: !!run.flags.scammed,
-    wisdom: Math.round(score / 40) + (reason === 'free' || reason === 'target' ? 10 : 2),
+    wisdom: Math.round(score / 40) + (reason === 'free' || reason === 'target' ? 10 : 2) + run.seenP.length,
+    learnMode: run.learnMode, aim: run.aim, aimMet, bonus, forecast: fstats,
+    cureYears: run.cureYears.slice(), years: run.age - run.startAge,
+    seenP: run.seenP.slice(), quizRight: run.quizRight, quizAsked: run.quizAsked.length,
   };
   run.phase = 'done';
   return run.result;

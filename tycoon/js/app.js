@@ -6,6 +6,7 @@ import {
   CURRENCIES, LIFESTYLES, CHARACTERS, ASSETS, COMPANIES, STATE_INFO, SWANS, CARDS,
   ERAS, CHALLENGES, ASCENSION, GLOSSARY, SCAM_TIPS, LESSONS, TIPS,
 } from './content.js';
+import { BOOKS, PRINCIPLES, PLANS, AIMS } from './learn.js';
 
 const app = document.getElementById('app');
 const layer = document.getElementById('layer');
@@ -17,8 +18,9 @@ const KEY = 'tycoonrush.v1';
 const DEFAULTS = {
   wisdom: 0, runs: 0, best: 0, freedoms: 0, bestAge: null, maxAsc: 0,
   glossary: [], scamLesson: false, daily: {}, weekly: {}, duels: {}, eras: {},
-  settings: { sound: true, timer: false, currency: 'NGN', calm: false },
-  setup: { char: 'graduate', asc: 0 },
+  principles: [], fcAll: [],
+  settings: { sound: true, timer: false, currency: 'NGN', calm: false, lens: false },
+  setup: { char: 'graduate', asc: 0, aim: 45 },
   run: null,
 };
 let P = loadProfile();
@@ -54,6 +56,8 @@ const calm = () => P.settings.calm || matchMedia('(prefers-reduced-motion: reduc
 const fairMode = (mode) => ['daily', 'duel'].includes(mode);
 const unlockedIds = () => E.unlockedCards(run && fairMode(run.mode) ? 0 : P.wisdom);
 const initials = (name) => name.replace('The ', '').slice(0, 2).toUpperCase();
+const pc = (x) => `${Math.round(x * 100)}%`;
+const needsForecast = () => run && run.learnMode && !run.eraId && run.forecast == null;
 
 function toast(msg) {
   const t = document.createElement('div');
@@ -257,11 +261,13 @@ function home() {
     <div class="ticker-strip" aria-hidden="true"><span>ZNK +2.1% · PLM −0.8% · BGP +0.4% · KUL +6.3% · NXO −3.2% · INDEX +1.2% · MOONCOIN −41% · T-BILL 13.5% · </span></div>
     ${resume}
     <section class="modes">
-      <button class="mode hero" data-act="setup" data-mode="classic"><b>Classic Run</b><small>From 22 to financial freedom. About 10 minutes. Unlocks and Ascension live here.</small></button>
+      <button class="mode hero" data-act="setup" data-mode="journey"><b>Wisdom Journey</b><small>Learn as you play. One year at a time: forecast the odds, follow a plan, and meet the ideas of six great money books.</small></button>
+      <button class="mode" data-act="setup" data-mode="classic"><b>Classic Run</b><small>2 years a turn, about 10 minutes. Ascension lives here.</small></button>
       <button class="mode" data-act="setup" data-mode="blitz"><b>Blitz</b><small>4 years a turn, 15 seconds to decide.</small></button>
       <button class="mode" data-act="daily"><b>Daily Market</b><small>Same market for everyone today. One try.</small>${daily ? `<span class="badge pill v-real">Done</span>` : ''}</button>
       <button class="mode" data-act="eras"><b>Eras</b><small>Survive famous booms and busts.</small></button>
       <button class="mode" data-act="duel"><b>Duel</b><small>Share a code, play the same market as friends.</small></button>
+      <button class="mode" data-act="library"><b>Library</b><small>The books, their ideas, and your forecasting record.</small></button>
       <button class="mode" data-act="weekly" style="grid-column:1/-1"><b>Weekly: ${esc(wk.name)}</b><small>${esc(wk.text)}</small>${wkDone != null ? `<span class="badge pill v-real">Badge</span>` : ''}</button>
     </section>
     <div class="stats-row">
@@ -311,6 +317,11 @@ function setup(mode) {
       <span class="note">${esc(CURRENCIES[cur].blurb)}</span>
     </section>
     ${asc}
+    ${setupMode === 'journey' ? `<section class="field">
+      <span class="lbl">Your definite chief aim</span>
+      <div class="seg">${AIMS.map((a) => `<button class="${P.setup.aim === a ? 'on' : ''}" data-act="aim" data-v="${a}">Free by ${a}</button>`).join('')}</div>
+      <span class="note">Think and Grow Rich starts here: a definite goal with a date. Meet it for a big bonus. Each turn is one year, with a forecast, a plan and a mentor's lesson. Your progress saves, so play a few years at a time.</span>
+    </section>` : ''}
     <div class="sticky-go"><button class="btn primary wide" data-act="start">Start at ${E.MODES[setupMode].startAge}</button></div>
   </main>`;
 }
@@ -343,6 +354,7 @@ function tileHTML(id) {
   return `<button class="tile ${open ? '' : 'closed'}" style="--c:${A.color}" data-act="asset" data-id="${id}" ${open ? '' : 'disabled'}>
     <span class="t-name">${esc(A.name)}</span>
     <span class="t-sub">${open ? esc(A.sub) : 'Closed this week'}</span>
+    ${id === 'index' && open ? (() => { const mm = E.mrMarket(run); return `<span class="mm" style="color:${mm.v < 0.92 ? 'var(--gain)' : mm.v > 1.08 ? 'var(--orange)' : 'var(--sky)'}">${mm.v.toFixed(2)}× fair value</span>`; })() : ''}
     <b class="t-val ${hv > 0 ? '' : 'zero'}">${f(hv)}</b>
     <span class="t-foot">${foot}<canvas class="spark" data-id="${id}" width="64" height="24"></canvas></span>
   </button>`;
@@ -370,7 +382,8 @@ function renderGame() {
       : n.kind === 'noise' ? '<span class="pill verdict v-noise">Noise</span>'
         : n.real ? '<span class="pill verdict v-real">Real</span>' : '<span class="pill verdict v-fake">Fake</span>';
     const getin = n.kind === 'trap' ? `<button class="getin" data-act="trap" data-i="${i}" ${n.taken ? 'disabled' : ''}>${n.taken ? 'You are in' : 'Get in early ▸'}</button>` : '';
-    return `<article class="headline"><span class="src">${src}</span>${verdict}<p>${esc(n.text)}</p>${getin}</article>`;
+    const hint = run.learnMode && n.hint ? `<span class="pill hint-pill" style="--mc:${STATE_INFO[n.hint].color}">Sounds like: ${STATE_INFO[n.hint].name}</span>` : '';
+    return `<article class="headline"><span class="src">${src}</span>${verdict}<p>${esc(n.text)}</p>${hint}${getin}</article>`;
   }).join('');
   const whisper = (run.charges.insider > 0 && !revealAll) ? `<button class="btn small" data-act="tool" data-tool="insider">Whisper (${run.charges.insider})</button>` : '';
   const ball = (run.charges.crystal > 0 && !run.crystal[run.turn]) ? `<button class="btn small" data-act="tool" data-tool="crystal">Crystal ball (${run.charges.crystal})</button>` : '';
@@ -388,12 +401,13 @@ function renderGame() {
         <div class="age"><b>${run.age}</b><span>yrs · turn ${run.turn + 1}/${run.turns}</span></div>
         <div class="macro"><span>Inflation <b>${pctS(run.infl)}</b></span><span>Interest <b>${pctS(run.rate)}</b></span></div>
       </div>
-      <div class="nw-row"><span class="lbl">Net worth</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></div>
+      <button class="nw-row" data-act="statement" aria-label="Your financial statement"><span class="lbl">Net worth ▸</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></button>
       <button class="freedom" data-act="passive" aria-label="Passive income breakdown">
         <div class="fbar"><i style="width:${(prog * 100).toFixed(1)}%"></i></div>
-        <div class="fmeta"><span>Passive <b>${f(p.total)}</b>/yr</span><span><b>${Math.round(prog * 100)}%</b> free</span><span>Costs <b>${f(C)}</b>/yr</span></div>
+        <div class="fmeta"><span>Passive <b>${f(p.total)}</b>/yr</span><span><b>${Math.round(prog * 100)}%</b> ${run.learnMode ? 'out of rat race' : 'free'}</span><span>Costs <b>${f(C)}</b>/yr</span></div>
       </button>
     </header>
+    ${run.aim ? `<div class="chip-line" style="border-color:var(--orange);color:var(--orange)">Chief aim: free by ${run.aim}. ${run.age < run.aim ? `${run.aim - run.age} years to go.` : 'The date has passed. Keep going.'}</div>` : ''}
     ${tip}${crystal}
     ${sea ? '<div class="sea-note"><b>At sea.</b> You can\'t trade or change your lifestyle this turn. Your money keeps working while you sail.</div>' : ''}
     ${E.era(run) ? `<div class="chip-line" style="border-color:var(--gold);color:var(--gold)">${esc(E.era(run).name)}: finish with ${E.era(run).target}× your yearly costs (${f(E.era(run).target * C)}), or reach freedom.</div>` : ''}
@@ -401,6 +415,7 @@ function renderGame() {
       <div class="sec-h"><h2>Headlines</h2><div style="display:flex;gap:6px">${whisper}${ball}</div></div>
       <div class="news-strip">${headlines}</div>
     </section>
+    ${thinkHTML()}
     <section class="sec">
       <div class="sec-h"><h2>Your money</h2><span class="note">Tap to buy or sell</span></div>
       <div class="grid">${ORDER.map(tileHTML).join('')}${ponzi}</div>
@@ -414,13 +429,207 @@ function renderGame() {
           <div class="seg">${LIFESTYLES.map((l, i) => `<button class="${run.life === i ? 'on' : ''}" data-act="life" data-lv="${i}" ${sea || locked ? 'disabled' : ''} aria-label="${l.name}">${l.name}</button>`).join('')}</div>
           <span class="note">${esc(LIFESTYLES[run.life].blurb)} Joy ${LIFESTYLES[run.life].joy >= 0 ? '+' : ''}${LIFESTYLES[run.life].joy} a turn.</span>
         </div>
+        ${planHTML(sea)}
         <div class="joy"><span>Joy</span><div class="jbar"><i style="width:${run.joy}%;background:${run.joy < 25 ? 'var(--loss)' : 'var(--pink)'}"></i></div><b class="num">${Math.round(run.joy)}</b></div>
       </div>
     </section>
+    ${curesHTML()}
     ${heldCards || lev ? `<section class="sec"><div class="sec-h"><h2>Your cards</h2></div><div class="held">${lev}${heldCards}</div></section>` : ''}
-    <footer class="actionbar"><button class="next" data-act="next"><span>Live ${run.ypt} years ▸</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></footer>
+    <footer class="actionbar"><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Forecast first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></footer>
   </div>`;
   requestAnimationFrame(drawSparks);
+}
+
+// ------------------------------------------------------------------ learning panels
+
+const moodName = (s) => STATE_INFO[s].name;
+
+function thinkHTML() {
+  if (run.eraId) return '';
+  const learnM = run.learnMode;
+  if (!learnM && !P.settings.lens) {
+    return `<section class="think"><div class="sec-h"><h2>Probability lens</h2><button class="linkish" data-act="lens">Open</button></div><p class="why">See base rates, what the headlines imply, and forecast the year.</p></section>`;
+  }
+  const { prior: pr, post, hints } = E.posterior(run);
+  const decided = run.forecast != null;
+  const showPost = decided || !learnM;
+  const odds = E.upOdds(run);
+  const prevS = run.turn > 0 ? run.market[run.turn - 1].state : null;
+  const rows = E.MOODS.map((s) => `<div class="lens-row" style="--mc:${STATE_INFO[s].color}"><span class="mood-n">${moodName(s)}</span>
+    <div class="bar"><i style="width:${pr[s] * 100}%"></i><b>${pc(pr[s])}</b></div>
+    <div class="bar post ${showPost ? '' : 'hidden'}"><i style="width:${post[s] * 100}%"></i><b>${showPost ? pc(post[s]) : '?'}</b></div></div>`).join('');
+  const span = run.ypt === 1 ? 'the next year' : `the next ${run.ypt} years`;
+  const chips = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map((p) => `<button class="${decided && Math.abs(run.forecast - p) < 0.001 ? 'on' : ''}" data-act="fc" data-p="${p}" ${decided && learnM ? 'disabled' : ''}>${Math.round(p * 100)}</button>`).join('');
+  let reveal = '';
+  if (showPost) {
+    const top = E.MOODS.slice().sort((a, b) => post[b] - post[a])[0];
+    const n = hints.filter((x) => x === top).length;
+    const mm = E.mrMarket(run);
+    reveal = `
+      <div class="fc-read">
+        <div><b>${decided ? pc(run.forecast) : '–'}</b><span>You said</span></div>
+        <div><b>${pc(odds.base)}</b><span>Base rates only</span></div>
+        <div><b>${pc(odds.ideal)}</b><span>Base rates + headlines</span></div>
+      </div>
+      <p class="why">Most likely mood: <b>${moodName(top)}</b>, ${pc(post[top])}. Its base rate was ${pc(pr[top])}, and ${n === 0 ? 'no headline points to it' : `${n} headline${n > 1 ? 's point' : ' points'} to it`}. Each mood headline is right 80% of the time, so every match multiplies its odds by 16 (0.8 ÷ 0.05) against each other mood. In a ${moodName(top)} the index beats inflation ${pc(odds.per[top])} of the time.${Math.abs(mm.gap) > 0.08 ? ` Mr. Market is ${mm.mood.toLowerCase()} at ${mm.v.toFixed(2)}× fair value, which ${mm.gap < 0 ? 'raises' : 'lowers'} the odds.` : ''}</p>`;
+  }
+  return `<section class="think">
+    <div class="sec-h"><h2>Think in probabilities</h2><button class="linkish" data-act="principle" data-id="${showPost ? 'x_bayes' : 'x_base'}">Why?</button></div>
+    <p class="why">${prevS ? `Last year was a <b>${moodName(prevS)}</b>. Base rates show what usually followed one.` : 'The first year. Base rates show how careers usually begin.'} ${learnM && !decided ? 'Read the headlines, then make your call. The full maths appears after you commit.' : ''}</p>
+    <div class="lens-row head"><span>Next mood</span><span>Base rate</span><span>After headlines</span></div>
+    ${rows}
+    <div class="fc-q">Will the index fund beat inflation over ${span}? <span class="muted">(%)</span></div>
+    <div class="fc-chips">${chips}</div>
+    ${reveal}
+    ${!learnM ? '<button class="linkish" data-act="lens" style="justify-self:start">Hide lens</button>' : ''}
+  </section>`;
+}
+
+function planHTML(sea) {
+  const pl = run.plan;
+  const can = E.canAct(run) && !sea;
+  const C = E.costs(run);
+  const mix = PLANS[pl.mix];
+  return `<div class="plan">
+    <span class="lbl">Your plan: pay yourself first</span>
+    <div class="seg">${[0, 0.1, 0.2, 0.3, 0.5].map((x) => `<button class="${Math.abs(pl.pyf - x) < 0.001 ? 'on' : ''}" data-act="pyf" data-v="${x}" ${can ? '' : 'disabled'}>${Math.round(x * 100)}%</button>`).join('')}</div>
+    <div class="seg">${Object.entries(PLANS).map(([k, v]) => `<button class="${pl.mix === k ? 'on' : ''}" data-act="mix" data-k="${k}" ${can ? '' : 'disabled'}>${v.name}</button>`).join('')}</div>
+    <button class="toggle-row" data-act="rebal" role="switch" aria-checked="${!!pl.rebalance}" ${can ? '' : 'disabled'}><span style="text-align:left"><b>Rebalance every year</b><small>Keep savings and index at ${Math.round((1 - mix.index) * 100)} / ${Math.round(mix.index * 100)}</small></span><span class="switch ${pl.rebalance ? 'on' : ''}"></span></button>
+    <span class="note">${pl.pyf > 0 ? `${f(run.salary * pl.pyf)} a year goes to you before any spending: ${Math.round(mix.index * 100)}% index, the rest savings.` : 'Nothing goes to you first yet. Arkad says keep at least 10%.'}</span>
+    ${run.salary * (1 - pl.pyf) < C ? '<span class="warn">Your plan plus living costs are more than your pay, so the plan will invest less than you set. Cut your lifestyle to make it fit.</span>' : ''}
+  </div>`;
+}
+
+const CURE_NAMES = ['Pay yourself first', 'Control spending', 'Make gold multiply', 'Guard against loss', 'Own property', 'Future income', 'Grow your earning'];
+const CURE_IDS = ['b_purse', 'b_control', 'b_multiply', 'b_guard', 'b_home', 'b_future', 'b_earn'];
+
+function curesHTML() {
+  const lit = run.cures.filter(Boolean).length;
+  return `<section class="sec"><button class="wallet cures-btn" data-act="cures">
+    <span><span class="lbl">Arkad's seven cures</span><br><span class="note">${run.turn === 0 ? 'Checked at the end of each year' : `${lit} of 7 kept last year`}</span></span>
+    <span class="stones">${run.cures.map((on, i) => `<span class="stone ${on ? 'on' : ''}">${i + 1}</span>`).join('')}</span></button></section>`;
+}
+
+function lessonHTML(pid, text, act = false) {
+  const pr = PRINCIPLES[pid];
+  const b = BOOKS[pr.book];
+  const tag = act ? 'button' : 'div';
+  return `<${tag} class="lesson" style="--bc:${b.color}" ${act ? `data-act="principle" data-id="${pid}"` : ''}><span class="book">${esc(b.title)}</span><b>${esc(pr.title)}</b><p>${esc(text || pr.idea)}</p></${tag}>`;
+}
+
+function principleSheet(id) {
+  const pr = PRINCIPLES[id];
+  const b = BOOKS[pr.book];
+  openSheet(`
+    ${sheetHead('', pr.title)}
+    <span class="kicker" style="color:${b.color}">${esc(b.title)}${b.year ? ` · ${esc(b.author)}, ${b.year}` : ''}</span>
+    <p>${esc(pr.idea)}</p>
+    <div class="insight" style="--ic:${b.color}"><span class="lbl">In the game</span><p>${esc(pr.game)}</p></div>
+    <p class="note">Ideas paraphrased from the book. Read the original, it is worth it.</p>
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+function curesSheet() {
+  openSheet(`
+    ${sheetHead('', 'Arkad\'s seven cures')}
+    <p class="muted">From The Richest Man in Babylon: seven habits that cure a lean purse. Each is checked at the end of every year.</p>
+    <div class="cure-list">${CURE_IDS.map((id, i) => `<div><span class="stone ${run.cures[i] ? 'on' : ''}">${i + 1}</span><span><b>${esc(PRINCIPLES[id].title)}</b><p>${esc(PRINCIPLES[id].game)}</p><p>Kept for ${run.cureYears[i]} of ${run.age - run.startAge} years.</p></span></div>`).join('')}</div>
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+function statementSheet() {
+  const st = E.statement(run);
+  const row = ([k, v]) => `<div><span>${esc(k)}</span><b>${f(v)}</b></div>`;
+  const q = st.quadrant;
+  const tot = q.E + q.S + q.B + q.I || 1;
+  const cell = (k, name, sub) => `<div class="${q[k] > 0 ? 'on' : ''}"><small>${name}</small><b>${pc(q[k] / tot)}</b><small>${sub}</small></div>`;
+  const inc = st.income.reduce((s, r) => s + r[1], 0);
+  const exp = st.expenses.reduce((s, r) => s + r[1], 0);
+  openSheet(`
+    ${sheetHead('', 'Your financial statement')}
+    <p class="muted">Rich Dad's test: assets put money in your pocket, liabilities take it out. Passive income must beat expenses to leave the rat race.</p>
+    <div class="stmt">
+      <h3>Income a year</h3>${st.income.map(row).join('')}<div><b>Total</b><b class="up">${f(inc)}</b></div>
+      <h3>Expenses a year</h3>${st.expenses.map(row).join('')}<div><b>Total</b><b class="down">${f(exp)}</b></div>
+      <h3>Assets</h3>${st.assets.map(row).join('') || '<div><span class="muted">None yet</span><b></b></div>'}
+      <h3>Liabilities</h3>${st.liabilities.map(row).join('') || '<div><span class="muted">None</span><b></b></div>'}
+    </div>
+    <span class="lbl">Where your income comes from</span>
+    <div class="quad">${cell('E', 'Employee', 'You have a job')}${cell('S', 'Self-employed', 'You run a business')}${cell('B', 'Business owner', 'A system runs it')}${cell('I', 'Investor', 'Money works for you')}</div>
+    <p class="note">Only B and I keep paying when you stop working. That is the right-hand side of the cashflow quadrant.</p>
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+function mathHTML(m) {
+  if (!m) return '';
+  if (m.kind === 'text') return `<p>${esc(m.text)}</p>`;
+  const rows = m.rows.map((r) => `<div class="mrow"><span>${pc(r.p)} · ${esc(r.label)}</span><span>${m.kind === 'stake' ? `${r.m === 0 ? 'lose it' : `${r.m.toFixed(r.m < 10 ? 1 : 0)}× stake`}` : f(r.v)}</span></div>`).join('');
+  if (m.kind === 'cost') {
+    return `${rows}<div class="mrow ev"><span>Expected cost</span><span>${f(m.ev)}</span></div>${m.compare != null ? `<div class="mrow"><span>${esc(m.compareLabel)}</span><span>${f(m.compare)}</span></div>` : ''}<p class="why">The cheaper average isn't always best: ask whether you could survive the bad case.</p>`;
+  }
+  const verdict = m.kelly <= 0
+    ? 'On average this loses money, so Kelly says bet nothing.'
+    : `This risks ${pc(m.share)} of your net worth. Kelly says at most ${pc(m.kelly)} (${f(m.kellyAmt)}); careful investors use half that.${m.share > m.kelly ? ' This is more than Kelly.' : ''}`;
+  return `${rows}<div class="mrow ev"><span>Expected value</span><span class="${m.ev >= 0 ? 'up' : 'down'}">${f(m.ev, true)} (${m.mult.toFixed(2)}× stake)</span></div><p class="why">${verdict}</p>`;
+}
+
+function showQuiz() {
+  const q = E.quizView(run);
+  if (!q) return;
+  const b = BOOKS[PRINCIPLES[q.p].book];
+  openModal(`
+    <div class="ev-card"><span class="kicker" style="color:${b.color}">Mentor's question · ${esc(b.title)}</span><p class="outcome">${esc(q.q)}</p></div>
+    <div class="choices">${q.opts.map((o, i) => `<button class="quiz-opt" data-act="quiz" data-i="${i}">${esc(o)}</button>`).join('')}</div>`);
+}
+
+function drawPath(c, path) {
+  const { ctx, w, h } = sizeCanvas(c);
+  const lo = Math.min(...path, 1);
+  const hi = Math.max(...path, 1);
+  const span = hi - lo || 1;
+  const X = (i) => 8 + (i / (path.length - 1)) * (w - 16);
+  const Y = (v) => 10 + (1 - (v - lo) / span) * (h - 30);
+  ctx.strokeStyle = 'rgba(169,159,210,.35)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(8, Y(1)); ctx.lineTo(w - 8, Y(1)); ctx.stroke(); ctx.setLineDash([]);
+  const up = path[path.length - 1] >= 1;
+  const col = up ? '#3ddc97' : '#ff5d73';
+  ctx.font = '600 10px Figtree, system-ui, sans-serif'; ctx.fillStyle = '#a99fd2';
+  ctx.fillText('Index fund, month by month', 10, h - 6);
+  const months = path.length - 1;
+  let i = 0;
+  const step = () => {
+    i = Math.min(months, i + (calm() ? months : 1));
+    ctx.clearRect(0, 0, w, h - 16);
+    ctx.strokeStyle = 'rgba(169,159,210,.35)'; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(8, Y(1)); ctx.lineTo(w - 8, Y(1)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath();
+    for (let j = 0; j <= i; j++) (j ? ctx.lineTo(X(j), Y(path[j])) : ctx.moveTo(X(j), Y(path[j])));
+    ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(i), Y(path[i]), 3, 0, Math.PI * 2); ctx.fill();
+    if (i < months) setTimeout(step, 110);
+  };
+  step();
+}
+
+function drawCalib(c, buckets) {
+  const { ctx, w, h } = sizeCanvas(c);
+  const pad = 28;
+  const X = (v) => pad + v * (w - pad - 10);
+  const Y = (v) => h - pad + -v * (h - pad - 10);
+  ctx.strokeStyle = 'rgba(169,159,210,.2)'; ctx.lineWidth = 1;
+  ctx.font = '600 10px Figtree, system-ui, sans-serif'; ctx.fillStyle = '#a99fd2';
+  for (const v of [0, 0.5, 1]) {
+    ctx.beginPath(); ctx.moveTo(X(0), Y(v)); ctx.lineTo(X(1), Y(v)); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText(pc(v), X(0) - 4, Y(v) + 3);
+    ctx.textAlign = 'center'; ctx.fillText(pc(v), X(v), h - pad + 14);
+  }
+  ctx.fillText('What you said', X(0.5), h - 2);
+  ctx.setLineDash([5, 4]); ctx.strokeStyle = '#ffc53d';
+  ctx.beginPath(); ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(1), Y(1)); ctx.stroke(); ctx.setLineDash([]);
+  for (const b of buckets) {
+    ctx.fillStyle = '#b69cff';
+    ctx.beginPath(); ctx.arc(X(b.said), Y(b.happened), 4 + Math.min(8, Math.sqrt(b.n) * 1.5), 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 // ------------------------------------------------------------------ asset sheets
@@ -447,6 +656,7 @@ function assetSheet(id) {
       <div><dt>${id === 'save' ? 'Interest' : 'Last turn'}</dt><dd class="${id === 'save' ? '' : cls(last || 0)}">${id === 'save' ? pctS(run.rate) + '/yr' : last != null ? E.pct(last, 1) : '–'}</dd></div>
       <div><dt>${id === 'fx' ? 'Spread' : 'Fee to sell'}</dt><dd>${pctS(A.fee * (run.asc >= 7 ? 2 : 1))}</dd></div>
     </dl>
+    ${id === 'index' ? (() => { const mm = E.mrMarket(run); const pos = clamp((mm.v - 0.6) / 1.0, 0, 1) * 100; return `<div class="field"><span class="lbl">Mr. Market today: ${mm.mood}, ${mm.v.toFixed(2)}× fair value</span><div class="gauge"><i style="left:${pos}%"></i></div><div class="gauge-l"><span>Cheap 0.6×</span><span>Fair 1.0×</span><span>Dear 1.6×</span></div><p class="why">${mm.v < 0.9 ? `He is selling ${pc(-mm.gap)} below fair value. That gap is a margin of safety: on average, prices drift back up to value.` : mm.v > 1.15 ? `He wants ${pc(mm.gap)} more than fair value. On average, expensive starts lead to weaker years.` : 'Prices are close to fair value. No bargain, no bubble.'} <button class="linkish" data-act="principle" data-id="${mm.v < 1 ? 'g_margin' : 'g_mrmarket'}">Learn more</button></p></div>`; })() : ''}
     ${max <= 0 ? '<p class="note">No cash to invest. Sell something, or wait for your next pay.</p>' : `
     <label class="lbl" for="amt">Set how much you hold</label>
     <input type="range" id="amt" min="0" max="${max}" step="${max / 400}" value="${hold}" ${can ? '' : 'disabled'}>
@@ -581,8 +791,14 @@ function menuSheet() {
 
 // ------------------------------------------------------------------ the turn sequence
 
-function nextTurn() {
+function nextTurn(force = false) {
   if (!run || run.phase !== 'alloc') return;
+  if (!force && needsForecast()) {
+    toast('Make your forecast first: will the index beat inflation?');
+    const t = document.querySelector('.think');
+    if (t) t.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth', block: 'center' });
+    return;
+  }
   stopTimer();
   closeLayer();
   const res = E.live(run);
@@ -603,17 +819,38 @@ function playout(res) {
   const rows = res.rows.map((r, i) => `<li style="animation-delay:${0.35 + i * 0.12}s"><span>${esc(ASSETS[r.id].name)}</span><span class="${cls(r.gain)}">${f(r.gain, true)}</span><span class="p ${cls(r.pct)}">${E.pct(r.pct, 1)}</span></li>`).join('');
   const flows = res.flows.map((x) => `<div><span>${esc(x.label)}</span><b class="${cls(x.v)}">${f(x.v, true)}</b></div>`).join('');
   const notes = res.notes.map((n) => `<p>${esc(n)}</p>`).join('');
+  const planLine = [
+    res.pyf ? `<div><span>Paid yourself first</span><b class="up">${f(res.pyf)} invested</b></div>` : '',
+    res.rebal ? `<div><span>Rebalanced</span><b>${res.rebal > 0 ? 'bought' : 'sold'} ${f(Math.abs(res.rebal))} index</b></div>` : '',
+  ].join('');
+  let verdict = '';
+  if (res.fc) {
+    const fc = res.fc;
+    const o = fc.up ? 1 : 0;
+    const realRet = fc.ret;
+    verdict = `<div class="verdict-box">
+      <span class="lbl">Your forecast</span>
+      <p>You said <b>${pc(fc.p)}</b> that the index would beat inflation. It <b class="${o ? 'up' : 'down'}">${o ? 'did' : 'did not'}</b>: it returned ${E.pct(realRet, 1)} while prices rose ${pctS(fc.infl)}, so ${E.pct(fc.real, 1)} after inflation.</p>
+      <p class="why">Score for this call: <b>${Math.pow(fc.p - o, 2).toFixed(2)}</b> (Brier: 0 is perfect, 0.25 is a coin flip). The careful answer, ${pc(fc.ideal)}, would have scored ${Math.pow(fc.ideal - o, 2).toFixed(2)}.</p>
+    </div>`;
+  }
+  const moments = (res.moments || []).map((mo) => lessonHTML(mo.p, mo.text)).join('');
   openModal(`
     <div class="play">
       <div class="years">Age ${res.age0} → ${res.age1}</div>
       <div class="mood" style="--mc:${info.color}">${info.name.toUpperCase()}</div>
       <p class="mood-line">${esc(info.line)}</p>
+      ${res.path && run.learnMode ? '<canvas class="path" id="path"></canvas>' : ''}
       ${rows ? `<ul class="rows">${rows}</ul>` : '<p class="note" style="text-align:center">You had nothing invested. The market moved without you.</p>'}
-      <div class="flows">${flows}</div>
+      <div class="flows">${flows}${planLine}</div>
       ${notes ? `<div class="notes">${notes}</div>` : ''}
       <div class="big-nw"><span class="lbl">Net worth</span><b id="roll" class="${res.nw1 >= res.nw0 ? 'up' : 'down'}">${f(res.nw0)}</b></div>
-      <button class="btn primary wide" data-act="to-event">Continue</button>
+      ${verdict}
+      ${moments ? `<span class="lbl">What this year teaches</span>${moments}` : ''}
+      <button class="btn primary wide" data-act="to-event">${res.quiet ? 'On to next year' : 'Continue'}</button>
     </div>`);
+  const pc_ = document.getElementById('path');
+  if (pc_) drawPath(pc_, res.path);
   const delta = res.nw1 - res.nw0;
   setTimeout(() => rollNumber(document.getElementById('roll'), res.nw0, res.nw1, 1000), 350);
   if (res.state === 'crash') { SFX.crash(); shake(); buzz([60, 40, 120]); } else if (delta >= 0) { SFX.gain(); } else { SFX.loss(); }
@@ -629,13 +866,15 @@ function showEvent() {
       <h2>${esc(v.title)}</h2>
       <p>${esc(v.text)}</p>
     </div>
-    <div class="choices">${v.choices.map((c, i) => `<button class="choice-btn" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}><b>${esc(c.label)}</b><small>${c.ok ? esc(c.note) : 'Not enough cash'}</small></button>`).join('')}</div>`);
+    <div class="choices">${v.choices.map((c, i) => `<button class="choice-btn" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}><b>${esc(c.label)}</b><small>${c.ok ? esc(c.note) : 'Not enough cash'}</small></button>
+      ${c.math ? `<button class="linkish math-btn" data-act="math" data-i="${i}">Show the maths</button><div class="math" id="math-${i}" hidden>${mathHTML(c.math)}</div>` : ''}`).join('')}</div>`);
 }
 
 function showOutcome(text) {
   const nw = E.netWorth(run);
   openModal(`
     <div class="ev-card"><span class="kicker">What happened</span><p class="outcome">${esc(text || 'Done.')}</p><p class="muted">Net worth now ${f(nw)} · Joy ${Math.round(run.joy)}</p></div>
+    ${run.eventLesson ? lessonHTML(run.eventLesson) : ''}
     <button class="btn primary wide" data-act="to-cards">Pick a card</button>`);
 }
 
@@ -647,6 +886,7 @@ function cardHTML(c, act, extra = '') {
 }
 
 function showCards() {
+  if (run.quiet) { run.quiet = false; takeCard(''); return; }
   if (!run.offer) { E.makeOffer(run, unlockedIds()); persist(); }
   const cards = run.offer.map((id) => cardHTML(E.cardById(id), 'take')).join('');
   SFX.card();
@@ -665,6 +905,7 @@ function takeCard(id) {
   if (res) return endRun(res);
   closeLayer();
   renderGame();
+  if (run.quiz) { showQuiz(); return; }
   startTimer();
   const nwEl = document.getElementById('nw');
   if (nwEl) nwEl.animate?.([{ transform: 'scale(1.12)' }, { transform: 'none' }], { duration: 300 });
@@ -677,7 +918,7 @@ let timerEnd = 0;
 function timerSeconds() {
   if (!run || run.phase !== 'alloc') return 0;
   if (E.MODES[run.mode].timer) return E.MODES[run.mode].timer;
-  return P.settings.timer ? 20 : 0;
+  return P.settings.timer && !run.learnMode ? 20 : 0;
 }
 function startTimer() {
   stopTimer();
@@ -690,7 +931,7 @@ function startTimer() {
     if (bar) bar.style.width = `${clamp(100 - (left / (secs * 1000)) * 100, 0, 100)}%`;
     if (left <= 0) {
       timerRaf = 0;
-      if (run && run.phase === 'alloc') { toast('The market doesn\'t wait.'); nextTurn(); }
+      if (run && run.phase === 'alloc') { toast('The market doesn\'t wait.'); nextTurn(true); }
       return;
     }
     timerRaf = requestAnimationFrame(tick);
@@ -717,6 +958,8 @@ function endRun(res) {
     if (run.mode === 'classic' && run.asc === P.maxAsc && P.maxAsc < ASCENSION.length - 1) { P.maxAsc += 1; res.ascUp = P.maxAsc; }
   }
   if (res.scammed) P.scamLesson = true;
+  P.principles = [...new Set([...(P.principles || []), ...(res.seenP || [])])];
+  P.fcAll = [...(P.fcAll || []), ...run.fc.map((x) => ({ p: x.p, ideal: x.ideal, up: x.up }))].slice(-400);
   if (run.mode === 'daily') P.daily[run.seed.replace('daily-', '')] = { score: res.score, reason: res.reason, age: res.age, grid: E.emojiGrid(run) };
   if (run.mode === 'weekly' && res.reason !== 'quit') P.weekly[weekNo()] = Math.max(P.weekly[weekNo()] || 0, res.score);
   if (run.mode === 'era') { const prev = P.eras[run.eraId]; P.eras[run.eraId] = { score: Math.max(prev ? prev.score : 0, res.score), won: won || (prev && prev.won) }; }
@@ -791,6 +1034,7 @@ function results(done) {
       <div><dt>Joy</dt><dd>${Math.round(r.joy)}/100</dd></div>
     </dl>
     ${insights.map(([c, k, t]) => `<div class="insight" style="--ic:${c}"><span class="lbl">${k}</span><p>${esc(t)}</p></div>`).join('')}
+    ${learnResults(r)}
     ${r.scammed ? `<div class="scam-card"><span class="kicker" style="color:var(--pink)">How to spot a scam</span><ol>${SCAM_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ol></div>` : ''}
     <div class="insight" style="--ic:var(--violet)"><span class="lbl">Wisdom earned</span><p><b>+${r.gained}</b>${r.newTerms.length ? ` · new words: ${r.newTerms.map((t) => esc(GLOSSARY[t][0])).join(', ')}` : ''}</p>
       ${r.unlocks.length ? `<div class="unlock-list">${r.unlocks.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}</div>
@@ -802,7 +1046,35 @@ function results(done) {
     </div>
   </main>`;
   window.scrollTo(0, 0);
-  requestAnimationFrame(() => drawChart(document.getElementById('chart'), r.hist, cur));
+  requestAnimationFrame(() => {
+    drawChart(document.getElementById('chart'), r.hist, cur);
+    const cc = document.getElementById('calib');
+    if (cc && r.forecast) drawCalib(cc, r.forecast.buckets);
+  });
+}
+
+function forecastVerdict(fs) {
+  if (fs.brier < fs.ideal + 0.02) return 'As sharp as the careful Bayesian answer. Excellent.';
+  if (fs.brier < 0.19) return 'Better than base rates alone. You are reading the evidence.';
+  if (fs.brier < 0.25) return 'Better than a coin flip, but the lens would have helped more.';
+  return 'Worse than a coin flip. Start from the base rate, then adjust a little for each headline.';
+}
+
+function learnResults(r) {
+  const out = [];
+  if (r.aim) out.push(`<div class="insight" style="--ic:var(--orange)"><span class="lbl">Chief aim (Think and Grow Rich)</span><p>${r.aimMet ? `Free by ${r.aim}, as you wrote down. Aim met: +300 points.` : `You aimed for freedom by ${r.aim}. ${r.reason === 'free' ? `You got there at ${r.age}.` : 'Not this time.'} Hill would say: keep the aim, fix the plan.`}</p></div>`);
+  const fs = r.forecast;
+  if (fs) out.push(`<div class="insight" style="--ic:var(--violet)"><span class="lbl">Your forecasting</span>
+    <p>${fs.n} forecasts. Your Brier score: <b>${fs.brier.toFixed(3)}</b>. A coin flip scores 0.250; the careful Bayesian answer scored ${fs.ideal.toFixed(3)}. ${forecastVerdict(fs)}</p>
+    <canvas class="calib" id="calib"></canvas>
+    <p class="why">Dots on the dashed line mean well calibrated: things you called 70% happened about 70% of the time. Dots below the line mean overconfidence.</p></div>`);
+  if (r.learnMode) {
+    out.push(`<div class="insight" style="--ic:var(--gold)"><span class="lbl">Arkad's seven cures</span>
+      <div class="cure-list">${CURE_IDS.map((id, i) => `<div><span class="stone ${r.cureYears[i] >= r.years / 2 ? 'on' : ''}">${i + 1}</span><span><b>${CURE_NAMES[i]}</b><p>Kept ${r.cureYears[i]} of ${r.years} years</p></span></div>`).join('')}</div></div>`);
+    if (r.quizAsked) out.push(`<div class="insight" style="--ic:var(--sky)"><span class="lbl">Mentor's questions</span><p>${r.quizRight} of ${r.quizAsked} right.</p></div>`);
+  }
+  if (r.seenP && r.seenP.length) out.push(`<div class="insight" style="--ic:var(--gain)"><span class="lbl">Principles met this run</span><div class="unlock-list">${r.seenP.map((id) => `<span>${esc(PRINCIPLES[id].title)}</span>`).join('')}</div></div>`);
+  return out.join('');
 }
 
 // ------------------------------------------------------------------ other pages
@@ -869,6 +1141,28 @@ function collection(tab = 'cards') {
   page('Collection', `<div class="seg">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="coll" data-tab="${k}">${l}</button>`).join('')}</div>${body}`);
 }
 
+function library() {
+  const learned = P.principles || [];
+  const total = Object.keys(PRINCIPLES).length;
+  const fs = E.forecastStats(P.fcAll || []);
+  const books = Object.entries(BOOKS).map(([bid, b]) => {
+    const ps = Object.entries(PRINCIPLES).filter(([, pr]) => pr.book === bid);
+    const got = ps.filter(([id]) => learned.includes(id)).length;
+    return `<div class="book-card" style="--bc:${b.color}">
+      <h2>${esc(b.title)}</h2><span class="by">${esc(b.author)}${b.year ? `, ${b.year}` : ''} · ${got}/${ps.length} met in play</span>
+      <p class="muted">${esc(b.blurb)}</p>
+      <div class="plist">${ps.map(([id, pr]) => `<button class="${learned.includes(id) ? '' : 'off'}" data-act="principle" data-id="${id}"><span>${esc(pr.title)}</span><span>${learned.includes(id) ? '✓' : '▸'}</span></button>`).join('')}</div>
+    </div>`;
+  }).join('');
+  page('Library', `
+    <p class="muted">The game is built on these books. You meet each idea when it happens to you in play; tap any one to read it now.</p>
+    <div class="score-box"><span class="lbl">Principles met</span><b>${learned.length}/${total}</b></div>
+    ${fs ? `<div class="insight" style="--ic:var(--violet)"><span class="lbl">Your forecasting, all runs</span><p>${fs.n} forecasts · Brier ${fs.brier.toFixed(3)} (coin flip 0.250, careful Bayesian ${fs.ideal.toFixed(3)}). ${forecastVerdict(fs)}</p><canvas class="calib" id="calib"></canvas></div>` : ''}
+    <div class="books">${books}</div>`);
+  const cc = document.getElementById('calib');
+  if (cc && fs) requestAnimationFrame(() => drawCalib(cc, fs.buckets));
+}
+
 function glossarySheet() {
   const learned = Object.keys(GLOSSARY).filter((k) => P.glossary.includes(k) || (run && run.learned.includes(k)));
   openSheet(`${sheetHead('', 'Words you have learned')}<div class="gloss">${learned.map((k) => `<div><b>${esc(GLOSSARY[k][0])}</b><p>${esc(GLOSSARY[k][1])}</p></div>`).join('')}</div><button class="btn wide" data-act="close">Close</button>`);
@@ -876,8 +1170,16 @@ function glossarySheet() {
 
 function how() {
   page('How to play', `
+    <p><b>New here? Start with the Wisdom Journey.</b> It goes one year at a time and teaches as you play.</p>
     <ol class="how">
-      <li>Each turn is two years of your life. Your salary lands, your living costs go out, and whatever is left sits in cash.</li>
+      <li><b>Think.</b> The probability lens shows base rates: how often each market mood follows the last one. Headlines are evidence, right 80% of the time.</li>
+      <li><b>Forecast.</b> Say how likely the index is to beat inflation. After you commit, you see the careful answer, and every forecast is scored.</li>
+      <li><b>Plan.</b> Pay yourself first, pick a Graham-style mix, and switch on rebalancing. The plan runs every year, even when you are scared.</li>
+      <li><b>Review.</b> After each year, a mentor points out what it teaches, from Babylon, Rich Dad, Graham, Hill, Housel or probability.</li>
+    </ol>
+    <p class="lbl">The basics, in every mode</p>
+    <ol class="how">
+      <li>Each turn is one to four years of your life. Your salary lands, your living costs go out, and whatever is left sits in cash.</li>
       <li>Read the three headlines. Most hint at what the next two years hold. Some are noise, and some are scams.</li>
       <li>Tap an asset to move cash into it or out of it. Each one behaves differently in booms and crashes.</li>
       <li>Press <b>Live 2 years</b>. Markets move, rent and profits arrive, and life throws you one event with a choice.</li>
@@ -934,7 +1236,35 @@ const ACT = {
   'pick-char': (d) => { P.setup.char = d.id; saveProfile(); setup(); },
   cur: (d) => { P.settings.currency = d.id; saveProfile(); setup(); },
   asc: (d) => { P.setup.asc = clamp(P.setup.asc + Number(d.d), 0, P.maxAsc); saveProfile(); setup(); },
-  start: () => startRun({ mode: setupMode, char: P.setup.char, currency: P.settings.currency, asc: setupMode === 'classic' ? Math.min(P.setup.asc, P.maxAsc) : 0 }),
+  start: () => startRun({ mode: setupMode, char: P.setup.char, currency: P.settings.currency, asc: setupMode === 'classic' ? Math.min(P.setup.asc, P.maxAsc) : 0, aim: setupMode === 'journey' ? P.setup.aim : null }),
+  aim: (d) => { P.setup.aim = Number(d.v); saveProfile(); setup(); },
+  library: () => library(),
+  principle: (d) => principleSheet(d.id),
+  statement: () => statementSheet(),
+  cures: () => curesSheet(),
+  lens: () => { P.settings.lens = !P.settings.lens; saveProfile(); renderGame(); },
+  fc: (d) => {
+    if (run.learnMode && run.forecast != null) return;
+    if (E.setForecast(run, Number(d.p))) { SFX.tap(); persist(); renderGame(); const t = document.querySelector('.think'); if (t && run.learnMode) t.scrollIntoView({ block: 'nearest' }); }
+  },
+  pyf: (d) => { if (E.setPlan(run, { pyf: Number(d.v) })) { SFX.tap(); persist(); renderGame(); } },
+  mix: (d) => { if (E.setPlan(run, { mix: d.k })) { SFX.tap(); persist(); renderGame(); } },
+  rebal: () => { if (E.setPlan(run, { rebalance: !run.plan.rebalance })) { SFX.tap(); persist(); renderGame(); } },
+  math: (d) => { const el = document.getElementById(`math-${d.i}`); if (el) el.hidden = !el.hidden; },
+  quiz: (d) => {
+    const q = E.quizView(run);
+    const out = E.answerQuiz(run, Number(d.i));
+    if (!out) return;
+    persist();
+    if (out.right) { SFX.gain(); coinBurst(30); } else SFX.loss();
+    openModal(`
+      <div class="ev-card"><span class="kicker">${out.right ? 'Correct' : 'Not quite'}</span><p class="outcome">${esc(q.q)}</p>
+        <div class="choices">${q.opts.map((o) => `<div class="quiz-opt ${o === out.correct ? 'right' : ''} ${o === q.opts[Number(d.i)] && !out.right ? 'wrong' : ''}">${esc(o)}</div>`).join('')}</div>
+        <p>${esc(out.why)}</p>${out.right ? `<p class="up">+${f(0.05 * run.salary)} and +3 joy from your mentor.</p>` : ''}</div>
+      ${lessonHTML(out.p)}
+      <button class="btn primary wide" data-act="quiz-done">Continue</button>`);
+  },
+  'quiz-done': () => { closeLayer(); renderGame(); startTimer(); },
   daily: () => dailyScreen(),
   weekly: () => startRun({ mode: 'weekly', char: 'graduate', currency: P.settings.currency, challengeId: weeklyChallenge().id, seed: `week-${weekNo()}` }),
   eras: () => eras(),
@@ -1033,6 +1363,7 @@ function resume() {
   if (!run) return home();
   renderGame();
   if (run.phase === 'event') { if (run.lastResult) playout(run.lastResult); else showEvent(); } else if (run.phase === 'cards') showCards();
+  else if (run.quiz) showQuiz();
   else startTimer();
 }
 
