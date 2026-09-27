@@ -167,6 +167,7 @@ export const CHAR_ACC = {
   farmer: () => ['strawhat', 'hoe'],
   hustler: () => ['cap', 'phones'],
   sailor: () => ['sailorcap', 'collar'],
+  me: (age) => (age < 30 ? [] : ['collar']),
 };
 
 export function avatar(look, char, { age = 22, expr = 'happy', size = null, label = 'You' } = {}) {
@@ -337,10 +338,12 @@ export function fruitTree(prog, size = 44) {
 
 // A face that shows joy, for places where the avatar is too big.
 export function joyFace(joy, size = 22) {
-  const expr = joy >= 60 ? 'smile' : joy >= 30 ? 'neutral' : 'sad';
-  const mouth = expr === 'smile' ? 'M16 28 Q24 36 32 28' : expr === 'neutral' ? 'M17 30 L31 30' : 'M16 33 Q24 26 32 33';
-  const fill = expr === 'smile' ? P_.gold : expr === 'neutral' ? P_.cream : P_.sky;
-  return svg('0 0 48 48', `<circle cx="24" cy="24" r="17" fill="${fill}" ${s2}/><circle cx="18" cy="21" r="2.4" fill="${O}"/><circle cx="30" cy="21" r="2.4" fill="${O}"/><path d="${mouth}" fill="none" ${s2}/>`, { size, cls: 'joyface', label: `Joy ${Math.round(joy)}` });
+  // Five steps, from sad to beaming, so every level looks different.
+  const lv = joy >= 85 ? 4 : joy >= 60 ? 3 : joy >= 40 ? 2 : joy >= 20 ? 1 : 0;
+  const mouth = ['M16 33 Q24 26 32 33', 'M17 32 Q24 29 31 32', 'M17 30 L31 30', 'M16 28 Q24 36 32 28', ''][lv];
+  const fill = [P_.sky, '#bfe0f0', P_.cream, P_.gold, P_.gold][lv];
+  const grin = lv === 4 ? `<path d="M14 27 Q24 42 34 27 Z" fill="#6b1f2b" ${s2}/><path d="M17 28 L31 28" stroke="#fff" stroke-width="2"/>` : `<path d="${mouth}" fill="none" ${s2}/>`;
+  return svg('0 0 48 48', `<circle cx="24" cy="24" r="17" fill="${fill}" ${s2}/><circle cx="18" cy="21" r="2.4" fill="${O}"/><circle cx="30" cy="21" r="2.4" fill="${O}"/>${grin}`, { size, cls: 'joyface', label: `Joy ${Math.round(joy)}` });
 }
 
 // ------------------------------------------------------------------ lifestyle rooms

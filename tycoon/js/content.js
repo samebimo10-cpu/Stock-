@@ -61,6 +61,8 @@ export const CHARACTERS = {
   heir: { name: 'The Heir', blurb: 'Big starting cash and a lavish habit you must rein in.', salary: 20000, costs: 16800, cash: 200000, life: 3, joy: 75, unlock: 0 },
   farmer: { name: 'The Farmer', blurb: 'Starts with a farm business. Weather hits harder.', salary: 12000, costs: 13500, cash: 3000, biz: 50000, life: 1, unlock: 40, weather: 2 },
   hustler: { name: 'The Hustler', blurb: 'Income swings wildly. Starts holding crypto.', salary: 26000, costs: 16800, cash: 1000, crypto: 12000, life: 1, unlock: 100, volatile: 0.35 },
+  // Not picked from the list: used when a player starts from their own real life.
+  me: { name: 'You', blurb: 'Your real age, money and goals.', salary: 24000, costs: 16800, cash: 0, life: 1, unlock: 0, custom: true },
   sailor: { name: 'The Sailor', blurb: 'High pay, but at sea every other turn: you can only invest in port, and it gets lonely.', salary: 38000, costs: 21000, cash: 4000, life: 1, unlock: 180, sailor: true },
 };
 

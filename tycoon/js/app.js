@@ -23,6 +23,8 @@ const DEFAULTS = {
   settings: { sound: true, timer: false, currency: 'NGN', calm: false, lens: false },
   setup: { char: 'graduate', asc: 0, aim: 45 },
   onboarded: false, region: null, look: { skin: 3, hair: 'short', hairColor: 0, outfit: 0 },
+  start: 'story',
+  me: { age: 25, pay: 0, costs: 0, cash: 0, save: 0, index: 0, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, bizManaged: false, liveIn: true, debt: 0, aim: 45, goal: 0 },
   run: null,
 };
 let P = loadProfile();
@@ -35,6 +37,7 @@ function loadProfile() {
   p.settings = { ...DEFAULTS.settings, ...(p.settings || {}) };
   p.setup = { ...DEFAULTS.setup, ...(p.setup || {}) };
   p.look = { ...DEFAULTS.look, ...(p.look || {}) };
+  p.me = { ...DEFAULTS.me, ...(p.me || {}) };
   if (!CURRENCIES[p.settings.currency]) p.settings.currency = 'NGN';
   // Players from before the redesign skip the intro but keep their progress.
   if (saved && saved.runs > 0 && saved.onboarded == null) { p.onboarded = true; p.region = p.region || (p.settings.currency === 'USD' ? 'europe_na' : 'westafrica'); }
@@ -274,7 +277,7 @@ function lastMood() {
 }
 
 function sceneFor(r, opts = {}) {
-  const prog = clamp(E.passive(r).total / E.costs(r), 0, 1);
+  const prog = clamp(E.passive(r).total / E.bowl(r), 0, 1);
   return A.homeScene({
     stage: opts.stage ?? A.stageOf(prog), life: r.life, mood: opts.mood || lastMood(), look: P.look, char: r.char, age: r.age,
     expr: opts.expr || youExpr(), prop: r.h.prop.v > 0, biz: r.h.biz.c > 0, farmer: r.char === 'farmer',
@@ -402,7 +405,81 @@ function home() {
       <button class="btn small" data-act="how">How to play</button>
       <button class="btn small" data-act="settings">${A.icon('gear', 20, '')} Settings</button>
     </nav>
+    <div class="share-actions">
+      <button class="btn" data-act="share-game">${A.icon('phone', 22, '')} Share with a friend</button>
+      <button class="btn" data-act="feedback">${A.icon('envelope', 22, '')} Send feedback</button>
+    </div>
   </main>`;
+}
+
+// ------------------------------------------------------------------ sharing and feedback
+
+// The public address of the game, for sharing from anywhere (including copies
+// of the game that run somewhere else).
+const GAME_URL = 'https://samebimo10-cpu.github.io/Stock-/tycoon/';
+// Put a WhatsApp number here (country code, digits only, e.g. '2348012345678')
+// to send feedback straight to it. Left empty, WhatsApp asks who to send it to.
+const FEEDBACK_WHATSAPP = '';
+const INVITE = 'Try Tycoon Rush, a free game that teaches money. Grow your money tree and get free before 60. It works offline too.';
+const waLink = (text, to = '') => `https://wa.me/${to.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`;
+
+function shareGame() {
+  if (navigator.share) {
+    navigator.share({ title: 'Tycoon Rush', text: INVITE, url: GAME_URL }).catch(() => {});
+    return;
+  }
+  const msg = `${INVITE}\n${GAME_URL}`;
+  openSheet(`
+    ${sheetHead('', 'Share with a friend')}
+    ${guideSay('Send this link. Your friends can play in their browser and add it to their home screen.')}
+    <div class="share"><pre id="share-text">${esc(msg)}</pre>
+      <div class="share-actions"><button class="btn small" data-act="copy">Copy</button><a class="btn small primary" href="${waLink(msg)}" target="_blank" rel="noopener">WhatsApp</a></div></div>
+    <button class="btn wide" data-act="close">Done</button>`);
+}
+
+const FB_TAGS = ['Fun', 'Learned something', 'Confusing', 'Too much reading', 'Too slow', 'Too fast', 'Found a bug'];
+let fb = { rate: 0, tags: [] };
+
+function feedbackText() {
+  const d = lastDone && lastDone.result;
+  const played = d
+    ? `${E.MODES[lastDone.mode].name}, ${d.reason === 'free' ? `free at ${d.age}` : d.reason === 'bankrupt' ? `broke at ${d.age}` : `ended at ${d.age}`}, score ${d.score.toLocaleString()}`
+    : run ? `${E.MODES[run.mode].name}, playing at age ${run.age}` : 'Not played yet';
+  const text = (document.getElementById('fb-text') || {}).value || '';
+  return [
+    'Tycoon Rush feedback',
+    fb.rate ? `Rating: ${fb.rate}/5` : '',
+    fb.tags.length ? `Noticed: ${fb.tags.join(', ')}` : '',
+    text.trim() ? `Comments: ${text.trim()}` : '',
+    '—',
+    `Played: ${played} · ${P.runs} run${P.runs === 1 ? '' : 's'} · ${region().name} · ${CURRENCIES[P.settings.currency].name}`,
+  ].filter(Boolean).join('\n');
+}
+
+function updateFeedbackLink() {
+  const a = document.getElementById('fb-send');
+  if (a) a.href = waLink(feedbackText(), FEEDBACK_WHATSAPP);
+  const pre = document.getElementById('share-text');
+  if (pre) pre.textContent = feedbackText();
+}
+
+function feedbackSheet() {
+  fb = { rate: 0, tags: [] };
+  const faces = [10, 30, 50, 75, 100];
+  openSheet(`
+    ${sheetHead('', 'Tell us what you think')}
+    ${guideSay('Your message goes to the person who shared this game with you. Honest is best!')}
+    <span class="lbl">How much did you enjoy it?</span>
+    <div class="fb-rate">${faces.map((j, i) => `<button class="fb-face" data-act="fb-rate" data-v="${i + 1}" aria-label="${i + 1} out of 5">${A.joyFace(j, 40)}<small>${i + 1}</small></button>`).join('')}</div>
+    <span class="lbl">What stood out? Tap any</span>
+    <div class="fb-tags">${FB_TAGS.map((t) => `<button class="fb-tag" data-act="fb-tag" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <label class="lbl" for="fb-text">Anything else?</label>
+    <textarea id="fb-text" class="fb-text" rows="4" placeholder="What confused you, what you liked, what you would change…"></textarea>
+    <pre id="share-text" hidden></pre>
+    <a class="btn primary wide" id="fb-send" href="${waLink(feedbackText(), FEEDBACK_WHATSAPP)}" target="_blank" rel="noopener">Send on WhatsApp</a>
+    <button class="btn wide" data-act="copy">Copy message instead</button>
+    <p class="note">${FEEDBACK_WHATSAPP ? 'WhatsApp opens with your message ready to send.' : 'WhatsApp opens with your message ready. Pick the friend who sent you the game.'}</p>`);
+  updateFeedbackLink();
 }
 
 // ------------------------------------------------------------------ setup
@@ -415,7 +492,7 @@ function setup(mode) {
   const regionCurs = region().currencies;
   const otherCurs = Object.keys(CURRENCIES).filter((c) => !regionCurs.includes(c));
   const opt = (c) => `<option value="${c}" ${c === cur ? 'selected' : ''}>${esc(CURRENCIES[c].sym.trim())} ${esc(CURRENCIES[c].name)}</option>`;
-  const chars = Object.entries(CHARACTERS).map(([id, c]) => {
+  const chars = Object.entries(CHARACTERS).filter(([, c]) => !c.custom).map(([id, c]) => {
     const locked = c.unlock > P.wisdom;
     return `<button class="char-card ${s.char === id ? 'on' : ''} ${locked ? 'locked' : ''}" data-act="pick-char" data-id="${id}" ${locked ? 'disabled' : ''}>
       ${A.avatar(P.look, id, { age: 24, expr: locked ? 'neutral' : 'happy', size: 120, label: c.name })}
@@ -435,22 +512,91 @@ function setup(mode) {
   app.innerHTML = `
   <main class="page">
     <header class="page-h"><button class="icon-btn" data-act="home" aria-label="Back">‹</button><h1>${esc(E.MODES[setupMode].name)}</h1></header>
-    <section class="field"><span class="lbl">Who are you? Swipe to see more</span><div class="char-strip">${chars}</div></section>
+    ${['journey', 'classic', 'blitz'].includes(setupMode) ? `<section class="field">
+      <span class="lbl">How do you want to start?</span>
+      <div class="seg start-seg">
+        <button class="${P.start !== 'me' ? 'on' : ''}" data-act="start-as" data-v="story">${A.icon('star', 22, '')} A story character</button>
+        <button class="${P.start === 'me' ? 'on' : ''}" data-act="start-as" data-v="me">${A.icon('smile', 22, '')} My real life</button>
+      </div>
+    </section>` : ''}
     <section class="field">
-      <label class="lbl" for="cur">Your money</label>
+      <label class="lbl" for="cur">Your money (currency)</label>
       <select id="cur" class="select">${regionCurs.map(opt).join('')}<optgroup label="Other currencies">${otherCurs.map(opt).join('')}</optgroup></select>
       <span class="note">${esc(PROFILE_BLURB[CURRENCIES[cur].profile])}</span>
     </section>
+    ${P.start === 'me' && ['journey', 'classic', 'blitz'].includes(setupMode) ? meForm() : `<section class="field"><span class="lbl">Who are you? Swipe to see more</span><div class="char-strip">${chars}</div></section>`}
+
     ${asc}
-    ${setupMode === 'journey' ? `<section class="field">
+    ${setupMode === 'journey' && P.start !== 'me' ? `<section class="field">
       <span class="lbl">Your goal: free by what age?</span>
       <div class="seg">${AIMS.map((a) => `<button class="${P.setup.aim === a ? 'on' : ''}" data-act="aim" data-v="${a}">${a}</button>`).join('')}</div>
       ${guideSay('Write your goal down and keep it in sight. <i>Think and Grow Rich</i> starts here. Each turn is one year, and your progress saves, so play a few years at a time.')}
     </section>` : ''}
-    <div class="sticky-go"><button class="btn primary wide" data-act="start">${A.icon('play', 24, '')} Start at ${E.MODES[setupMode].startAge}</button></div>
+    <div class="sticky-go"><button class="btn primary wide" data-act="start">${A.icon('play', 24, '')} Start at ${P.start === 'me' && ['journey', 'classic', 'blitz'].includes(setupMode) ? meAge() : E.MODES[setupMode].startAge}</button></div>
   </main>`;
   const strip = app.querySelector('.char-strip .on');
   if (strip) strip.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+
+// ------------------------------------------------------------------ start from your real life
+
+const ME_FIELDS = [
+  ['Your money now', [
+    ['cash', 'Cash and current account', 'Money that earns no interest'],
+    ['save', 'Savings and fixed deposits', 'Earns interest, safe'],
+    ['index', 'Index or mutual funds', 'A basket of many companies'],
+    ['stocks', 'Shares in single companies', ''],
+    ['crypto', 'Crypto', ''],
+    ['fx', 'Foreign money (e.g. dollars)', 'Its value in your own money'],
+    ['prop', 'Property you own (value)', 'Home or land, what it would sell for'],
+    ['biz', 'Your business (value)', 'What you have put in or could sell it for'],
+  ]],
+  ['What you owe', [
+    ['mortgage', 'Mortgage left on property', ''],
+    ['debt', 'Other debts', 'Loans, cards, money owed to people'],
+  ]],
+];
+const num = (v) => Math.max(0, Number(v) || 0);
+const meAge = () => clamp(Math.round(num(P.me.age) || 25), 16, 75);
+
+function mePreview() {
+  const m = P.me;
+  const cur = P.settings.currency;
+  const F = (n) => E.fmt(n, cur);
+  const nw = num(m.cash) + num(m.save) + num(m.index) + num(m.stocks) + num(m.crypto) + num(m.fx) + num(m.prop) + num(m.biz) - num(m.mortgage) - num(m.debt);
+  const bowlYr = Math.max(num(m.costs), num(m.goal)) * 12;
+  const passiveYr = 0.04 * (num(m.save) + num(m.index) + num(m.stocks) + num(m.fx)) + (m.liveIn === false ? num(m.prop) * 0.05 : 0);
+  const left = (num(m.pay) - num(m.costs)) * 12;
+  const prog = bowlYr > 0 ? clamp(passiveYr / bowlYr, 0, 1) : 0;
+  return `<div class="me-preview">
+    <div class="f-row">${A.fruitTree(prog, 44)}<div><b>Net worth ${F(nw)}</b><p class="muted">Freedom Number ${F(25 * bowlYr)} · about ${Math.round(prog * 100)}% of the way</p></div></div>
+    <p class="${left >= 0 ? 'up' : 'down'}">${left >= 0 ? '▲' : '▼'} You keep ${F(left)} a year after living costs.</p>
+    ${num(m.costs) <= 0 ? '<p class="warn">Add your monthly living costs to start.</p>' : ''}
+  </div>`;
+}
+
+const echo = (v) => (num(v) >= 1000 ? E.fmt(num(v), P.settings.currency) : '');
+
+function meForm() {
+  const m = P.me;
+  const sym = CURRENCIES[P.settings.currency].sym.trim();
+  const field = ([k, label, hint], opts = {}) => `<label class="me-f" for="me-${k}"><span><b>${esc(label)}</b>${hint ? `<small>${esc(hint)}</small>` : ''}</span>
+    <span class="me-in"><i>${opts.unit || esc(sym)}</i><input id="me-${k}" data-me="${k}" type="number" inputmode="decimal" min="0" step="any" value="${m[k] || ''}" placeholder="0"></span>
+    <small class="me-echo" id="echo-${k}">${opts.unit ? '' : echo(m[k])}</small></label>`;
+  return `<section class="field me-form">
+    ${guideSay('Put in your real numbers. They stay on this phone only and are never sent anywhere. The game starts from exactly where you are.')}
+    <span class="lbl">You</span>
+    ${field(['age', 'Your age', ''], { unit: 'yrs' })}
+    ${field(['pay', 'Take-home pay, per month', 'After tax'])}
+    ${field(['costs', 'Living costs, per month', 'Rent, food, transport, bills, family. Not loan repayments: the game charges their interest'])}
+    ${ME_FIELDS.map(([title, rows]) => `<span class="lbl">${title}</span>${rows.map((r) => field(r)).join('')}`).join('')}
+    <label class="check" id="box-prop" ${num(m.prop) > 0 ? '' : 'hidden'}><input type="checkbox" id="me-liveIn" ${m.liveIn !== false ? 'checked' : ''}> I live in this property (it pays no rent)</label>
+    <label class="check" id="box-biz" ${num(m.biz) > 0 ? '' : 'hidden'}><input type="checkbox" id="me-bizManaged" ${m.bizManaged ? 'checked' : ''}> My business runs without me (a manager runs it)</label>
+    <span class="lbl">Your goals</span>
+    ${field(['aim', 'Free by what age?', 'When you want work to be optional'], { unit: 'age' })}
+    ${field(['goal', 'Income you want when free, per month', 'In today\'s money. Leave empty to use your living costs'])}
+    <div id="me-preview">${mePreview()}</div>
+  </section>`;
 }
 
 function startRun(opts) {
@@ -477,7 +623,7 @@ function tileHTML(id) {
   const arrow = (x) => (x > 0.0005 ? '▲' : x < -0.0005 ? '▼' : '■');
   let foot = change != null ? `<span class="${cls(change)}">${arrow(change)} ${E.pct(change, 1)}</span>` : '<span class="muted">New</span>';
   if (id === 'biz' && run.h.biz.c > 0) foot = `<span class="up">▲ ${f(run.h.biz.profit)}/yr</span>`;
-  if (id === 'prop' && run.h.prop.v > 0) foot = `<span class="up">▲ ${f(run.h.prop.v * E.rentYield(run))}/yr</span>`;
+  if (id === 'prop' && run.h.prop.v > 0) foot = E.rentable(run) > 0 ? `<span class="up">▲ ${f(E.rentable(run) * E.rentYield(run))}/yr</span>` : '<span class="muted">■ Your home</span>';
   if (id === 'save') foot = `<span class="${run.rate < run.infl ? 'down' : 'up'}">${run.rate < run.infl ? '▼' : '▲'} ${pctS(run.rate)}/yr</span>`;
   return `<button class="tile ${open ? '' : 'closed'}" style="--c:${ASSETS[id].color}" data-act="asset" data-id="${id}" ${open ? '' : 'disabled'} aria-label="${esc(pl.label)}: ${esc(f(hv))}">
     <span class="t-top">${A.icon(pl.icon, 40, '')}<span class="t-name">${esc(pl.label)}<small>${esc(ASSETS[id].name)}</small></span></span>
@@ -504,7 +650,8 @@ function renderGame() {
   const nw = E.netWorth(run);
   const p = E.passive(run);
   const C = E.costs(run);
-  const prog = clamp(p.total / C, 0, 1);
+  const B = E.bowl(run);
+  const prog = clamp(p.total / B, 0, 1);
   const sea = E.atSea(run);
   const locked = E.lifeLocked(run);
   const idle = run.flags.idle || 0;
@@ -543,7 +690,7 @@ function renderGame() {
       </div>
       <button class="freedom" data-act="passive" aria-label="Fruit basket against the bowl: ${Math.round(prog * 100)}%">
         <span class="f-row">${A.fruitTree(prog, 34)}<span class="fbar"><i style="width:${(prog * 100).toFixed(1)}%"></i><b>${Math.round(prog * 100)}%</b></span>${A.icon('bowl', 30, '')}</span>
-        <span class="fmeta"><span>Fruit <b>${f(p.total)}</b>/yr</span><span>Bowl <b>${f(C)}</b>/yr</span></span>
+        <span class="fmeta"><span>Fruit <b>${f(p.total)}</b>/yr</span><span>Bowl <b>${f(B)}</b>/yr${B > C * 1.001 ? ' (your goal)' : ''}</span></span>
       </button>
     </header>
     <section class="scene-wrap"><button class="scene-btn" data-act="town" aria-label="Your home and town">${sceneFor(run)}</button>
@@ -852,7 +999,7 @@ function propSheet() {
     <dl class="stats">
       <div><dt>Value</dt><dd>${f(p.v)}</dd></div>
       <div><dt>Mortgage</dt><dd class="${p.debt > 0 ? 'down' : ''}">${f(p.debt)}</dd></div>
-      <div><dt>Rent a year</dt><dd class="up">${f(p.v * E.rentYield(run))}</dd></div>
+      <div><dt>Rent a year</dt><dd class="up">${f(E.rentable(run) * E.rentYield(run))}</dd></div>
     </dl>
     ${cash > 0 ? `
     <label class="lbl" for="amt">Cash to put in</label>
@@ -919,8 +1066,9 @@ function passiveSheet() {
       ${row('Debt interest', p.debt, true)}
       <div class="tot"><span>Passive income</span><b>${f(p.total)}/yr</b></div>
       <div><span>Living costs</span><b>${f(C)}/yr</b></div>
+      ${E.bowl(run) > C * 1.001 ? `<div><span>Your goal income when free</span><b>${f(E.bowl(run))}/yr</b></div>` : ''}
     </div>
-    <p class="note">Your Freedom Number is 25 × your costs: <b>${f(E.freedomNumber(run))}</b> invested. Crypto pays no income, so it only counts once you sell it into something that does. Every lifestyle upgrade raises this number.</p>
+    <p class="note">Your Freedom Number is 25 × your bowl: <b>${f(E.freedomNumber(run))}</b> invested. Crypto pays no income, so it only counts once you sell it into something that does. Every lifestyle upgrade raises this number.</p>
     <button class="btn wide" data-act="close">Close</button>`);
 }
 
@@ -930,6 +1078,7 @@ function menuSheet() {
     <button class="btn primary wide" data-act="close">Resume</button>
     <button class="btn wide" data-act="glossary-sheet">Words you have learned</button>
     <button class="btn wide" data-act="home">Save and go home</button>
+    <div class="share-actions"><button class="btn" data-act="share-game">Share game</button><button class="btn" data-act="feedback">Send feedback</button></div>
     <button class="btn danger wide" data-act="abandon">Abandon this run</button>`);
 }
 
@@ -1161,9 +1310,9 @@ function resultTitle(r) {
 function shareText(done) {
   const r = done.result;
   const outcome = r.reason === 'free' ? `Free at ${r.age}` : r.reason === 'bankrupt' ? `Bankrupt at ${r.age}` : `Still working at ${r.age}`;
-  if (done.mode === 'daily') return `Tycoon Rush Daily ${done.seed.replace('daily-', '')}\n${E.emojiGrid(done)}\n${outcome} · Score ${r.score.toLocaleString()}`;
-  if (done.mode === 'duel') return `Tycoon Rush duel ${done.seed.replace('duel-', '')}: ${outcome}, score ${r.score.toLocaleString()}. Same market, can you beat me?\n${E.emojiGrid(done)}`;
-  return `Tycoon Rush: ${outcome}, score ${r.score.toLocaleString()}.\n${E.emojiGrid(done)}`;
+  if (done.mode === 'daily') return `Tycoon Rush Daily ${done.seed.replace('daily-', '')}\n${E.emojiGrid(done)}\n${outcome} · Score ${r.score.toLocaleString()}\n${GAME_URL}`;
+  if (done.mode === 'duel') return `Tycoon Rush duel ${done.seed.replace('duel-', '')}: ${outcome}, score ${r.score.toLocaleString()}. Same market, can you beat me?\n${E.emojiGrid(done)}\n${GAME_URL}`;
+  return `Tycoon Rush: ${outcome}, score ${r.score.toLocaleString()}.\n${E.emojiGrid(done)}\n${GAME_URL}`;
 }
 
 function results(done) {
@@ -1202,6 +1351,10 @@ function results(done) {
       ${r.unlocks.length ? `<div class="unlock-list">${r.unlocks.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}</div>
     ${share ? `<div class="share"><span class="lbl">Share</span><pre id="share-text">${esc(text)}</pre>
       <div class="share-actions"><button class="btn small" data-act="copy">Copy</button><a class="btn small" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a></div></div>` : ''}
+    <div class="share-actions">
+      <button class="btn" data-act="feedback">${A.icon('envelope', 22, '')} Send feedback</button>
+      <button class="btn" data-act="share-game">${A.icon('phone', 22, '')} Invite a friend</button>
+    </div>
     <div class="share-actions">
       <button class="btn primary" data-act="again">Play again</button>
       <button class="btn" data-act="home">Home</button>
@@ -1301,7 +1454,7 @@ function collection(tab = 'cards') {
       return cardHTML(c, null).replace('<button', '<div').replace('</button>', '</div>').replace(' disabled', '');
     }).join('')}</div>`;
   } else if (tab === 'people') {
-    body = `<div class="choice-list">${Object.values(CHARACTERS).map((c) => `<div class="choice ${c.unlock > P.wisdom ? 'locked' : ''}"><span class="av">${A.avatar(P.look, Object.keys(CHARACTERS).find((k) => CHARACTERS[k] === c), { size: 44, label: '' })}</span><span><b>${esc(c.name)}</b><small>${c.unlock > P.wisdom ? `Unlocks at ${c.unlock} wisdom` : esc(c.blurb)}</small></span></div>`).join('')}</div>`;
+    body = `<div class="choice-list">${Object.values(CHARACTERS).filter((c) => !c.custom).map((c) => `<div class="choice ${c.unlock > P.wisdom ? 'locked' : ''}"><span class="av">${A.avatar(P.look, Object.keys(CHARACTERS).find((k) => CHARACTERS[k] === c), { size: 44, label: '' })}</span><span><b>${esc(c.name)}</b><small>${c.unlock > P.wisdom ? `Unlocks at ${c.unlock} wisdom` : esc(c.blurb)}</small></span></div>`).join('')}</div>`;
   } else if (tab === 'words') {
     const learned = Object.keys(GLOSSARY).filter((k) => P.glossary.includes(k));
     body = `<p class="note">${learned.length} of ${Object.keys(GLOSSARY).length} words learned. New ones unlock when they happen to you.</p>
@@ -1412,7 +1565,17 @@ const ACT = {
   'pick-char': (d) => { P.setup.char = d.id; saveProfile(); setup(); },
   cur: (d) => { P.settings.currency = d.id; saveProfile(); setup(); },
   asc: (d) => { P.setup.asc = clamp(P.setup.asc + Number(d.d), 0, P.maxAsc); saveProfile(); setup(); },
-  start: () => startRun({ mode: setupMode, char: P.setup.char, currency: P.settings.currency, asc: setupMode === 'classic' ? Math.min(P.setup.asc, P.maxAsc) : 0, aim: setupMode === 'journey' ? P.setup.aim : null }),
+  start: () => {
+    const real = P.start === 'me' && ['journey', 'classic', 'blitz'].includes(setupMode);
+    if (real && num(P.me.costs) <= 0) { toast('Add your monthly living costs first.'); document.getElementById('me-costs')?.focus(); return; }
+    startRun({
+      mode: setupMode, char: P.setup.char, currency: P.settings.currency,
+      asc: setupMode === 'classic' && !real ? Math.min(P.setup.asc, P.maxAsc) : 0,
+      aim: real ? null : setupMode === 'journey' ? P.setup.aim : null,
+      me: real ? { ...P.me, age: meAge() } : null,
+    });
+  },
+  'start-as': (d) => { P.start = d.v; saveProfile(); setup(); },
   aim: (d) => { P.setup.aim = Number(d.v); saveProfile(); setup(); },
   intro: (d) => intro(Number(d.step)),
   'region-screen': () => regionScreen(),
@@ -1421,6 +1584,18 @@ const ACT = {
   look: (d) => { P.look[d.k] = d.k === 'hair' ? d.v : Number(d.v); saveProfile(); SFX.tap(); lookScreen(); },
   'look-done': () => { if (!P.region) P.region = 'westafrica'; P.onboarded = true; saveProfile(); SFX.card(); home(); },
   term: (d) => termSheet(d.id),
+  'share-game': () => shareGame(),
+  feedback: () => feedbackSheet(),
+  'fb-rate': (d) => {
+    fb.rate = Number(d.v);
+    document.querySelectorAll('.fb-face').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === fb.rate));
+    updateFeedbackLink();
+  },
+  'fb-tag': (d, el) => {
+    fb.tags = fb.tags.includes(d.t) ? fb.tags.filter((t) => t !== d.t) : [...fb.tags, d.t];
+    el.classList.toggle('on', fb.tags.includes(d.t));
+    updateFeedbackLink();
+  },
   prices: () => pricesSheet(),
   town: () => townSheet(),
   library: () => library(),
@@ -1457,7 +1632,7 @@ const ACT = {
   era: (d) => startRun({ mode: 'era', char: 'graduate', eraId: d.id }),
   duel: () => duel(),
   'duel-new': () => duel(randomCode()),
-  'duel-copy': () => { const v = document.getElementById('code').value.trim().toUpperCase(); copyText(`Play my Tycoon Rush duel: code ${v}`); },
+  'duel-copy': () => { const v = document.getElementById('code').value.trim().toUpperCase(); copyText(`Play my Tycoon Rush duel: code ${v}\n${GAME_URL}`); },
   'duel-go': () => {
     const v = (document.getElementById('code').value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (v.length < 3) { toast('Enter a code of at least 3 letters.'); return; }
@@ -1561,10 +1736,26 @@ document.addEventListener('click', (e) => {
   if (fn) fn(el.dataset, el, e);
 });
 document.addEventListener('input', (e) => {
+  if (e.target.dataset && e.target.dataset.me) {
+    P.me[e.target.dataset.me] = e.target.value === '' ? 0 : Number(e.target.value);
+    saveProfile();
+    const pv = document.getElementById('me-preview');
+    if (pv) pv.innerHTML = mePreview();
+    // The "I live in it" and "runs without me" boxes show once there is an amount.
+    const ec = document.getElementById(`echo-${e.target.dataset.me}`);
+    if (ec && !['age', 'aim'].includes(e.target.dataset.me)) ec.textContent = echo(e.target.value);
+    const box = document.getElementById(`box-${e.target.dataset.me}`);
+    if (box) box.hidden = !(Number(e.target.value) > 0);
+    const go = document.querySelector('[data-act=start]');
+    if (go && e.target.dataset.me === 'age') go.innerHTML = `${A.icon('play', 24, '')} Start at ${meAge()}`;
+  }
+  if (e.target.id === 'fb-text') updateFeedbackLink();
   if (e.target.id === 'amt') { if (sheetCtx && sheetCtx.id === 'prop') updatePropSlider(); else updateSlider(); }
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'mort') updatePropSlider();
+  if (e.target.id === 'me-bizManaged') { P.me.bizManaged = e.target.checked; saveProfile(); }
+  if (e.target.id === 'me-liveIn') { P.me.liveIn = e.target.checked; saveProfile(); const pv = document.getElementById('me-preview'); if (pv) pv.innerHTML = mePreview(); }
   if (e.target.id === 'cur') { P.settings.currency = e.target.value; saveProfile(); if (app.querySelector('.char-strip')) setup(); }
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && layer.querySelector('.sheet')) closeLayer(); });
