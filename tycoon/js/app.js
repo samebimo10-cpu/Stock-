@@ -7,6 +7,7 @@ import {
   ERAS, CHALLENGES, ASCENSION, GLOSSARY, SCAM_TIPS, LESSONS, TIPS, REGIONS, PROFILE_BLURB,
 } from './content.js';
 import * as A from './art.js';
+import { buildReport } from './report.js';
 import { BOOKS, PRINCIPLES, PLANS, AIMS } from './learn.js';
 
 const app = document.getElementById('app');
@@ -244,7 +245,8 @@ function openSheet(html) {
   layer.innerHTML = `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
 }
 function openModal(html) {
-  layer.innerHTML = `<div class="scrim full"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
+  const homeBtn = run && run.phase !== 'done' ? `<button class="icon-btn modal-home" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 24, '')}</button>` : '';
+  layer.innerHTML = `<div class="scrim full"><div class="modal" role="dialog" aria-modal="true">${homeBtn}${html}</div></div>`;
   layer.querySelector('.modal').scrollTop = 0;
 }
 function closeLayer() { layer.innerHTML = ''; sheetCtx = null; }
@@ -482,6 +484,60 @@ function feedbackSheet() {
   updateFeedbackLink();
 }
 
+// ------------------------------------------------------------------ the PDF report
+
+let reportRun = null;
+
+function reportTitle(r) {
+  const res = r.result;
+  if (!res) return `Game in progress, age ${r.age}`;
+  return resultTitle(res)[1];
+}
+
+function reportSheet(r) {
+  reportRun = r;
+  const canShareFiles = !!(navigator.canShare && navigator.share);
+  const framed = window.self !== window.top;
+  openSheet(`
+    ${sheetHead('', 'Your money report')}
+    ${guideSay(r.result ? 'Here is how you did: a grade for each money habit, your key decisions, and what to try next.' : 'A report on your game so far. You can keep playing afterwards.')}
+    <label class="me-f" for="report-name"><span><b>Name on the report</b><small>Optional</small></span><span class="me-in"><input id="report-name" type="text" maxlength="40" value="${esc(P.reportName || '')}" placeholder="Your name"></span></label>
+    <button class="btn primary wide" data-act="report-download">${A.icon('payslip', 22, '')} Download PDF</button>
+    ${canShareFiles ? `<button class="btn wide" data-act="report-share">${A.icon('phone', 22, '')} Share PDF (WhatsApp, email…)</button>` : ''}
+    ${framed ? '<p class="note">Downloads can be blocked inside claude.ai. If nothing happens, open the game from its website to get the PDF.</p>' : '<p class="note">The report is made on your phone. Nothing is uploaded.</p>'}
+    <button class="btn ghost wide" data-act="close">Close</button>`);
+}
+
+function makeReport() {
+  const r = reportRun;
+  const input = document.getElementById('report-name');
+  P.reportName = input ? input.value.trim() : '';
+  saveProfile();
+  const bytes = buildReport(r, { name: P.reportName, modeName: E.MODES[r.mode].name, regionName: region().name, title: reportTitle(r) });
+  const who = P.reportName ? `-${P.reportName.replace(/[^A-Za-z0-9]+/g, '-')}` : '';
+  const file = `tycoon-rush-report${who}-age-${r.age}.pdf`;
+  return { blob: new Blob([bytes], { type: 'application/pdf' }), file };
+}
+
+function downloadReport() {
+  const { blob, file } = makeReport();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = file;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  toast('Report downloaded');
+}
+
+async function shareReport() {
+  const { blob, file } = makeReport();
+  const f = new File([blob], file, { type: 'application/pdf' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: 'My Tycoon Rush report' });
+    else downloadReport();
+  } catch { /* cancelled */ }
+}
+
 // ------------------------------------------------------------------ setup
 
 let setupMode = 'classic';
@@ -684,6 +740,7 @@ function renderGame() {
     <header class="hud">
       <div class="hud-row">
         <button class="icon-btn" data-act="menu" aria-label="Menu">☰</button>
+        <button class="icon-btn" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 26, '')}</button>
         <button class="me" data-act="town" aria-label="You, age ${run.age}. Open your town">${A.avatar(P.look, run.char, { age: run.age, expr: youExpr(), size: 46, label: '' })}<span class="agebadge">${run.age}</span></button>
         <button class="hud-own" data-act="statement" aria-label="Everything you own: ${esc(f(nw))}">${A.icon('coins', 26, '')}<span><span class="lbl">Everything you own</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></span></button>
         <button class="wx" data-act="prices" aria-label="Prices and rates">${A.moodIcon(mood, 34)}<small>Prices</small></button>
@@ -1078,6 +1135,7 @@ function menuSheet() {
     <button class="btn primary wide" data-act="close">Resume</button>
     <button class="btn wide" data-act="glossary-sheet">Words you have learned</button>
     <button class="btn wide" data-act="home">Save and go home</button>
+    <button class="btn wide" data-act="report-now">${A.icon('payslip', 22, '')} Progress report (PDF)</button>
     <div class="share-actions"><button class="btn" data-act="share-game">Share game</button><button class="btn" data-act="feedback">Send feedback</button></div>
     <button class="btn danger wide" data-act="abandon">Abandon this run</button>`);
 }
@@ -1351,6 +1409,7 @@ function results(done) {
       ${r.unlocks.length ? `<div class="unlock-list">${r.unlocks.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}</div>
     ${share ? `<div class="share"><span class="lbl">Share</span><pre id="share-text">${esc(text)}</pre>
       <div class="share-actions"><button class="btn small" data-act="copy">Copy</button><a class="btn small" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a></div></div>` : ''}
+    <button class="btn primary wide" data-act="report">${A.icon('payslip', 24, '')} Get my PDF report</button>
     <div class="share-actions">
       <button class="btn" data-act="feedback">${A.icon('envelope', 22, '')} Send feedback</button>
       <button class="btn" data-act="share-game">${A.icon('phone', 22, '')} Invite a friend</button>
@@ -1585,6 +1644,10 @@ const ACT = {
   'look-done': () => { if (!P.region) P.region = 'westafrica'; P.onboarded = true; saveProfile(); SFX.card(); home(); },
   term: (d) => termSheet(d.id),
   'share-game': () => shareGame(),
+  report: () => reportSheet(lastDone),
+  'report-now': () => reportSheet(run),
+  'report-download': () => downloadReport(),
+  'report-share': () => shareReport(),
   feedback: () => feedbackSheet(),
   'fb-rate': (d) => {
     fb.rate = Number(d.v);

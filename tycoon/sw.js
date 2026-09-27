@@ -5,7 +5,7 @@
 // network first, so a new version shows up the next time it is opened; if the
 // network is slow or gone it falls back to the saved copy within a few seconds.
 
-const CACHE = 'tycoon-rush-v4';
+const CACHE = 'tycoon-rush-v5';
 
 // How long to wait for the network before using the saved copy.
 const NETWORK_WAIT_MS = 3000;
@@ -20,6 +20,7 @@ const SHELL = [
   './js/content.js',
   './js/learn.js',
   './js/art.js',
+  './js/report.js',
   './fonts/bungee.woff2',
   './fonts/figtree-400.woff2',
   './fonts/figtree-700.woff2',
