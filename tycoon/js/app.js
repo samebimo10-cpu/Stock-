@@ -1575,5 +1575,18 @@ applyCalm();
 home();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('./sw.js').catch(() => { /* no offline cache here; the game still runs */ });
+  // When a new version takes over an open game, reload once so the player
+  // sees it now rather than on the next launch. Progress is saved first.
+  // A first-ever install has no previous controller, so it doesn't reload.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    persist();
+    location.reload();
+  });
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+    .then((reg) => reg.update())
+    .catch(() => { /* no offline cache here; the game still runs */ });
 }
