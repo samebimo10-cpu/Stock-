@@ -152,3 +152,44 @@ test('journey years alternate between events and quiet years, with forecasts sco
   assert.ok(res.seenP.length > 5);
   assert.equal(res.learnMode, true);
 });
+
+// ---------------------------------------------------------------- starting from real life
+
+const ME = { age: 31, pay: 350000, costs: 250000, cash: 400000, save: 1200000, index: 800000, stocks: 500000, crypto: 100000, fx: 300000, prop: 15000000, liveIn: true, mortgage: 6000000, biz: 2000000, bizManaged: false, debt: 150000, aim: 50, goal: 400000 };
+
+test('a real-life start uses the player\'s own age, money and goals', () => {
+  const run = E.newRun({ mode: 'journey', char: 'graduate', currency: 'NGN', seed: 'me1', me: ME });
+  assert.equal(run.age, 31);
+  assert.equal(run.char, 'me');
+  assert.equal(run.salary, 350000 * 12);
+  assert.equal(E.costs(run), 250000 * 12);
+  const expected = 400000 + 1200000 + 800000 + 500000 + 100000 + 300000 + 15000000 - 6000000 + 2000000 - 150000;
+  assert.ok(Math.abs(E.netWorth(run) - expected) < 1, `${E.netWorth(run)} vs ${expected}`);
+  assert.equal(run.aim, 50);
+  assert.equal(E.bowl(run), 400000 * 12, 'the goal income sets the bowl');
+  assert.equal(run.turns, 60 - 31);
+  assert.equal(run.hist[0].nw, E.netWorth(run));
+});
+
+test('a real-life start plays to the end, and older players still get years to play', () => {
+  const { res } = play({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'me2', me: { ...ME, age: 58, pay: 4000, costs: 3000, cash: 20000, save: 0, index: 50000, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, debt: 0, goal: 0 } }, investAll);
+  assert.ok(Number.isFinite(res.score));
+  assert.ok(res.years >= 8 || res.reason === 'free' || res.reason === 'bankrupt');
+});
+
+test('someone already free by the 4% rule is free after the first year', () => {
+  const rich = { age: 40, pay: 5000, costs: 2000, cash: 0, save: 2000000, index: 0, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, debt: 0, goal: 0 };
+  const { res } = play({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'me3', me: rich });
+  assert.equal(res.reason, 'free');
+  assert.equal(res.age, 42);
+});
+
+test('the home you live in earns no rent, but a second property does', () => {
+  const home = E.newRun({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'h1', me: { ...ME, liveIn: true } });
+  assert.equal(E.passive(home).rent, 0);
+  const let_ = E.newRun({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'h1', me: { ...ME, liveIn: false } });
+  assert.ok(E.passive(let_).rent > 0);
+  home.cash = 1e7;
+  E.buyProperty(home, 1e6, false);
+  assert.ok(E.passive(home).rent > 0, 'a property bought in the game is let out');
+});

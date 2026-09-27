@@ -43,6 +43,7 @@
   --r: 14px;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; min-height: 100%; }
 body {
   background: var(--bg);
@@ -53,7 +54,7 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
@@ -557,6 +558,29 @@ svg.art { display: block; flex: none; }
 .play .mood { font-size: clamp(34px, 11vw, 48px); }
 .rows .r-name { display: flex; align-items: center; gap: 6px; }
 .res-scene { margin-inline: -16px; }
+
+.fb-rate { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.fb-face { display: grid; justify-items: center; gap: 2px; padding: 6px 0; border-radius: 12px; background: var(--surface); border: 2px solid transparent; min-height: 48px; }
+.fb-face.on { border-color: var(--gold); background: #33265f; }
+.fb-face small { font-weight: 800; color: var(--muted); }
+.fb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.fb-tag { min-height: 40px; padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font-weight: 700; font-size: 14px; }
+.fb-tag.on { background: var(--violet); color: #1b1336; border-color: var(--violet); }
+.fb-text { width: 100%; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); padding: 10px 12px; font-size: 16px; resize: vertical; }
+a.btn { text-decoration: none; }
+
+.start-seg button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 52px; }
+.me-form { display: grid; gap: 10px; }
+.me-f { display: grid; grid-template-columns: 1fr minmax(120px, 44%); gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface); }
+.me-f b { display: block; font-size: 14px; }
+.me-f small { display: block; color: var(--muted); font-size: 12px; }
+.me-in { display: flex; align-items: center; gap: 6px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; min-height: 48px; }
+.me-in:focus-within { border-color: var(--gold); }
+.me-in i { font-style: normal; color: var(--muted); font-weight: 800; font-size: 13px; }
+.me-echo { grid-column: 2; justify-self: end; font-size: 12px; font-weight: 800; color: var(--gold); min-height: 14px; margin-top: -6px; }
+.me-in input { width: 100%; min-width: 0; background: none; border: 0; outline: 0; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; min-height: 44px; }
+.me-preview { display: grid; gap: 6px; padding: 12px; border-radius: 12px; background: #251b52; border: 1px solid var(--violet); }
+.me-preview .f-row { display: flex; gap: 10px; align-items: center; }
 
 /* juice */
 #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 40; }

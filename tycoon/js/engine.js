@@ -289,9 +289,12 @@ export function newRun(opts) {
   const asc = opts.asc || 0;
   const currency = era ? era.currency : opts.currency || 'NGN';
   const scale = CURRENCIES[currency].scale;
-  const startAge = era ? era.startAge : ch && ch.startAge ? ch.startAge : mode.startAge;
+  // A real-life start: the player's own age, money and goals, in their own
+  // currency (actual amounts, so no scaling).
+  const me = !era && opts.me ? opts.me : null;
+  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : ch && ch.startAge ? ch.startAge : mode.startAge;
   const ypt = mode.ypt;
-  const deadline = asc >= 12 ? 56 : 60;
+  const deadline = Math.max(asc >= 12 ? 56 : 60, me ? startAge + 8 : 0);
   const turns = era ? era.states.length : Math.max(3, Math.round((deadline - startAge) / ypt));
   const seed = String(opts.seed != null ? opts.seed : Math.floor(Math.random() * 1e9));
 
@@ -335,9 +338,35 @@ export function newRun(opts) {
   run.rate = policyRate(run.infl, 'steady', profileOf(currency));
   run.h.biz.profit = bizProfit(run, 1);
   learn(run, 'freedom');
+  if (me) applyMe(run, me);
   run.hist.push(snapshot(run));
   if (run.aim) seeP(run, 'h_aim');
   return run;
+}
+
+function applyMe(run, me) {
+  const n = (x) => Math.max(0, Number(x) || 0);
+  run.char = 'me';
+  run.custom = true;
+  run.salary = n(me.pay) * 12;
+  run.salaryStart = run.salary;
+  run.life = 1;
+  run.startLife = 1;
+  run.baseCosts = Math.max(1, n(me.costs) * 12);
+  run.cash = n(me.cash) - n(me.debt);
+  const h = run.h;
+  h.save = n(me.save);
+  h.index = n(me.index);
+  h.stocks = COMPANIES.map(() => n(me.stocks) / COMPANIES.length);
+  h.crypto = n(me.crypto);
+  if (isOpen(run, 'fx')) h.fx = n(me.fx); else h.save += n(me.fx);
+  h.prop = { v: n(me.prop), debt: Math.min(n(me.mortgage), n(me.prop) * 1.5), bought: -1, home: me.liveIn === false ? 0 : n(me.prop) };
+  if (n(me.mortgage) > h.prop.debt) run.cash -= n(me.mortgage) - h.prop.debt;
+  h.biz = { c: n(me.biz), managed: !!me.bizManaged, profit: 0 };
+  h.biz.profit = bizProfit(run, 1);
+  run.goal = n(me.goal) * 12;
+  if (me.aim) run.aim = clamp(Math.round(me.aim), run.startAge + 1, 90);
+  run.flags.skillAge = run.startAge;
 }
 
 // ---------------------------------------------------------------- read helpers
@@ -374,6 +403,9 @@ export function netWorth(run) {
     + h.biz.c + (h.ponzi ? h.ponzi.v : 0) + (h.angel ? h.angel.amt : 0) + (h.scam || 0);
 }
 
+// The home you live in earns no rent (it saves rent, which is already in your
+// living costs); only the rest of your property is let out.
+export const rentable = (run) => Math.max(0, run.h.prop.v - (run.h.prop.home || 0));
 export const rentYield = (run) => profileOf(run.currency).rent * (has(run, 'landlord') ? 1.25 : 1);
 export const mortRate = (run) => run.rate + 0.03;
 export const debtRate = (run) => run.rate + 0.15;
@@ -396,7 +428,7 @@ export function bizProfit(run, mood) {
 export function passive(run) {
   const h = run.h;
   const invest = 0.04 * (h.save + h.index + stocksTotal(run) + h.fx);
-  const rent = h.prop.v * rentYield(run);
+  const rent = rentable(run) * rentYield(run);
   const mort = h.prop.debt * mortRate(run);
   const debt = run.cash < 0 ? -run.cash * debtRate(run) : 0;
   const biz = bizManaged(run) ? h.biz.profit : 0;
@@ -405,7 +437,10 @@ export function passive(run) {
   return { invest, rent, biz, mort, debt, total };
 }
 
-export const freedomNumber = (run) => 25 * costs(run);
+// The bowl passive income has to fill: today's living costs, or the income the
+// player says they want when free (kept in today's money), whichever is bigger.
+export const bowl = (run) => Math.max(costs(run), (run.goal || 0) * run.prices);
+export const freedomNumber = (run) => 25 * bowl(run);
 
 function snapshot(run) {
   return { age: run.age, nw: netWorth(run), passive: passive(run).total, costs: costs(run), fn: freedomNumber(run), state: run.turn > 0 ? run.market[run.turn - 1].state : null };
@@ -472,6 +507,7 @@ export function sellProperty(run, frac) {
   const v = p.v * frac;
   const d = p.debt * frac;
   p.v -= v; p.debt -= d;
+  if (p.home) p.home *= 1 - frac;
   run.cash += v * (1 - feeFor(run, 'prop')) - d;
   run.flow.sell.prop = (run.flow.sell.prop || 0) + v;
   learn(run, 'liquidity');
@@ -936,6 +972,7 @@ export function live(run) {
   gains.crypto = h.crypto * adj(m.ret.crypto, 'crypto'); h.crypto += gains.crypto;
   gains.fx = h.fx * m.ret.fx; h.fx += gains.fx;
   gains.prop = h.prop.v * m.ret.prop; h.prop.v += gains.prop;
+  if (h.prop.home) h.prop.home *= 1 + m.ret.prop;
 
   if (prev === 'crash' && has(run, 'contrarian')) {
     const bonus = 0.12 * ((run.flow.buy.index || 0) + (run.flow.buy.stocks || 0));
@@ -945,7 +982,7 @@ export function live(run) {
 
   // Rent, mortgage interest, business profit, debt interest.
   if (h.prop.v > 0) {
-    const rent = h.prop.v * rentYield(run) * y;
+    const rent = rentable(run) * rentYield(run) * y;
     const mort = h.prop.debt * mortRate(run) * y;
     run.cash += rent - mort;
     res.flows.push({ label: 'Rent', v: rent });
@@ -1055,6 +1092,7 @@ export function live(run) {
   res.nw1 = netWorth(run);
   res.passive = passive(run).total;
   res.costs = costs(run);
+  res.bowl = bowl(run);
 
   // Forecast scoring.
   if (fc) {
@@ -1117,11 +1155,11 @@ export function live(run) {
   if (run.log.scam > scam0) mo.push(['scam_loss']);
   if (run.flow.buy.prop > 0 || (h.prop.v > 0 && !run.flags.propSeen)) {
     run.flags.propSeen = true;
-    const net = h.prop.v * rentYield(run) - h.prop.debt * mortRate(run);
+    const net = rentable(run) * rentYield(run) - h.prop.debt * mortRate(run);
     mo.push(net >= 0 ? ['house_asset', money(net)] : ['house_liab', money(-net)]);
   }
   if (bizManaged(run) && h.biz.c > 0 && !run.flags.bSeen) { run.flags.bSeen = true; mo.push(['manager']); }
-  if (res.passive >= 0.5 * res.costs && !run.flags.halfSeen) { run.flags.halfSeen = true; mo.push(['half_free']); }
+  if (res.passive >= 0.5 * res.bowl && !run.flags.halfSeen) { run.flags.halfSeen = true; mo.push(['half_free']); }
   if (res.rows.some((r) => -r.gain > 0.25 * Math.max(nw0, 1))) mo.push(['conc_loss']);
   if (fc) {
     const hit = fc.up ? fc.p : 1 - fc.p;
@@ -1135,7 +1173,7 @@ export function live(run) {
   const investedNow = hv.save + hv.index + hv.stocks + hv.fx;
   if (investedNow > 3 * run.salary && !run.flags.compSeen) { run.flags.compSeen = true; mo.push(['compound', '3']); }
   if (run.cash < 0) mo.push(['debt', `${Math.round(debtRate(run) * 100)}%`]);
-  if (run.aim && run.age >= run.aim - 5 && run.age - y < run.aim - 5) mo.push(['aim_near', String(run.aim), `${Math.round(Math.min(1, res.passive / res.costs) * 100)}%`]);
+  if (run.aim && run.age >= run.aim - 5 && run.age - y < run.aim - 5) mo.push(['aim_near', String(run.aim), `${Math.round(Math.min(1, res.passive / res.bowl) * 100)}%`]);
   if (run.learnMode && t === 0) mo.push(['base_intro']);
   if (run.learnMode && t === 1) mo.push(['bayes_intro']);
   if (run.flags.allCures && !run.flags.allCuresSeen) { run.flags.allCuresSeen = true; mo.push(['all_cures']); }
@@ -1235,7 +1273,7 @@ function endTurn(run) {
   const nw = netWorth(run);
   run.negTurns = nw < 0 ? run.negTurns + 1 : 0;
   const e = era(run);
-  if (passive(run).total >= costs(run)) return finish(run, 'free');
+  if (passive(run).total >= bowl(run)) return finish(run, 'free');
   // Broke for four years in a row (two 2-year turns) ends the run.
   if (run.negTurns * run.ypt >= 4) return finish(run, 'bankrupt');
   if (run.turn >= run.turns) return finish(run, e ? (nw >= e.target * costs(run) ? 'target' : 'missed') : 'clock');
@@ -1254,7 +1292,7 @@ export function finish(run, reason) {
   const p = passive(run);
   const C = costs(run);
   const nw = netWorth(run);
-  const ratio = clamp(p.total / C, 0, 1);
+  const ratio = clamp(p.total / bowl(run), 0, 1);
   const e = era(run);
   let score;
   if (reason === 'free') score = 1000 + (60 - run.age) * 60 + Math.round(run.joy * 3);
