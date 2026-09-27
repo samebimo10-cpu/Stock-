@@ -16,6 +16,7 @@ on:
       # change to either has to reach the site. Without this the publish waits on
       # the market-data run, which takes five minutes rather than thirty seconds.
       - "douvalue/server/**"
+      - "tycoon/**"
       - "scripts/assemble_site.sh"
       - ".github/workflows/publish-site.yml"
 
