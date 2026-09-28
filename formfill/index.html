@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FormFill</title>
+<meta name="description" content="Fill your Excel forms from invoices, letters and photos. Works offline; only the cells you map change.">
+<meta name="theme-color" content="#1f4e79">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FormFill">
+<style>
+:root {
+  --bg: #f4f6f9; --card: #ffffff; --ink: #17212b; --muted: #5b6875; --line: #d8dee6;
+  --brand: #1f4e79; --brand-ink: #ffffff; --brand-soft: #e3edf7;
+  --ok: #1b7f4b; --ok-soft: #e2f4ea; --warn: #9a5b00; --warn-soft: #fff1d6; --bad: #b3261e; --bad-soft: #fde7e5;
+  --field: #cfe2ff; --field-line: #2f6fd1; --table: #d8f3e1; --table-line: #1b7f4b; --filled: #fff3b0;
+  --grid-bg: #ffffff; --grid-head: #eef1f5;
+  --radius: 12px; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --card: #1a2129; --ink: #e7edf3; --muted: #9aa7b4; --line: #2e3945;
+    --brand: #5b9bd5; --brand-ink: #0c1620; --brand-soft: #1f3347;
+    --ok: #5cc98b; --ok-soft: #173325; --warn: #f0b451; --warn-soft: #3a2c12; --bad: #ff8a80; --bad-soft: #3d1b19;
+    --field: #1d3a66; --field-line: #7fb0ff; --table: #1b3b2a; --table-line: #5cc98b; --filled: #4a4217;
+    --grid-bg: #ffffff; --grid-head: #1d252e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --card: #1a2129; --ink: #e7edf3; --muted: #9aa7b4; --line: #2e3945;
+  --brand: #5b9bd5; --brand-ink: #0c1620; --brand-soft: #1f3347;
+  --ok: #5cc98b; --ok-soft: #173325; --warn: #f0b451; --warn-soft: #3a2c12; --bad: #ff8a80; --bad-soft: #3d1b19;
+  --field: #1d3a66; --field-line: #7fb0ff; --table: #1b3b2a; --table-line: #5cc98b; --filled: #4a4217;
+  --grid-bg: #ffffff; --grid-head: #1d252e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
+button, input, select, textarea { font: inherit; color: inherit; }
+header.top { position: sticky; top: 0; z-index: 5; background: var(--brand); color: var(--brand-ink); padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; }
+header.top h1 { font-size: 18px; margin: 0; flex: 1; font-weight: 700; letter-spacing: .2px; cursor: pointer; }
+header.top button { background: transparent; border: 1px solid color-mix(in srgb, var(--brand-ink) 40%, transparent); color: var(--brand-ink); border-radius: 999px; padding: 4px 12px; font-size: 14px; cursor: pointer; }
+.net { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--brand-ink) 18%, transparent); }
+main { max-width: 980px; margin: 0 auto; padding: 16px 16px calc(96px + env(safe-area-inset-bottom)); }
+h2 { font-size: 20px; margin: 8px 0 12px; }
+h3 { font-size: 16px; margin: 18px 0 8px; }
+p { margin: 6px 0; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); margin-bottom: 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+.btn { appearance: none; border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 600; min-height: 44px; }
+.btn.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.btn.danger { color: var(--bad); }
+.btn.small { min-height: 34px; padding: 6px 10px; font-size: 14px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.block { width: 100%; }
+label.field { display: block; margin: 8px 0; }
+label.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input[type=text], input[type=url], input[type=password], input[type=number], select, textarea { width: 100%; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 9px 10px; min-height: 42px; }
+input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.banner { border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner.bad { background: var(--bad-soft); color: var(--bad); }
+.banner.ok { background: var(--ok-soft); color: var(--ok); }
+.banner.info { background: var(--brand-soft); color: var(--brand); }
+.list { display: grid; gap: 8px; }
+.item { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.item .t { font-weight: 600; overflow-wrap: anywhere; }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(6px); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+.bar .inner { max-width: 980px; margin: 0 auto; display: flex; gap: 8px; }
+.bar .inner .btn { flex: 1; }
+.tabs { display: flex; gap: 6px; overflow-x: auto; margin: 8px 0; }
+.tabs button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-pressed=true] { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.gridwrap { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 10px; background: var(--grid-bg); -webkit-overflow-scrolling: touch; }
+table.grid { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+table.grid th { position: sticky; background: var(--grid-head); color: var(--muted); font-weight: 600; z-index: 1; border: 1px solid var(--line); padding: 2px 4px; }
+table.grid thead th { top: 0; }
+table.grid tbody th { left: 0; min-width: 34px; }
+table.grid td { border: 1px solid color-mix(in srgb, var(--line) 50%, transparent); padding: 2px 4px; height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 1px; cursor: pointer; position: relative; color: #17212b; }
+table.grid td.b { font-weight: 700; }
+table.grid td.bl { border-left: 1px solid #555; } table.grid td.br { border-right: 1px solid #555; } table.grid td.bt { border-top: 1px solid #555; } table.grid td.bb { border-bottom: 1px solid #555; }
+table.grid td.fld { background: var(--field) !important; outline: 2px solid var(--field-line); outline-offset: -2px; color: var(--ink); }
+table.grid td.tbl { background: var(--table) !important; color: var(--ink); }
+table.grid td.fill { background: var(--filled) !important; color: var(--ink); font-weight: 600; }
+table.grid td .tag { font-size: 10px; font-weight: 700; color: var(--field-line); }
+.plain td { color: var(--ink) !important; }
+.fieldrow { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--card); display: grid; gap: 6px; }
+.fieldrow.flag-warn { border-color: var(--warn); }
+.fieldrow.flag-bad { border-color: var(--bad); }
+.fieldrow .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fieldrow .name { font-weight: 700; overflow-wrap: anywhere; }
+.snippet { font-size: 12px; color: var(--muted); background: var(--bg); border-radius: 6px; padding: 4px 6px; overflow-wrap: anywhere; }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.threecol { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }
+@media (max-width: 560px) { .twocol, .threecol { grid-template-columns: 1fr; } }
+.linetable { width: 100%; border-collapse: collapse; }
+.linetable th, .linetable td { border-bottom: 1px solid var(--line); padding: 4px; text-align: left; font-size: 13px; }
+.linetable input { min-height: 36px; padding: 6px; font-size: 14px; }
+.tablescroll { overflow-x: auto; }
+.progress { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--brand); width: 0; transition: width .2s; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom)); background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 10px; z-index: 20; font-size: 14px; max-width: calc(100% - 32px); box-shadow: var(--shadow); }
+.hidden { display: none !important; }
+.empty { text-align: center; padding: 26px 12px; color: var(--muted); }
+.drop { border: 2px dashed var(--line); border-radius: var(--radius); padding: 18px; text-align: center; }
+.drop.over { border-color: var(--brand); background: var(--brand-soft); }
+details summary { cursor: pointer; font-weight: 600; }
+code { font-size: 13px; background: var(--bg); padding: 1px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1 id="home-link" title="Home">FormFill</h1>
+  <span class="net" id="net">Offline</span>
+  <button id="settings-btn" type="button">Settings</button>
+</header>
+<main id="main"><p class="muted">Loading…</p></main>
+<div class="bar hidden" id="bar"><div class="inner" id="bar-inner"></div></div>
+<noscript><p style="padding:16px">FormFill needs JavaScript.</p></noscript>
+<script src="vendor/jszip.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

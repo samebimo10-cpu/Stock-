@@ -10,6 +10,7 @@
 #   _site/          the stock selector and allocator   -> /Stock-/
 #   _site/farm/     DouValue Farm Manager              -> /Stock-/farm/
 #   _site/tycoon/   Tycoon Rush, the investing game    -> /Stock-/tycoon/
+#   _site/formfill/ FormFill, the form autofill app    -> /Stock-/formfill/
 #
 # All the apps reference their assets with relative paths, so the farm app works
 # from a sub-path with no rewriting.
@@ -59,6 +60,17 @@ if [ -d "$root/tycoon" ]; then
   cp -R "$root/tycoon/fonts" "$out/tycoon/fonts"
   if [ -d "$root/tycoon/news" ]; then cp -R "$root/tycoon/news" "$out/tycoon/news"; fi
   echo "Game       -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
+fi
+
+# FormFill is optional in the same way. Its tests and the Apps Script proxy
+# source stay out of the site; the app, its icons and bundled libraries go in.
+if [ -d "$root/formfill" ]; then
+  mkdir -p "$out/formfill"
+  cp "$root/formfill/index.html" "$root/formfill/sw.js" "$root/formfill/manifest.webmanifest" "$root/formfill/icon.svg" "$out/formfill/"
+  cp "$root"/formfill/*.png "$out/formfill/"
+  cp -R "$root/formfill/js" "$out/formfill/js"
+  cp -R "$root/formfill/vendor" "$out/formfill/vendor"
+  echo "FormFill   -> $(find "$out/formfill" -type f | wc -l | tr -d ' ') files under /formfill/"
 fi
 
 # Pages built through Actions does not run Jekyll, but this makes that explicit
