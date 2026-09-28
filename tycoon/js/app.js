@@ -5,6 +5,8 @@ import * as E from './engine.js';
 import {
   CURRENCIES, LIFESTYLES, CHARACTERS, ASSETS, COMPANIES, STATE_INFO, SWANS, CARDS,
   ERAS, CHALLENGES, ASCENSION, GLOSSARY, SCAM_TIPS, LESSONS, TIPS, REGIONS, PROFILE_BLURB,
+  HOMES, HOME_ORDER, DISTRICTS, DISTRICT_ORDER, CARS, CAR_ORDER, PARTNERS, SCHOOLS, SCHOOL_ORDER, KID_OUTCOMES,
+  WORLD_RULES, CIRCLE_TYPES, FAITHS, ZONE_TYPES, ZONE_ORDER, COUNTRIES, TITLES, GOLDEN,
 } from './content.js';
 import * as A from './art.js';
 import { buildReport } from './report.js';
@@ -21,15 +23,22 @@ const DEFAULTS = {
   wisdom: 0, runs: 0, best: 0, freedoms: 0, bestAge: null, maxAsc: 0,
   glossary: [], scamLesson: false, daily: {}, weekly: {}, duels: {}, eras: {},
   principles: [], fcAll: [],
-  settings: { sound: true, timer: false, currency: 'NGN', calm: false, lens: false },
+  settings: { sound: true, timer: false, currency: 'NGN', calm: false, lens: false, autoplay: true, reminders: false },
   setup: { char: 'graduate', asc: 0, aim: 45 },
-  onboarded: false, region: null, look: { skin: 3, hair: 'short', hairColor: 0, outfit: 0 },
+  onboarded: false, region: null, look: { skin: 3, hair: 'short', hairColor: 0, outfit: 0, sex: 'm', build: 'average', wear: 'none', hijab: false, beard: false },
   start: 'story',
-  me: { age: 25, pay: 0, costs: 0, cash: 0, save: 0, index: 0, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, bizManaged: false, liveIn: true, debt: 0, aim: 45, goal: 0 },
+  me: { age: 25, pay: 0, costs: 0, cash: 0, save: 0, index: 0, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, bizManaged: false, liveIn: true, debt: 0, aim: 45, goal: 0, home: 'studio', district: 'suburb', car: 'none' },
+  // Under 16 is a protected mode; 16+ turns on the full set of pull-you-back techniques.
+  ageMode: null, faith: 'none', sprintDone: false,
+  trophies: { homes: [], cars: [], districts: [], zones: [], golden: [] },
+  streak: { n: 0, last: null, best: 0, skipWeek: null },
+  board: {}, gen: 1, heir: null, newsPack: null,
   run: null,
 };
 let P = loadProfile();
-let run = P.run;
+let run = E.upgradeRun(P.run);
+const adult = () => P.ageMode === 'adult';
+const myLook = () => (run && run.look) || P.look;
 
 function loadProfile() {
   let saved = null;
@@ -39,6 +48,11 @@ function loadProfile() {
   p.setup = { ...DEFAULTS.setup, ...(p.setup || {}) };
   p.look = { ...DEFAULTS.look, ...(p.look || {}) };
   p.me = { ...DEFAULTS.me, ...(p.me || {}) };
+  p.trophies = { ...DEFAULTS.trophies, ...(p.trophies || {}) };
+  p.streak = { ...DEFAULTS.streak, ...(p.streak || {}) };
+  p.board = p.board || {};
+  // Players who already finished a game skip the first-run Sprint.
+  if (saved && saved.runs > 0 && saved.sprintDone == null) p.sprintDone = true;
   if (!CURRENCIES[p.settings.currency]) p.settings.currency = 'NGN';
   // Players from before the redesign skip the intro but keep their progress.
   if (saved && saved.runs > 0 && saved.onboarded == null) { p.onboarded = true; p.region = p.region || (p.settings.currency === 'USD' ? 'europe_na' : 'westafrica'); }
@@ -67,7 +81,7 @@ const fairMode = (mode) => ['daily', 'duel'].includes(mode);
 const unlockedIds = () => E.unlockedCards(run && fairMode(run.mode) ? 0 : P.wisdom);
 const initials = (name) => name.replace('The ', '').slice(0, 2).toUpperCase();
 const pc = (x) => `${Math.round(x * 100)}%`;
-const needsForecast = () => run && run.learnMode && !run.eraId && run.forecast == null;
+const needsForecast = () => run && run.learnMode && run.think && !run.eraId && run.forecast == null;
 
 function toast(msg) {
   const t = document.createElement('div');
@@ -278,14 +292,6 @@ function lastMood() {
   return run && run.turn > 0 ? run.market[run.turn - 1].state : 'steady';
 }
 
-function sceneFor(r, opts = {}) {
-  const prog = clamp(E.passive(r).total / E.bowl(r), 0, 1);
-  return A.homeScene({
-    stage: opts.stage ?? A.stageOf(prog), life: r.life, mood: opts.mood || lastMood(), look: P.look, char: r.char, age: r.age,
-    expr: opts.expr || youExpr(), prop: r.h.prop.v > 0, biz: r.h.biz.c > 0, farmer: r.char === 'farmer',
-    kids: !!r.flags.kids, car: !!r.flags.car, sea: E.atSea(r),
-  }, { label: opts.label || 'Your home. It grows as your fruit basket fills.' });
-}
 
 // Effects written with little pictures: pay slip, smile, bowl, coin.
 function fxIcons(note) {
@@ -354,51 +360,81 @@ function lookScreen() {
   const l = P.look;
   const swatch = (key, arr) => arr.map((c, i) => `<button class="swatch ${l[key] === i ? 'on' : ''}" style="--sw:${c}" data-act="look" data-k="${key}" data-v="${i}" aria-label="${key} ${i + 1}"></button>`).join('');
   page('How do you look?', `
-    <div class="look-preview">${A.avatar(l, P.setup.char || 'graduate', { age: 22, expr: 'cheer', size: 180, label: 'Your character' })}</div>
+    <div class="look-preview">${A.avatar(l, P.setup.char || 'graduate', { age: 22, expr: 'cheer', size: 180, label: 'Your character', style: 2 })}</div>
     <section class="field"><span class="lbl">Skin</span><div class="swatches">${swatch('skin', A.SKINS)}</div></section>
     <section class="field"><span class="lbl">Hair</span><div class="hair-grid">${A.HAIRS.map((h) => `<button class="hair-btn ${l.hair === h ? 'on' : ''}" data-act="look" data-k="hair" data-v="${h}" aria-label="${h}">${A.person({ skin: A.SKINS[l.skin], hair: h, hairColor: A.HAIR_COLORS[l.hairColor || 0], outfit: A.OUTFITS[l.outfit], accent: A.OUTFITS[(l.outfit + 2) % 6], expr: 'happy' }, { size: 56 })}</button>`).join('')}</div></section>
     <section class="field"><span class="lbl">Hair colour</span><div class="swatches">${swatch('hairColor', A.HAIR_COLORS.slice(0, 4))}</div></section>
-    <section class="field"><span class="lbl">Clothes</span><div class="swatches">${swatch('outfit', A.OUTFITS)}</div></section>
+    <section class="field"><span class="lbl">Clothes colour</span><div class="swatches">${swatch('outfit', A.OUTFITS)}</div></section>
+    <section class="field"><span class="lbl">You are</span><div class="seg"><button class="${l.sex !== 'f' ? 'on' : ''}" data-act="look" data-k="sex" data-v="m">A man</button><button class="${l.sex === 'f' ? 'on' : ''}" data-act="look" data-k="sex" data-v="f">A woman</button></div><span class="note">Used for your partner in the game: a wife for a man, a husband for a woman.</span></section>
+    <section class="field"><span class="lbl">Build</span><div class="seg">${A.BUILDS.map((b) => `<button class="${(l.build || 'average') === b ? 'on' : ''}" data-act="look" data-k="build" data-v="${b}">${b[0].toUpperCase() + b.slice(1)}</button>`).join('')}</div></section>
+    <section class="field"><span class="lbl">Dress</span><div class="seg wrap-seg">${A.WEARS.map((w) => `<button class="${(l.wear || 'none') === w ? 'on' : ''}" data-act="look" data-k="wear" data-v="${w}">${esc(A.WEAR_NAMES[w])}</button>`).join('')}</div><span class="note">How smart you look still follows your money: from a plain T-shirt to designer.</span></section>
+    <section class="field"><div class="seg"><button class="${l.hijab ? 'on' : ''}" data-act="look" data-k="hijab" data-v="${l.hijab ? '' : '1'}">Hijab ${l.hijab ? '✓' : ''}</button><button class="${l.beard ? 'on' : ''}" data-act="look" data-k="beard" data-v="${l.beard ? '' : '1'}" ${l.sex === 'f' ? 'disabled' : ''}>Beard ${l.beard ? '✓' : ''}</button></div></section>
     <div class="sticky-go"><button class="btn primary wide" data-act="look-done">${P.onboarded ? 'Save' : 'Start playing'}</button></div>`, 'region-screen');
 }
 
 // ------------------------------------------------------------------ home
 
+function ageScreen() {
+  page('Before you play', `
+    ${guideSay('One quick question. It changes how the game treats your time, never the money lessons.')}
+    <div class="choice-list">
+      <button class="choice ${P.ageMode === 'u16' ? 'on' : ''}" data-act="age-mode" data-v="u16"><span class="av">${A.icon('shield', 40, '')}</span><span><b>Under 16</b><small>No streak losses, no reminders, no autoplay, no endless play, no "a friend passed you" alerts, and a break reminder after 45 minutes.</small></span></button>
+      <button class="choice ${P.ageMode === 'adult' ? 'on' : ''}" data-act="age-mode" data-v="adult"><span class="av">${A.icon('flame', 40, '')}</span><span><b>16 or over</b><small>The full game: autoplay, daily streaks with rewards, mystery envelopes, weekend events, endless play as your children, and optional reminders.</small></span></button>
+    </div>
+    <p class="note">You can change this later in Settings.</p>`, P.onboarded && P.ageMode ? 'settings' : 'home');
+}
+
+function msToMidnight() {
+  const d = new Date();
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  const mins = Math.max(0, Math.round((m - d) / 60000));
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
 function home() {
   stopTimer();
   closeLayer();
   if (!P.onboarded) return intro(0);
-  run = P.run;
+  if (!P.ageMode) return ageScreen();
+  run = E.upgradeRun(P.run);
   const daily = P.daily[today()];
   const wk = weeklyChallenge();
   const wkDone = P.weekly[weekNo()];
   const resume = run && run.phase !== 'done'
-    ? `<button class="continue" data-act="resume"><span class="c-face">${A.avatar(P.look, run.char, { age: run.age, expr: 'happy', size: 52, label: '' })}</span><span><span class="kicker">Continue</span><b>${esc(E.MODES[run.mode].name)} · Age ${run.age}</b><span class="muted">${f(E.netWorth(run))} owned</span></span><span class="kicker">▶</span></button>` : '';
+    ? `<button class="continue" data-act="resume"><span class="c-face">${A.avatar(myLook(), run.char, { age: run.age, expr: 'happy', size: 52, label: '', style: run.life })}</span><span><span class="kicker">Continue</span><b>${esc(E.MODES[run.mode].name)} · Age ${run.age}</b><span class="muted">${run.teaser ? esc(run.teaser) : `${f(E.netWorth(run))} owned`}</span></span><span class="kicker">▶</span></button>` : '';
+  const boardN = Object.values(P.board).reduce((s, x) => s + x.length, 0);
   const more = [
-    ['daily', 'calendar', 'Daily Market', daily ? 'Done today ✓' : 'Same market for everyone'],
+    ['daily', 'calendar', 'Daily Market', daily ? `Done ✓ · new in ${msToMidnight()}` : `Ends in ${msToMidnight()}`],
     ['duel', 'swords', 'Duel', 'Play a friend\'s market'],
+    ['board', 'trophy', 'Friends board', boardN ? `${boardN} result${boardN > 1 ? 's' : ''}` : 'Scores your friends send'],
     ['eras', 'clock', 'Eras', 'Famous booms and busts'],
     ['blitz', 'bolt', 'Blitz', '15 seconds a turn'],
     ['weekly', 'trophy', `Weekly: ${wk.name}`, wkDone != null ? 'Badge earned ✓' : wk.text],
     ['library', 'book', 'Library', 'The books behind the game'],
     ['collection', 'star', 'Collection', 'Cards, people, words'],
   ];
+  const first = !P.sprintDone;
+  const streak = P.streak.n > 0 ? `<button class="streak" data-act="daily" aria-label="Daily streak ${P.streak.n} days">${A.icon('flame', 26, '')}<b>${P.streak.n}</b><small>day${P.streak.n > 1 ? 's' : ''}${adult() && streakBoost() > 0 ? ` · +${Math.round(streakBoost() * 100)}% starting cash` : ''}</small></button>` : '';
   app.innerHTML = `
   <main class="home">
-    <div class="home-scene">${A.homeScene({ stage: P.bestAge ? 4 : 1, life: 2, mood: 'boom', look: P.look, char: P.setup.char || 'graduate', age: 22, expr: 'cheer', prop: P.freedoms > 0, biz: P.runs > 2 }, { label: 'Your home' })}</div>
+    <div class="home-scene">${A.homeScene({ home: P.freedoms > 0 ? 'house' : 'studio', district: P.freedoms > 0 ? 'upscale' : 'suburb', car: P.freedoms > 0 ? 'saloon' : 'none', mood: 'boom', family: [{ look: P.look, age: 24, expr: 'cheer', style: 2, sex: P.look.sex }], beach: !!P.bestAge && P.freedoms > 2 }, { label: 'Your home' })}</div>
     <header class="brand">
       <div class="logo">TYCOON<span>RUSH</span></div>
-      <p class="tag">Fill your bowl with fruit from your money tree, before 60.</p>
+      <p class="tag">Build a life worth showing off: free, happy, and good to your people.</p>
     </header>
+    ${adult() && isWeekend() ? `<div class="chip-line" style="border-color:var(--gold);color:var(--gold)">${A.icon('sparkle', 22, '')} <b>Boom Weekend:</b> golden events are three times as likely until Monday.</div>` : ''}
+    ${streak}
     ${resume}
-    <button class="play-big" data-act="setup" data-mode="journey">${A.icon('play', 60, '')}<span><b>Play</b><small>Learn as you go, one year at a time</small></span></button>
-    <button class="btn wide" data-act="setup" data-mode="classic">${A.icon('coin', 26, '')} Quick game · about 10 minutes</button>
-    <details class="more"><summary>${A.icon('gift', 26, '')} More ways to play</summary>
+    ${first
+    ? `<button class="play-big" data-act="sprint">${A.icon('play', 60, '')}<span><b>Play</b><small>Your first ten years · about 5 minutes</small></span></button>`
+    : `<button class="play-big" data-act="setup" data-mode="journey">${A.icon('play', 60, '')}<span><b>Play</b><small>A whole life, one year at a time</small></span></button>
+    <button class="btn wide" data-act="setup" data-mode="classic">${A.icon('coin', 26, '')} Quick game · about 10 minutes</button>`}
+    ${first ? '<p class="note" style="text-align:center">Finish the Sprint to unlock the full life: every mode, the Map and more.</p>' : `<details class="more"><summary>${A.icon('gift', 26, '')} More ways to play</summary>
       <div class="more-grid">${more.map(([act, ic, name, sub]) => `<button class="more-b" data-act="${act === 'blitz' ? 'setup' : act}" ${act === 'blitz' ? 'data-mode="blitz"' : ''}>${A.icon(ic, 40, '')}<b>${esc(name)}</b><small>${esc(sub)}</small></button>`).join('')}</div>
-    </details>
+    </details>`}
     <div class="stats-row">
       <div class="stat"><b>${P.wisdom}</b><span>Wisdom</span></div>
-      <div class="stat"><b>${P.best.toLocaleString()}</b><span>Best score</span></div>
+      <div class="stat"><b>${P.bestStars != null ? `${P.bestStars}★` : '–'}</b><span>Best life</span></div>
       <div class="stat"><b>${P.bestAge ?? '–'}</b><span>Free at</span></div>
       <div class="stat"><b>${P.runs}</b><span>Runs</span></div>
     </div>
@@ -413,6 +449,162 @@ function home() {
       <button class="btn" data-act="feedback">${A.icon('envelope', 22, '')} Send feedback</button>
     </div>
   </main>`;
+}
+
+// A picture of your life for WhatsApp: your family in front of your home.
+async function shareCard() {
+  const d = lastDone;
+  if (!d || !d.result) return;
+  const r = d.result;
+  try {
+    const svgStr = resultScene(d).replace('<svg ', '<svg width="1080" height="540" ');
+    const img = new Image();
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = 1080; c.height = 1350;
+    const x = c.getContext('2d');
+    x.fillStyle = '#140e29'; x.fillRect(0, 0, 1080, 1350);
+    x.drawImage(img, 0, 170, 1080, 540);
+    x.textAlign = 'center';
+    x.fillStyle = '#ffc53d'; x.font = '84px Bungee, Figtree, sans-serif';
+    x.fillText('TYCOON RUSH', 540, 120);
+    x.fillStyle = '#ffffff'; x.font = '800 76px Figtree, sans-serif';
+    x.fillText(resultTitle(r)[1], 540, 840);
+    if (r.life) { x.fillStyle = '#ffc53d'; x.font = '110px sans-serif'; x.fillText(starsText(r.life.stars), 540, 990); }
+    x.fillStyle = '#a99fd2'; x.font = '600 44px Figtree, sans-serif';
+    x.fillText(`Score ${r.score.toLocaleString()} · ${E.MODES[d.mode].name}`, 540, 1090);
+    x.fillText('Can you build a better life?', 540, 1180);
+    x.font = '600 34px Figtree, sans-serif';
+    x.fillText(GAME_URL.replace('https://', ''), 540, 1270);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    const file = new File([blob], 'my-tycoon-rush-life.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], text: shareText(d) });
+    else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      toast('Picture saved');
+    }
+  } catch { toast('Could not make the picture here.'); }
+}
+
+// ------------------------------------------------------------------ reminders (16+, opt-in)
+//
+// There is no server, so reminders use the browser's periodic background sync
+// where it exists (Chrome on Android, installed game). The service worker
+// reads the latest teaser from a small cache entry.
+
+function saveTeaser() {
+  if (!adult() || !P.settings.reminders || !('caches' in window)) return;
+  const text = run && run.teaser ? run.teaser : run && !run.home.own ? 'Rent is due. Your money is waiting for you.' : 'Your money tree has grown. Come and see.';
+  caches.open('tr-state').then((c) => c.put('./state/teaser.json', new Response(JSON.stringify({ text, at: Date.now() }), { headers: { 'Content-Type': 'application/json' } }))).catch(() => {});
+}
+
+async function setupReminders() {
+  try {
+    if (!('Notification' in window)) { toast('Reminders are not available on this phone.'); P.settings.reminders = false; saveProfile(); return; }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Reminders need notification permission.'); P.settings.reminders = false; saveProfile(); settings(); return; }
+    const reg = await navigator.serviceWorker.ready;
+    if (reg.periodicSync) { await reg.periodicSync.register('tr-remind', { minInterval: 20 * 60 * 60 * 1000 }); toast('Reminders on.'); }
+    else toast('Reminders are on, but this browser only shows them when the game is open. Install the game for the best results.');
+    saveTeaser();
+  } catch { toast('Reminders could not be set up here.'); }
+}
+
+// Under 16: a gentle break after 45 minutes of play.
+let sessionStart = Date.now();
+setInterval(() => {
+  if (P.ageMode !== 'u16' || !run || document.hidden) return;
+  if (Date.now() - sessionStart < 45 * 60 * 1000) return;
+  sessionStart = Date.now();
+  stopTimer(); stopAutoplay(); persist();
+  openModal(`<div class="swan swan-in"><span class="kicker">Break time</span><div class="mood" style="color:var(--sky)">45 MINUTES</div><p class="outcome">You have been playing for a while. Your game is saved exactly where you left it.</p><button class="btn primary wide" data-act="home">Take a break</button><button class="btn wide" data-act="break-on">Keep playing</button></div>`);
+}, 60 * 1000);
+
+// ------------------------------------------------------------------ the weekly real-news pack
+//
+// Online, the game fetches a small file of real headlines for your region,
+// published weekly. They replace the "noise" headlines only, so they never
+// change the market. Offline, the generated headlines are used.
+
+async function loadNewsPack() {
+  try {
+    const r = await fetch('./news/weekly.json', { cache: 'no-cache' });
+    if (!r.ok) return;
+    const pack = await r.json();
+    if (pack && pack.regions) { P.newsPack = { week: pack.week, regions: pack.regions }; saveProfile(); }
+  } catch { /* offline: keep the last pack, or the generated headlines */ }
+}
+
+function realNoise(i) {
+  const pack = P.newsPack;
+  if (!pack || !run) return null;
+  const list = (pack.regions && (pack.regions[run.region] || pack.regions.world)) || [];
+  if (!list.length) return null;
+  const h = list[(run.turn * 3 + i) % list.length];
+  return typeof h === 'string' ? h : h && h.title;
+}
+
+// ------------------------------------------------------------------ friends board
+//
+// No server: a result travels inside the link a friend shares. Opening the
+// link adds it to your board, grouped by Duel code.
+
+const b64 = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64 = (t) => JSON.parse(decodeURIComponent(escape(atob(t.replace(/-/g, '+').replace(/_/g, '/')))));
+
+function resultLink(done) {
+  const r = done.result;
+  const code = done.mode === 'duel' ? done.seed.replace('duel-', '') : done.mode === 'daily' ? `Daily ${done.seed.replace('daily-', '')}` : 'Open play';
+  return `${GAME_URL}?vs=${b64({ n: (P.reportName || 'A friend').slice(0, 20), c: code, s: r.score, st: r.life ? r.life.stars : 0, a: r.age, r: r.reason, d: today() })}`;
+}
+
+function ingestLink() {
+  let q = null;
+  try { q = new URLSearchParams(location.search).get('vs'); } catch { q = null; }
+  if (!q) return;
+  try {
+    const e = unb64(q);
+    if (!e || typeof e.s !== 'number') return;
+    const code = String(e.c || 'Open play').slice(0, 24);
+    const list = P.board[code] || [];
+    if (!list.some((x) => x.n === e.n && x.s === e.s)) list.push({ n: String(e.n).slice(0, 20), s: e.s, st: Number(e.st) || 0, a: e.a, r: e.r, d: e.d || today() });
+    P.board[code] = list.slice(-30);
+    saveProfile();
+    const mine = code.startsWith('Daily') ? (P.daily[code.replace('Daily ', '')] || {}).score : (P.duels[code] || {}).score;
+    setTimeout(() => toast(adult() && mine != null && e.s > mine ? `${e.n} passed your score. Play ${code} again?` : `${e.n}'s result added to your friends board`), 600);
+    history.replaceState(null, '', location.pathname);
+  } catch { /* not a valid link */ }
+}
+
+function boardScreen() {
+  const codes = Object.keys(P.board);
+  const mine = (code) => (code.startsWith('Daily') ? P.daily[code.replace('Daily ', '')] : P.duels[code]);
+  page('Friends board', `
+    <p class="muted">When a friend shares a result link and you open it, their score lands here. Share yours from the results screen. Ranked by Life Score, then points.</p>
+    ${codes.length ? codes.map((code) => {
+    const me = mine(code);
+    const rows = [...P.board[code].map((x) => ({ ...x })), ...(me ? [{ n: 'You', s: me.score, st: me.stars || 0, you: true }] : [])].sort((a, b) => b.st - a.st || b.s - a.s);
+    return `<section class="field"><span class="lbl">${esc(code)}</span><ol class="board">${rows.map((x) => `<li class="${x.you ? 'you' : ''}"><b>${esc(x.n)}</b><span>${'★'.repeat(Math.floor(x.st))}${x.st % 1 ? '½' : ''}</span><span>${Number(x.s).toLocaleString()}</span></li>`).join('')}</ol>${code !== 'Open play' && !code.startsWith('Daily') ? `<button class="btn small" data-act="duel-code" data-code="${esc(code)}">Play ${esc(code)}</button>` : ''}</section>`;
+  }).join('') : '<p class="note">Nothing here yet. Start a Duel and send the code, or share a result.</p>'}`);
+}
+
+// ------------------------------------------------------------------ daily streak
+
+function bumpStreak() {
+  const s = P.streak;
+  const t = today();
+  if (s.last === t) return;
+  const days = s.last ? Math.round((new Date(t) - new Date(s.last)) / 864e5) : 1;
+  if (!s.last || days === 1) s.n += 1;
+  else if (!adult()) s.n += 1; // Under 16: a streak never breaks.
+  else if (days === 2 && s.skipWeek !== weekNo()) { s.n += 1; s.skipWeek = weekNo(); }
+  else if ((s.freezes || 0) >= days - 1) { s.freezes -= days - 1; s.n += 1; }
+  else s.n = 1;
+  s.last = t;
+  s.best = Math.max(s.best || 0, s.n);
 }
 
 // ------------------------------------------------------------------ sharing and feedback
@@ -646,6 +838,9 @@ function meForm() {
     ${field(['age', 'Your age', ''], { unit: 'yrs' })}
     ${field(['pay', 'Take-home pay, per month', 'After tax'])}
     ${field(['costs', 'Living costs, per month', 'Rent, food, transport, bills, family. Not loan repayments: the game charges their interest'])}
+    <label class="me-f" for="me-home"><span><b>Your home now</b><small>Rent is already in your living costs</small></span><span class="me-in"><select id="me-home" class="select">${HOME_ORDER.map((id) => `<option value="${id}" ${m.home === id ? 'selected' : ''}>${esc(HOMES[id].long)}</option>`).join('')}</select></span></label>
+    <label class="me-f" for="me-district"><span><b>Your area</b></span><span class="me-in"><select id="me-district" class="select">${DISTRICT_ORDER.map((id) => `<option value="${id}" ${m.district === id ? 'selected' : ''}>${esc(DISTRICTS[id].name)}</option>`).join('')}</select></span></label>
+    <label class="me-f" for="me-car"><span><b>Your car</b><small>Counted at about 60% of the new price</small></span><span class="me-in"><select id="me-car" class="select">${CAR_ORDER.map((id) => `<option value="${id}" ${m.car === id ? 'selected' : ''}>${esc(CARS[id].name)}</option>`).join('')}</select></span></label>
     ${ME_FIELDS.map(([title, rows]) => `<span class="lbl">${title}</span>${rows.map((r) => field(r)).join('')}`).join('')}
     <label class="check" id="box-prop" ${num(m.prop) > 0 ? '' : 'hidden'}><input type="checkbox" id="me-liveIn" ${m.liveIn !== false ? 'checked' : ''}> I live in this property (it pays no rent)</label>
     <label class="check" id="box-biz" ${num(m.biz) > 0 ? '' : 'hidden'}><input type="checkbox" id="me-bizManaged" ${m.bizManaged ? 'checked' : ''}> My business runs without me (a manager runs it)</label>
@@ -656,8 +851,20 @@ function meForm() {
   </section>`;
 }
 
+const isWeekend = () => [0, 6].includes(new Date().getDay());
+const streakBoost = () => (adult() ? Math.min(0.3, 0.01 * (P.streak.n || 0)) : 0);
+
 function startRun(opts) {
-  run = E.newRun(opts);
+  const fair = fairMode(opts.mode);
+  run = E.newRun({
+    sex: P.look.sex, region: P.region || 'westafrica',
+    think: (P.runs || 0) >= 2,
+    envelopes: adult(), weekend: adult() && isWeekend(),
+    cashBoost: fair ? 0 : streakBoost(),
+    ...opts,
+  });
+  run.lookSkin = P.look.skin;
+  tab = 'year';
   persist();
   closeLayer();
   renderGame();
@@ -685,7 +892,7 @@ function tileHTML(id) {
   return `<button class="tile ${open ? '' : 'closed'}" style="--c:${ASSETS[id].color}" data-act="asset" data-id="${id}" ${open ? '' : 'disabled'} aria-label="${esc(pl.label)}: ${esc(f(hv))}">
     <span class="t-top">${A.icon(pl.icon, 40, '')}<span class="t-name">${esc(pl.label)}<small>${esc(ASSETS[id].name)}</small></span></span>
     <b class="t-val ${hv > 0 ? '' : 'zero'}">${f(hv)}</b>
-    <span class="t-cap">${open ? esc(pl.cap) : 'Closed this week'}</span>
+    <span class="t-cap">${open ? esc(pl.cap) : E.rule(run, 'cryptoBan') && id === 'crypto' ? 'Banned in this world' : 'Closed this week'}</span>
     ${id === 'index' && open ? (() => { const mm = E.mrMarket(run); return `<span class="mm" style="color:${mm.v < 0.92 ? 'var(--gain)' : mm.v > 1.08 ? 'var(--orange)' : 'var(--sky)'}">${mm.v < 0.92 ? '▼ Cheap' : mm.v > 1.08 ? '▲ Dear' : '■ Fair'} · ${mm.v.toFixed(2)}× value</span>`; })() : ''}
     <span class="t-foot">${foot}<canvas class="spark" data-id="${id}" width="64" height="24"></canvas></span>
   </button>`;
@@ -701,17 +908,90 @@ function headlinePic(n) {
 }
 const STAMP = { real: ['tick', 'Real'], fake: ['cross', 'Fake'], noise: ['shrug', 'Noise'], scam: ['warn', 'Scam'] };
 
-function renderGame() {
-  if (!run) return home();
-  const m = run.market[run.turn];
+// The game screen is one short Year view plus tabs. New systems live in tabs,
+// never on the Year view: one number per thing, details in a sheet.
+let tab = 'year';
+const TABS = [['year', 'calendar', 'Year'], ['life', 'house', 'Life'], ['money', 'coins', 'Money'], ['map', 'map', 'Map'], ['circle', 'people', 'Circle'], ['me', 'smile', 'Me']];
+const circleSeen = (r = run) => r.seenEv.includes('circle') || E.circleOpen(r);
+function tabLock(id) {
+  if (id === 'map' && !E.mapOpen(run)) return 'The Map opens after your third year.';
+  if (id === 'circle' && !circleSeen()) return 'Your Circle opens the first time someone asks you for help.';
+  return null;
+}
+const zoneName = (z, r = run) => COUNTRIES[r.currency].zones[z];
+const ms = (r) => r.milestones || [];
+
+function hudHTML() {
   const nw = E.netWorth(run);
   const p = E.passive(run);
-  const C = E.costs(run);
   const B = E.bowl(run);
+  const C = E.costs(run);
   const prog = clamp(p.total / B, 0, 1);
+  const mood = lastMood();
+  const MS = [['efund', 'umbrella'], ['car', 'car'], ['home', 'key'], ['half', 'fruitbasket'], ['cushion', 'coins'], ['debtfree', 'chain'], ['school', 'school']];
+  return `<header class="hud">
+      <div class="hud-row">
+        <button class="home-pill hud-home" data-act="home" aria-label="Home screen (your game is saved)">‹ ${A.icon('house', 20, '')}<span>Home</span></button>
+        <button class="me" data-act="tab" data-t="life" aria-label="You, age ${run.age}. Open your life">${A.avatar(myLook(), run.char, { age: run.age, expr: youExpr(), size: 44, label: '', style: run.life })}<span class="agebadge">${run.age}</span></button>
+        <button class="hud-own" data-act="statement" aria-label="Everything you own: ${esc(f(nw))}"><span><span class="lbl">Everything you own</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></span></button>
+        <button class="wx" data-act="prices" aria-label="Prices and rates">${A.moodIcon(mood, 30)}<small>Prices</small></button>
+      </div>
+      <button class="freedom" data-act="passive" aria-label="Fruit basket against the bowl: ${Math.round(prog * 100)}%">
+        <span class="f-row">${A.fruitTree(prog, 30)}<span class="fbar"><i style="width:${(prog * 100).toFixed(1)}%"></i><b>${Math.round(prog * 100)}%</b></span>${A.icon('bowl', 26, '')}</span>
+        <span class="fmeta"><span>Fruit <b>${f(p.total)}</b>/yr · Bowl <b>${f(B)}</b>/yr${B > C * 1.001 ? ' (goal)' : ''}</span><span class="ms-row" aria-label="Milestones">${MS.map(([id, ic]) => `<i class="${ms(run).includes(id) ? 'on' : ''}" title="${esc(E.MILESTONES[id])}">${A.icon(ic, 16, '')}</i>`).join('')}</span></span>
+      </button>
+    </header>`;
+}
+
+function tabbarHTML() {
+  const dot = { circle: !!run.flags.circleNew, map: E.mapOpen(run) && !!(run.market[run.turn].zone) && !run.flags[`mapSeen${run.turn}`] };
+  return `<nav class="tabbar" aria-label="Game sections">${TABS.map(([id, ic, name]) => {
+    const lock = id !== 'year' && tabLock(id);
+    return `<button class="tb ${tab === id ? 'on' : ''} ${lock ? 'locked' : ''}" data-act="tab" data-t="${id}" aria-label="${name}${lock ? ' (locked)' : ''}" ${tab === id ? 'aria-current="page"' : ''}>${A.icon(lock ? 'lock' : ic, 24, '')}<span>${name}</span>${dot[id] ? '<i class="tb-dot"></i>' : ''}</button>`;
+  }).join('')}</nav>`;
+}
+
+function familyOf(r) {
+  const out = [{ look: { ...((r.look) || P.look) }, age: r.age, expr: youExpr(), style: r.life, sex: ((r.look) || P.look).sex }];
+  if (r.partner && r.partner.look && Object.keys(r.partner.look).length) out.push({ look: r.partner.look, age: r.age + ((r.partner.look.age || r.age) - r.age), sex: r.partner.sex, style: r.life, expr: r.partner.trust < 25 ? 'tired' : 'happy' });
+  for (const k of r.kids) { const a = r.age - k.born; if (a < 22 && k.look) out.push({ look: k.look, age: Math.max(1, a), sex: k.sex, style: 1 }); }
+  return out.slice(0, 5);
+}
+
+function sceneFor(r, opts = {}) {
+  if (!r.home) {
+    const prog = clamp(E.passive(r).total / E.bowl(r), 0, 1);
+    return A.homeScene({ stage: opts.stage ?? A.stageOf(prog), life: r.life, mood: opts.mood || lastMood(), look: P.look, age: r.age, expr: opts.expr || youExpr() }, { label: opts.label || 'Your home' });
+  }
+  return A.homeScene({
+    home: r.home.id, district: r.home.district, car: r.car.id, family: familyOf(r).map((p, i) => (i === 0 && opts.expr ? { ...p, expr: opts.expr } : p)),
+    mood: opts.mood || lastMood(), rental: E.rentable(r) > 0, biz: r.h.biz.c > 0, farmer: r.char === 'farmer', sea: E.atSea(r),
+    guard: r.home.guard, cctv: r.home.cctv, worn: r.cash < 0, beach: !!opts.beach,
+  }, { label: opts.label || `Your ${HOMES[r.home.id].name.toLowerCase()} in a ${DISTRICTS[r.home.district].name.toLowerCase()}` });
+}
+
+function renderGame() {
+  if (!run) return home();
+  E.upgradeRun(run);
+  if (tab !== 'year' && tabLock(tab)) tab = 'year';
+  if (tab === 'map') run.flags[`mapSeen${run.turn}`] = true;
+  if (tab === 'circle') run.flags.circleNew = false;
+  const body = { year: yearTab, life: lifeTab, money: moneyTab, map: mapTab, circle: circleTab, me: meTab }[tab]();
+  app.innerHTML = `
+  <div class="game tab-${tab}">
+    ${hudHTML()}
+    ${body}
+    ${tab === 'year' ? `<footer class="actionbar"><div class="actions-row"><button class="home-big" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 28, '')}<span>Home</span></button><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Make your call first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></div></footer>` : ''}
+    ${tabbarHTML()}
+  </div>`;
+  if (tab === 'money') requestAnimationFrame(drawSparks);
+}
+
+// ------------------------------------------------------------------ Year: decide, then live it
+
+function yearTab() {
+  const m = run.market[run.turn];
   const sea = E.atSea(run);
-  const locked = E.lifeLocked(run);
-  const idle = run.flags.idle || 0;
   const tip = P.runs === 0 && run.turn < TIPS.length && !run.flags[`tip${run.turn}`]
     ? `<div class="sec">${guideSay(esc(TIPS[run.turn]), 'happy', '<button class="btn small" data-act="tip">Got it</button>')}</div>` : '';
   const crystal = run.crystal[run.turn]
@@ -719,41 +999,30 @@ function renderGame() {
   const revealAll = E.newsRevealed(run, {});
   const headlines = m.news.map((n, i) => {
     const shown = E.newsRevealed(run, n);
-    const src = n.tag === 'co' ? 'Markets' : n.tag === 'rate' ? 'Central bank' : n.tag === 'fx' ? 'Currency' : n.kind === 'trap' ? 'Sponsored' : 'News';
+    const real = n.kind === 'noise' ? realNoise(i) : null;
+    const src = n.tag === 'co' ? 'Markets' : n.tag === 'rate' ? 'Central bank' : n.tag === 'fx' ? 'Currency' : n.tag === 'zone' ? 'Land & regions' : n.kind === 'trap' ? 'Sponsored' : real ? 'Real news this week' : 'News';
     const key = n.kind === 'trap' ? 'scam' : n.kind === 'noise' ? 'noise' : n.real ? 'real' : 'fake';
     const verdict = shown ? `<span class="stamp">${A.icon(STAMP[key][0], 30, STAMP[key][1])}<small>${STAMP[key][1]}</small></span>` : '';
     const getin = n.kind === 'trap' ? `<button class="getin" data-act="trap" data-i="${i}" ${n.taken ? 'disabled' : ''}>${n.taken ? 'You are in' : 'Get in early ▸'}</button>` : '';
-    const hint = run.learnMode && n.hint ? `<span class="pill hint-pill" style="--mc:${STATE_INFO[n.hint].color}">Sounds like: ${A.WEATHER[n.hint].word}</span>` : '';
-    return `<article class="headline ${n.kind === 'trap' ? 'is-trap' : ''}"><div class="h-top"><span class="h-pic">${headlinePic(n)}</span><span class="src">${src}</span>${verdict}</div><p>${esc(n.text)}</p>${hint}${getin}</article>`;
+    const hint = run.learnMode && run.think && n.hint ? `<span class="pill hint-pill" style="--mc:${STATE_INFO[n.hint].color}">Sounds like: ${A.WEATHER[n.hint].word}</span>` : '';
+    const text = real || n.text;
+    const zoneBtn = n.tag === 'zone' && n.zone && E.mapOpen(run) ? `<button class="linkish" data-act="zone" data-id="${n.zone}">See land in ${esc(zoneName(n.zone))} ▸</button>` : '';
+    return `<article class="headline ${n.kind === 'trap' ? 'is-trap' : ''}"><div class="h-top"><span class="h-pic">${headlinePic(n)}</span><span class="src">${src}</span>${verdict}</div><p>${esc(text)}</p>${hint}${getin}${zoneBtn}</article>`;
   }).join('');
   const whisper = (run.charges.insider > 0 && !revealAll) ? `<button class="btn small" data-act="tool" data-tool="insider">Whisper (${run.charges.insider})</button>` : '';
   const ball = (run.charges.crystal > 0 && !run.crystal[run.turn]) ? `<button class="btn small" data-act="tool" data-tool="crystal">Crystal ball (${run.charges.crystal})</button>` : '';
-  const ponzi = run.h.ponzi ? `<button class="tile special" data-act="ponzi"><span class="t-top">${A.castFace('hype', 'sly', 40, 'The Hype Guy')}<span class="t-name">Golden Circle<small>"Guaranteed 30%"</small></span></span><b class="t-val">${f(run.h.ponzi.v)}</b><span class="t-foot"><span class="up">▲ +30.0%</span></span></button>` : '';
-  const heldCards = run.cards.map((id) => { const c = E.cardById(id); return `<span class="hc ${c.type === 'Tool' ? 'tool' : ''}">${A.icon(A.TYPE_ICON[c.type] === 'hype' ? 'warn' : A.TYPE_ICON[c.type], 16, '')} ${esc(c.name)}${run.charges[id] ? ` ×${run.charges[id]}` : ''}</span>`; }).join('');
-  const lev = run.lev > 0 ? `<span class="hc" style="border-color:var(--orange);color:var(--orange)">${A.icon('dice', 16, '')} Leverage: ${run.lev} turn${run.lev > 1 ? 's' : ''}</span>` : '';
-  const debtLine = run.cash < 0 ? `You owe this. It grows ${pctS(E.debtRate(run))} a year until you sell something to pay it.` : idle > 0 ? `Sitting idle: rising prices take ${pctS(run.infl)} a year.` : 'Coins in a jar earn nothing.';
-  const saving = run.salary - C;
-  const mood = lastMood();
-  const L = LIFESTYLES;
-
-  app.innerHTML = `
-  <div class="game">
-    <header class="hud">
-      <div class="hud-row">
-        <button class="icon-btn" data-act="menu" aria-label="Menu">☰</button>
-        <button class="icon-btn" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 26, '')}</button>
-        <button class="me" data-act="town" aria-label="You, age ${run.age}. Open your town">${A.avatar(P.look, run.char, { age: run.age, expr: youExpr(), size: 46, label: '' })}<span class="agebadge">${run.age}</span></button>
-        <button class="hud-own" data-act="statement" aria-label="Everything you own: ${esc(f(nw))}">${A.icon('coins', 26, '')}<span><span class="lbl">Everything you own</span><b class="nw ${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b></span></button>
-        <button class="wx" data-act="prices" aria-label="Prices and rates">${A.moodIcon(mood, 34)}<small>Prices</small></button>
-      </div>
-      <button class="freedom" data-act="passive" aria-label="Fruit basket against the bowl: ${Math.round(prog * 100)}%">
-        <span class="f-row">${A.fruitTree(prog, 34)}<span class="fbar"><i style="width:${(prog * 100).toFixed(1)}%"></i><b>${Math.round(prog * 100)}%</b></span>${A.icon('bowl', 30, '')}</span>
-        <span class="fmeta"><span>Fruit <b>${f(p.total)}</b>/yr</span><span>Bowl <b>${f(B)}</b>/yr${B > C * 1.001 ? ' (your goal)' : ''}</span></span>
-      </button>
-    </header>
-    <section class="scene-wrap"><button class="scene-btn" data-act="town" aria-label="Your home and town">${sceneFor(run)}</button>
-      <div class="scene-cap">${run.turn > 0 ? `Last year: <b>${A.WEATHER[mood].word}</b> (${esc(STATE_INFO[mood].name)})` : 'Age 22: your first home'} · tap to open your town</div></section>
+  const C = E.costs(run);
+  const income = run.salary + (run.partner && !run.partner.legacy ? run.partner.pay : 0);
+  const saving = income - C - run.giving * income;
+  const rules = (run.rules || []).map((id) => WORLD_RULES[id].name);
+  const teaser = run.teaser ? `<div class="chip-line teaser">${A.icon('bell', 22, '')} ${esc(run.teaser)}</div>` : '';
+  return `
+    <section class="scene-wrap"><button class="scene-btn" data-act="tab" data-t="life" aria-label="Your life. Open the Life tab">${sceneFor(run)}</button>
+      <div class="scene-cap"><b>${esc(HOMES[run.home.id].name)}</b> · ${esc(DISTRICTS[run.home.district].name)} · ${esc(CARS[run.car.id].name)}${run.partner ? ` · ${esc(run.partner.name)}` : ''} ${run.kids.length ? `· ${run.kids.length} child${run.kids.length > 1 ? 'ren' : ''}` : ''}</div></section>
+    ${teaser}
     ${run.aim ? `<div class="chip-line" style="border-color:var(--orange);color:var(--orange)">${A.icon('trophy', 22, '')} Goal: free by ${run.aim}. ${run.age < run.aim ? `${run.aim - run.age} years to go.` : 'The date has passed. Keep going.'}</div>` : ''}
+    ${rules.length ? `<button class="chip-line rules-chip" data-act="rules">${A.icon('dice', 22, '')} This world: ${rules.map(esc).join(' · ')} ▸</button>` : ''}
+    ${E.MODES[run.mode].years ? `<div class="chip-line" style="border-color:var(--sky);color:var(--sky)">${A.icon('clock', 22, '')} 10-Year Sprint: ${Math.max(0, run.deadline - run.age)} years left. Build the best life you can.</div>` : ''}
     ${tip}${crystal}
     ${sea ? `<div class="sea-note">${A.icon('clock', 22, '')} <b>At sea.</b> You can't trade or change how you live this turn. Your money keeps working while you sail.</div>` : ''}
     ${E.era(run) ? `<div class="chip-line" style="border-color:var(--gold);color:var(--gold)">${esc(E.era(run).name)}: finish owning ${E.era(run).target}× a year of costs (${f(E.era(run).target * C)}), or reach freedom.</div>` : ''}
@@ -761,7 +1030,42 @@ function renderGame() {
       <div class="sec-h"><h2 class="news-h">${A.castFace('anchor', 'neutral', 30, 'The news anchor')} This year's news</h2><div style="display:flex;gap:6px">${whisper}${ball}</div></div>
       <div class="news-strip">${headlines}</div>
     </section>
-    ${thinkHTML()}
+    ${forecastCard()}
+    <button class="wallet-mini" data-act="tab" data-t="money">${A.coinJar(clamp(run.cash / Math.max(1, C), 0, 1), { debt: run.cash < 0, size: 44 })}<span><span class="lbl">Cash</span><b class="${run.cash < 0 ? 'down' : ''}">${f(run.cash)}</b></span><span class="${saving >= 0 ? 'up' : 'down'}">${saving >= 0 ? '▲' : '▼'} ${f(saving, true)}/yr</span><span class="go">Money ▸</span></button>`;
+}
+
+// The forecast question, on the Year view in the Wisdom Journey once the
+// probability tools are open. The full lens lives behind "Think" in Money.
+function forecastCard() {
+  if (run.eraId || !run.learnMode || !run.think) return '';
+  const decided = run.forecast != null;
+  const span = run.ypt === 1 ? 'the next year' : `the next ${run.ypt} years`;
+  const chips = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map((p) => `<button class="${decided && Math.abs(run.forecast - p) < 0.001 ? 'on' : ''}" data-act="fc" data-p="${p}" ${decided ? 'disabled' : ''}>${Math.round(p * 100)}</button>`).join('');
+  const odds = decided ? E.upOdds(run) : null;
+  return `<section class="think fc-card">
+    <div class="sec-h"><h2>Your call</h2><button class="linkish" data-act="think">Think it through ▸</button></div>
+    <div class="fc-q">Will the index fund beat inflation over ${span}? <span class="muted">(% chance)</span></div>
+    <div class="fc-chips">${chips}</div>
+    ${decided ? `<p class="why">You said <b>${pc(run.forecast)}</b>. Base rates alone say ${pc(odds.base)}; base rates plus headlines say <b>${pc(odds.ideal)}</b>.</p>` : ''}
+  </section>`;
+}
+
+// ------------------------------------------------------------------ Money
+
+function moneyTab() {
+  const sea = E.atSea(run);
+  const C = E.costs(run);
+  const idle = run.flags.idle || 0;
+  const ponzi = run.h.ponzi ? `<button class="tile special" data-act="ponzi"><span class="t-top">${A.castFace('hype', 'sly', 40, 'The Hype Guy')}<span class="t-name">Golden Circle<small>"Guaranteed 30%"</small></span></span><b class="t-val">${f(run.h.ponzi.v)}</b><span class="t-foot"><span class="up">▲ +30.0%</span></span></button>` : '';
+  const heldCards = run.cards.map((id) => { const c = E.cardById(id); return `<span class="hc ${c.type === 'Tool' ? 'tool' : ''}">${A.icon(A.TYPE_ICON[c.type] === 'hype' ? 'warn' : A.TYPE_ICON[c.type], 16, '')} ${esc(c.name)}${run.charges[id] ? ` ×${run.charges[id]}` : ''}</span>`; }).join('');
+  const lev = run.lev > 0 ? `<span class="hc" style="border-color:var(--orange);color:var(--orange)">${A.icon('dice', 16, '')} Leverage: ${run.lev} turn${run.lev > 1 ? 's' : ''}</span>` : '';
+  const debtLine = run.cash < 0 ? `You owe this. It grows ${pctS(E.debtRate(run))} a year until you sell something to pay it.` : idle > 0 ? `Sitting idle: rising prices take ${pctS(run.infl)} a year.` : 'Coins in a jar earn nothing.';
+  const partnerPay = run.partner && !run.partner.legacy ? run.partner.pay : 0;
+  const saving = run.salary + partnerPay - C - run.giving * (run.salary + partnerPay);
+  const thinkBtn = run.eraId ? '' : run.think
+    ? `<button class="big-row" data-act="think">${A.icon('dice', 32, '')}<span><b>Think</b><small>Base rates, headlines, Mr. Market and bet sizing</small></span><span>▸</span></button>`
+    : `<div class="big-row locked">${A.icon('lock', 32, '')}<span><b>Think tools</b><small>Probability tools unlock after your second game. For now, trust your plan.</small></span></div>`;
+  return `
     <section class="sec">
       <div class="sec-h"><h2>Where your money goes</h2><span class="note">Tap to put in or take out</span></div>
       <div class="grid">${ORDER.map(tileHTML).join('')}${ponzi}</div>
@@ -769,21 +1073,232 @@ function renderGame() {
     <section class="sec">
       <div class="wallet">
         <div class="cash-row">${A.coinJar(clamp(run.cash / Math.max(1, C), 0, 1), { debt: run.cash < 0, shrink: idle * 0.05, size: 56 })}<span class="cash-txt"><span class="lbl">Cash in your jar</span><b class="${run.cash < 0 ? 'down' : ''}" style="opacity:${1 - Math.min(0.45, idle * 0.12)}">${f(run.cash)}</b><span class="cash-sub">${debtLine}</span></span></div>
-        <div class="flowline">${A.icon('payslip', 20, 'Pay')} Pay <b>${f(run.salary)}</b> − ${A.icon('bowl', 20, 'Costs')} costs <b>${f(C)}</b> = <b class="${saving >= 0 ? 'up' : 'down'}">${saving >= 0 ? '▲' : '▼'} ${f(saving, true)}</b> a year</div>
-        <div class="field">
-          <span class="lbl">How you live${locked ? ' (locked)' : ''}</span>
-          <div class="rooms">${L.map((l, i) => `<button class="room-b ${run.life === i ? 'on' : ''}" data-act="life" data-lv="${i}" ${sea || locked ? 'disabled' : ''} aria-label="${l.name}, joy ${l.joy >= 0 ? '+' : ''}${l.joy}">${A.room(i, 52)}<b>${l.name}</b><small>${A.icon(l.joy >= 0 ? 'smile' : 'sad', 14, '')}${l.joy >= 0 ? '+' : ''}${l.joy}</small></button>`).join('')}</div>
-          <span class="note">${esc(L[run.life].blurb)} Costs ×${L[run.life].mult}. Better living makes you happier but makes the bowl bigger.</span>
-        </div>
+        <div class="flowline">${A.icon('payslip', 20, 'Pay')} Pay <b>${f(run.salary + partnerPay)}</b> − ${A.icon('bowl', 20, 'Costs')} costs <b>${f(C)}</b>${run.giving ? ` − giving <b>${f(run.giving * (run.salary + partnerPay))}</b>` : ''} = <b class="${saving >= 0 ? 'up' : 'down'}">${saving >= 0 ? '▲' : '▼'} ${f(saving, true)}</b> a year</div>
         ${planHTML(sea)}
-        <div class="joy">${A.joyFace(run.joy, 24)}<div class="jbar"><i style="width:${run.joy}%;background:${run.joy < 25 ? 'var(--loss)' : 'var(--pink)'}"></i></div><b class="num">${Math.round(run.joy)}</b></div>
       </div>
     </section>
-    ${curesHTML()}
-    ${heldCards || lev ? `<section class="sec"><div class="sec-h"><h2>Your cards</h2></div><div class="held">${lev}${heldCards}</div></section>` : ''}
-    <footer class="actionbar"><div class="actions-row"><button class="home-big" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 28, '')}<span>Home</span></button><button class="next" data-act="next" ${needsForecast() ? 'style="opacity:.6"' : ''}><span>${needsForecast() ? 'Guess first ▲' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></div></footer>
-  </div>`;
-  requestAnimationFrame(drawSparks);
+    ${thinkBtn}
+    <div class="two-btn"><button class="big-row" data-act="statement">${A.icon('payslip', 28, '')}<span><b>Statement</b><small>Rich Dad's test</small></span></button><button class="big-row" data-act="cures">${A.icon('star', 28, '')}<span><b>Seven cures</b><small>${run.cures.filter(Boolean).length} of 7 kept</small></span></button></div>
+    ${heldCards || lev ? `<section class="sec"><div class="sec-h"><h2>Your cards</h2></div><div class="held">${lev}${heldCards}</div></section>` : ''}`;
+}
+
+// ------------------------------------------------------------------ Life: home, car, partner, children
+
+const starStr = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+
+function lifeTab() {
+  const H = HOMES[run.home.id];
+  const D = DISTRICTS[run.home.district];
+  const lc = E.lifeCosts(run);
+  const st = E.stars(run);
+  const can = E.canAct(run) && !E.atSea(run);
+  const locked = E.lifeLocked(run);
+  const L = LIFESTYLES;
+  const P_ = run.partner;
+  const kids = run.kids.map((k, i) => {
+    const a = run.age - k.born;
+    const open = E.schoolsOpen(run);
+    let ctl = '';
+    if (a < 5) ctl = '<small class="muted">Starts school at 5</small>';
+    else if (a < 18) ctl = `<div class="seg school-seg">${SCHOOL_ORDER.map((id) => `<button class="${k.school === id ? 'on' : ''}" data-act="school" data-i="${i}" data-id="${id}" ${can && open.includes(id) ? '' : 'disabled'}>${esc(SCHOOLS[id].name.replace(' private', ''))}<small>${f(SCHOOLS[id].fee * run.salaryStart * (run.feeIdx || 1))}</small></button>`).join('')}</div>`;
+    else if (a < 22) ctl = `<div class="seg"><button class="${k.uni !== 'abroad' ? 'on' : ''}" data-act="uni" data-i="${i}" data-v="0" ${can ? '' : 'disabled'}>Study at home</button><button class="${k.uni === 'abroad' ? 'on' : ''}" data-act="uni" data-i="${i}" data-v="1" ${can ? '' : 'disabled'}>University abroad<small>${f(1.5 * run.salaryStart * (run.feeIdx || 1))}/yr</small></button></div>`;
+    else ctl = `<small class="${k.outcome === 'support' ? 'down' : 'up'}">${esc(KID_OUTCOMES[k.outcome] || '')}</small>`;
+    return `<div class="person-row">${k.look ? A.lookPerson(k.look, { age: Math.max(2, a), size: 54, sex: k.sex, label: k.name }) : A.icon('family', 44, '')}<div><b>${esc(k.name)}, ${a}</b>${ctl}</div></div>`;
+  }).join('');
+  const T = P_ ? PARTNERS[P_.type] : null;
+  const partner = P_ ? `<div class="person-row">${P_.look && Object.keys(P_.look).length ? A.lookPerson(P_.look, { age: run.age, size: 64, sex: P_.sex, expr: P_.trust < 25 ? 'worried' : 'happy', label: P_.name }) : A.icon('heart', 48, '')}
+      <div><b>${esc(P_.name)}</b><small>${P_.revealed ? `${esc(T.name)}: ${esc(T.line)}` : 'Still getting to know each other. First impressions are only clues.'}</small>
+      <div class="trust"><span class="lbl">Trust</span><div class="jbar"><i style="width:${P_.trust}%;background:${P_.trust < 25 ? 'var(--loss)' : 'var(--pink)'}"></i></div><b class="num">${Math.round(P_.trust)}</b></div>
+      ${!P_.legacy ? `<small class="muted">Brings in ${f(P_.pay)} a year.</small>` : ''}</div></div>`
+    : `<p class="muted">Single for now. Someone special may come along.</p>`;
+  const got = trophiesAll();
+  return `
+    <section class="sec life-home">
+      <div class="sec-h"><h2>${A.icon('house', 26, '')} Home</h2><button class="btn small" data-act="move" ${can ? '' : 'disabled'}>Move ▸</button></div>
+      <div class="life-card">${A.homePic(run.home.id, 84)}<div><b>${esc(H.name)}</b><small>${esc(D.name)} · ${run.home.own ? 'You own it' : `Rent ${f(lc.rent)}/yr`}</small><small>Security <span class="stars" aria-label="${st} of 5 stars">${starStr(st)}</span> · Flood risk ${D.flood >= 0.5 ? 'medium–high' : 'low'}</small></div></div>
+      <div class="sec-row">${[['levy', 'Estate levy', `${f(0.02 * run.salary)}/yr`], ['guard', 'Private guard', `${f(0.05 * run.salary)}/yr`]].map(([k, name, cost]) => `<button class="toggle-row" data-act="security" data-k="${k}" role="switch" aria-checked="${!!run.home[k]}" ${can ? '' : 'disabled'}><span style="text-align:left"><b>${A.icon('shield', 18, '')} ${name}</b><small>+1 star · ${cost}</small></span><span class="switch ${run.home[k] ? 'on' : ''}"></span></button>`).join('')}
+        <button class="toggle-row" data-act="security" data-k="cctv" ${can && !run.home.cctv ? '' : 'disabled'}><span style="text-align:left"><b>${A.icon('cctv', 18, '')} CCTV and alarm</b><small>${run.home.cctv ? 'Installed: +1 star' : `+1 star · one-off ${f(0.08 * run.salary)}`}</small></span><span class="switch ${run.home.cctv ? 'on' : ''}"></span></button></div>
+    </section>
+    <section class="sec">
+      <div class="sec-h"><h2>${A.icon('car', 26, '')} Car</h2><button class="btn small" data-act="carsheet" ${can ? '' : 'disabled'}>Change ▸</button></div>
+      <div class="life-card">${run.car.id === 'none' ? A.icon('crowd', 64, '') : A.carPic(run.car.id, 84)}<div><b>${esc(CARS[run.car.id].name)}</b><small>${run.car.id === 'none' ? esc(CARS.none.long) : `Worth ${f(run.car.v)}${run.car.loan > 0 ? ` · loan ${f(run.car.loan)}` : ''}`}</small><small>Running costs ${f(lc.car)}/yr</small></div></div>
+    </section>
+    <section class="sec">
+      <div class="sec-h"><h2>${A.icon('heart', 26, '')} Partner</h2></div>
+      ${partner}
+    </section>
+    ${kids ? `<section class="sec"><div class="sec-h"><h2>${A.icon('school', 26, '')} Children</h2></div>${kids}${run.life === 0 ? '<p class="warn">Frugal living caps school at budget private.</p>' : ''}<p class="note">School fees rise 3 points faster than prices. At 22, each child finds their own way: independent, helping you, or still needing support.</p></section>` : ''}
+    <section class="sec">
+      <span class="lbl">Everyday spending${locked ? ' (locked)' : ''}</span>
+      <div class="rooms">${L.map((l, i) => `<button class="room-b ${run.life === i ? 'on' : ''}" data-act="life" data-lv="${i}" ${!can || locked ? 'disabled' : ''} aria-label="${l.name}, joy ${l.joy >= 0 ? '+' : ''}${l.joy}">${A.room(i, 52)}<b>${l.name}</b><small>${A.icon(l.joy >= 0 ? 'smile' : 'sad', 14, '')}${l.joy >= 0 ? '+' : ''}${l.joy}</small></button>`).join('')}</div>
+      <span class="note">${esc(L[run.life].blurb)} Your clothes follow it too. ${run.life === 0 ? 'Two frugal years in a row bring burnout.' : ''}</span>
+      <div class="joy">${A.joyFace(run.joy, 24)}<div class="jbar"><i style="width:${run.joy}%;background:${run.joy < 25 ? 'var(--loss)' : 'var(--pink)'}"></i></div><b class="num">${Math.round(run.joy)}</b></div>
+    </section>
+    <section class="sec"><button class="big-row" data-act="costs">${A.icon('bowl', 28, '')}<span><b>Where your costs go</b><small>${f(E.costs(run))} a year</small></span><span>▸</span></button></section>
+    <section class="sec">
+      <div class="sec-h"><h2>${A.icon('trophy', 26, '')} Trophy wall</h2><span class="note">Everything you have ever had</span></div>
+      <div class="trophies">${HOME_ORDER.map((id) => `<span class="tro">${A.homePic(id, 56, got.homes.includes(id))}<small>${esc(HOMES[id].name)}</small></span>`).join('')}${CAR_ORDER.filter((id) => id !== 'none').map((id) => `<span class="tro">${A.carPic(id, 56, got.cars.includes(id))}<small>${esc(CARS[id].name)}</small></span>`).join('')}</div>
+      <div class="trophies small">${DISTRICT_ORDER.map((id) => `<span class="chip ${got.districts.includes(id) ? 'on' : ''}">${esc(DISTRICTS[id].name)}</span>`).join('')}${GOLDEN.map((g) => `<span class="chip gold ${got.golden.includes(g.id) ? 'on' : ''}">${got.golden.includes(g.id) ? esc(g.title) : '? Golden event'}</span>`).join('')}</div>
+    </section>`;
+}
+
+function trophiesAll() {
+  const t = P.trophies || {};
+  const g = (run && run.got) || {};
+  const u = (k) => [...new Set([...(t[k] || []), ...(g[k] || [])])];
+  return { homes: u('homes'), cars: u('cars'), districts: u('districts'), zones: u('zones'), golden: u('golden') };
+}
+
+function costsSheet() {
+  const lc = E.lifeCosts(run);
+  const row = (label, v) => (v > 0 ? `<div><span>${label}</span><b>${f(v)}</b></div>` : '');
+  openSheet(`
+    ${sheetHead('', 'Where your costs go')}
+    <div class="brk">
+      ${row(`Everyday spending (${LIFESTYLES[run.life].name.toLowerCase()}${run.partner ? ', for two' : ''})`, E.everyday(run))}
+      ${row('Rent', lc.rent)}${row('Home upkeep', lc.upkeep)}${row('Property tax', lc.tax)}
+      ${row('Car running costs', lc.car)}${row('Car loan interest', lc.loan)}${row('Security', lc.security)}
+      ${row('Children (food, clothes, school fees)', lc.kids)}${row('Nanny', lc.nanny)}
+      <div class="tot"><span>Living costs</span><b>${f(E.costs(run))}/yr</b></div>
+    </div>
+    <p class="note">Your Freedom Number is 25 × these costs. A bigger house, a better car or a pricier school all raise it.</p>
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+let moveCtx = null;
+function moveSheet() {
+  const c = moveCtx || (moveCtx = { home: run.home.id, district: run.home.district, buy: false, mortgage: true, keepOld: false });
+  const price = HOMES[c.home].buy ? E.homePrice(run, c.home, c.district) : 0;
+  const rent = E.homeRent(run, c.home, c.district);
+  const equity = c.buy ? (c.mortgage ? price * (1 - E.ltv(run)) : price) : 0;
+  const ok = !(c.home === run.home.id && c.district === run.home.district && c.buy === run.home.own) && (!c.buy || HOMES[c.home].buy);
+  openSheet(`
+    ${sheetHead('', 'Move home')}
+    <span class="lbl">What kind of home?</span>
+    <div class="pick-grid">${HOME_ORDER.map((id) => `<button class="pick ${c.home === id ? 'on' : ''}" data-act="mv" data-k="home" data-v="${id}">${A.homePic(id, 60)}<b>${esc(HOMES[id].name)}</b><small>${HOMES[id].joy >= 0 ? '+' : ''}${HOMES[id].joy} joy · ${HOMES[id].beds} bed${HOMES[id].beds === 1 ? '' : 's'}</small></button>`).join('')}</div>
+    <span class="lbl">Where?</span>
+    <div class="choice-list">${DISTRICT_ORDER.map((id) => { const D = DISTRICTS[id]; return `<button class="choice ${c.district === id ? 'on' : ''}" data-act="mv" data-k="district" data-v="${id}"><span class="av">${A.icon('shield', 34, '')}</span><span><b>${esc(D.name)} <span class="stars">${starStr(D.security)}</span></b><small>${esc(D.blurb)} Prices ×${D.price}.${D.commute ? ' Long commute (−3 joy).' : ''}</small></span></button>`; }).join('')}</div>
+    <div class="seg"><button class="${!c.buy ? 'on' : ''}" data-act="mv" data-k="buy" data-v="0">Rent<small>${f(rent)}/yr</small></button><button class="${c.buy ? 'on' : ''}" data-act="mv" data-k="buy" data-v="1" ${HOMES[c.home].buy ? '' : 'disabled'}>Buy<small>${HOMES[c.home].buy ? f(price) : 'Not for sale'}</small></button></div>
+    ${c.buy ? `<label class="check"><input type="checkbox" id="mv-mort" ${c.mortgage ? 'checked' : ''}> Borrow ${Math.round(E.ltv(run) * 100)}% (mortgage at ${pctS(E.mortRate(run))}). You pay ${f(price * (1 - E.ltv(run)))} now.</label>` : ''}
+    ${run.home.own ? `<label class="check"><input type="checkbox" id="mv-keep" ${c.keepOld ? 'checked' : ''}> Keep my old home and rent it out (instead of selling it)</label>` : ''}
+    <p class="note">${c.buy ? `You need ${f(equity)} in cash, plus moving costs. The home you live in saves rent but earns none; upkeep is ${Math.round(HOMES[c.home].upkeep * 100)}% of its value a year.` : 'Renting keeps your cash free. Rent rises with prices.'}${run.kids.length && HOMES[c.home].beds < 2 ? ' <b>Children need a home with at least two bedrooms.</b>' : ''}</p>
+    <button class="btn primary wide" data-act="mv-go" ${ok ? '' : 'disabled'}>Move here</button>`);
+}
+
+function carSheet() {
+  const can = E.canAct(run);
+  openSheet(`
+    ${sheetHead('', 'Change your car')}
+    <p class="muted">A car is a doodad: it costs money to run and loses value every year. It also makes life easier and happier. Your old car is traded in.</p>
+    <div class="choice-list">${CAR_ORDER.filter((id) => id !== run.car.id).map((id) => {
+    const C = CARS[id];
+    const price = E.carPrice(run, id);
+    return `<div class="choice car-choice">${id === 'none' ? A.icon('crowd', 50, '') : A.carPic(id, 70)}<span><b>${esc(C.name)}</b><small>${id === 'none' ? 'Sell your car and take the bus' : `${f(price)} · runs ${f(C.run * E.unit(run))}/yr · loses ${Math.round(C.dep * 100)}%/yr`} · ${C.joy >= 0 ? '+' : ''}${C.joy} joy</small>
+      <span class="share-actions">${id === 'none' ? `<button class="btn small" data-act="buycar" data-id="none" ${can ? '' : 'disabled'}>Sell car</button>` : `<button class="btn small" data-act="buycar" data-id="${id}" ${can ? '' : 'disabled'}>Pay cash</button><button class="btn small" data-act="buycar" data-id="${id}" data-loan="1" ${can ? '' : 'disabled'}>On a loan</button>`}</span></span></div>`;
+  }).join('')}</div>
+    <p class="note">Car loans cost ${pctS(E.carLoanRate(run))} a year and are paid off over four years.</p>
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+// ------------------------------------------------------------------ Map: land across your country
+
+function mapTab() {
+  const zones = ZONE_ORDER.map((id) => ({ id, name: zoneName(id), plots: run.land.filter((l) => l.zone === id).reduce((s, l) => s + l.plots, 0), news: run.market[run.turn].zone && run.market[run.turn].zone.zone === id }));
+  const plots = run.land.map((l, i) => {
+    const v = l.plots * E.plotPrice(run, l.zone);
+    return `<div class="plot-row">${A.icon('plot', 36, '')}<div><b>${esc(zoneName(l.zone))}</b><small>${esc(TITLES[l.title].short)}${l.checked ? '' : ' (unchecked)'} · worth ${f(v)} · paid ${f(l.paid)}</small>
+      <div class="seg">${[['hold', 'Hold'], ['farm', 'Farm'], ['build', 'Build to rent']].map(([u, name]) => `<button class="${l.use === u || (u === 'build' && l.built) ? 'on' : ''}" data-act="landuse" data-i="${i}" data-u="${u}" ${E.canAct(run) && !l.built && !(u === 'farm' && ZONE_TYPES[l.zone].farm <= 0) ? '' : 'disabled'}>${name}${u === 'build' ? `<small>${f(2 * v)}</small>` : u === 'farm' && ZONE_TYPES[l.zone].farm > 0 ? `<small>~${pctS(E.farmRate(run, l.zone))}/yr</small>` : ''}</button>`).join('')}<button data-act="sellland" data-i="${i}" ${E.canAct(run) && l.bt !== run.turn ? '' : 'disabled'}>Sell<small>${f(v * 0.94)}</small></button></div></div></div>`;
+  }).join('');
+  return `
+    <section class="sec">
+      <div class="sec-h"><h2>${A.icon('map', 26, '')} Land in ${esc(COUNTRIES[run.currency].name)}</h2></div>
+      ${A.countryMap(zones, { country: COUNTRIES[run.currency].name })}
+      <p class="note">Tap a zone to see this year's plot for sale. Read the news: roads, airports and floods move land prices, and some headlines are only rumours.</p>
+    </section>
+    ${run.market[run.turn].zone ? `<div class="chip-line" style="border-color:var(--gold);color:var(--gold)">${A.icon('tv', 22, '')} ${esc(run.market[run.turn].zone.text)}</div>` : ''}
+    <section class="sec"><div class="sec-h"><h2>Your plots</h2><span class="note">${f(E.landValue(run))}</span></div>${plots || '<p class="muted">You own no land yet.</p>'}</section>`;
+}
+
+function zoneSheet(z) {
+  const Z = ZONE_TYPES[z];
+  const o = E.landOffer(run, z);
+  const can = E.canAct(run);
+  const n = run.market[run.turn].zone;
+  openSheet(`
+    ${sheetHead('', zoneName(z))}
+    <span class="kicker">${esc(Z.name)}</span>
+    <dl class="stats"><div><dt>Plot price</dt><dd>${f(E.plotPrice(run, z))}</dd></div><div><dt>Grows with</dt><dd style="font-size:13px">${esc(Z.driver)}</dd></div><div><dt>Main risk</dt><dd style="font-size:13px">${esc(Z.risk)}</dd></div></dl>
+    ${n && n.zone === z ? `<div class="insight" style="--ic:var(--gold)"><span class="lbl">In the news</span><p>${esc(n.text)}</p></div>` : ''}
+    <div class="insight" style="--ic:var(--violet)"><span class="lbl">For sale this year</span>
+      ${o.sold ? '<p>Sold. Another plot comes up next year.</p>' : `<p>One plot for <b>${f(o.price)}</b>. The seller says: <b>${esc(TITLES[o.claimed].name)}</b>.</p>
+      ${o.checked ? `<p class="${o.truth === o.claimed ? 'up' : 'down'}">${A.icon(o.truth === o.claimed ? 'tick' : 'warn', 20, '')} Survey and registry search: <b>${esc(TITLES[o.truth].name)}</b>. ${o.truth === o.claimed ? 'The papers are what the seller said.' : 'The papers are worse than the seller said.'}</p>` : `<p class="muted">Papers can be worse than claimed. Over ten years, problems hit about ${Math.round((1 - Math.pow(1 - TITLES.full.hazard, 10)) * 100)}% of full titles, ${Math.round((1 - Math.pow(1 - TITLES.progress.hazard, 10)) * 100)}% in progress, and ${Math.round((1 - Math.pow(1 - TITLES.receipt.hazard, 10)) * 100)}% with a family receipt only.</p>`}
+      <div class="share-actions">${o.checked ? '' : `<button class="btn" data-act="landcheck" data-id="${z}" ${can && run.cash >= o.checkCost ? '' : 'disabled'}>Check the papers (${f(o.checkCost)})</button>`}<button class="btn primary" data-act="landbuy" data-id="${z}" ${can && run.cash >= o.price ? '' : 'disabled'}>Buy (${f(o.price)})</button></div>`}
+    </div>
+    ${Z.farm > 0 ? `<p class="note">Farming here yields about ${pctS(E.farmRate(run, z))} of the land's value a year, more in good weather.${run.char === 'farmer' ? ' You are a farmer: +50%.' : ''}</p>` : '<p class="note">Too built-up to farm. Hold it, or build to rent.</p>'}
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+// ------------------------------------------------------------------ Circle: people and giving
+
+function circleTab() {
+  const F = FAITHS[P.faith || 'none'];
+  const faces = run.circle.map((c) => `<button class="face-b" data-act="person" data-id="${c.id}">${A.lookPerson(c.look, { age: run.age + (c.ageGap || 0), size: 64, sex: c.sex, expr: c.known && ['taker', 'schemer'].includes(c.type) ? 'sly' : 'happy', label: c.name })}<b>${esc(c.name)}</b><small>${esc(c.rel)}</small>${c.known ? `<span class="type-tag t-${c.type}">${esc(CIRCLE_TYPES[c.type].name)}</span>` : c.clues.length ? '<span class="type-tag">Clue noted</span>' : ''}</button>`).join('');
+  const given = run.circle.reduce((s, c) => s + c.given, 0);
+  const back = run.circle.reduce((s, c) => s + c.returned, 0);
+  return `
+    <section class="sec">
+      <div class="sec-h"><h2>${A.icon('people', 26, '')} Your Circle</h2></div>
+      <p class="muted">Each person has a hidden character. Watch what they do and ask questions before you send money.</p>
+      <div class="faces">${faces}</div>
+      <p class="note">Given ${f(given)} · paid back ${f(back)}</p>
+    </section>
+    <section class="sec">
+      <div class="trust"><span class="lbl">Reputation</span><div class="jbar"><i style="width:${run.rep}%;background:var(--gold)"></i></div><b class="num">${Math.round(run.rep)}</b></div>
+      <p class="note">${run.rep >= 65 ? 'People speak well of you. If you get into trouble, your Circle will help.' : run.rep <= 30 ? 'People have stopped expecting help from you, and won\'t help you either.' : 'Help the genuine, set limits with takers, and people will stand by you.'}</p>
+    </section>
+    <section class="sec">
+      <div class="sec-h"><h2>${A.icon('jar', 26, '')} ${esc(F.jar)} jar</h2><button class="linkish" data-act="settings-faith">Wording ▸</button></div>
+      <div class="seg">${[0, 0.02, 0.05, 0.1, 0.15].map((g) => `<button class="${Math.abs(run.giving - g) < 0.001 ? 'on' : ''}" data-act="giving" data-v="${g}" ${E.canAct(run) ? '' : 'disabled'}>${Math.round(g * 100)}%</button>`).join('')}</div>
+      <p class="note">${run.giving > 0 ? `${f(run.giving * (run.salary + (run.partner && !run.partner.legacy ? run.partner.pay : 0)))} a year goes to ${esc(F.jar.toLowerCase())}.` : `Choose a share of income to ${esc(F.verb)} every year.`} Giving lifts joy and your name, and now and then someone you helped opens a door. It is not an investment: it never pays back on a formula.</p>
+    </section>`;
+}
+
+function personSheet(id) {
+  const c = run.circle.find((x) => x.id === id);
+  if (!c) return;
+  openSheet(`
+    ${sheetHead('', c.name)}
+    <div class="person-row">${A.lookPerson(c.look, { age: run.age + (c.ageGap || 0), size: 90, sex: c.sex, label: c.name })}<div><b>${esc(c.rel)}</b><small>Asked ${c.asks} time${c.asks === 1 ? '' : 's'} · you gave ${f(c.given)} · paid back ${f(c.returned)}</small>${c.known ? `<p><b>${esc(CIRCLE_TYPES[c.type].name)}.</b> ${esc(CIRCLE_TYPES[c.type].tell)} <i>${esc(CIRCLE_TYPES[c.type].lesson)}</i></p>` : '<p class="muted">You don\'t know them well yet.</p>'}</div></div>
+    ${c.clues.length ? `<span class="lbl">What you noticed</span><ul class="clues">${c.clues.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    <button class="btn wide" data-act="close">Close</button>`);
+}
+
+// ------------------------------------------------------------------ Me
+
+function meTab() {
+  const rules = run.rules || [];
+  return `
+    <section class="sec me-card">${A.avatar(myLook(), run.char, { age: run.age, expr: 'happy', size: 96, label: 'You', style: run.life })}<div><b>${esc(run.heirName || P.reportName || 'You')}, ${run.age}</b><small>${esc(E.MODES[run.mode].name)} · ${esc(CURRENCIES[run.currency].name)} · ${esc(region().name)}${run.gen > 1 ? ` · Generation ${run.gen}` : ''}</small><button class="btn small" data-act="look-screen">${A.icon('smile', 18, '')} Change my look</button></div></section>
+    ${rules.length ? `<section class="sec"><span class="lbl">This world's rules</span>${rules.map((id) => `<div class="insight" style="--ic:var(--orange)"><b>${esc(WORLD_RULES[id].name)}</b><p>${esc(WORLD_RULES[id].text)}</p></div>`).join('')}</section>` : ''}
+    <div class="me-grid">
+      <button class="big-row" data-act="report-now">${A.icon('payslip', 28, '')}<span><b>Progress report</b><small>A PDF of your choices so far</small></span></button>
+      <button class="big-row" data-act="library">${A.icon('book', 28, '')}<span><b>Library</b><small>The books behind the game</small></span></button>
+      <button class="big-row" data-act="glossary-sheet">${A.icon('diploma', 28, '')}<span><b>Words learned</b><small>Your money dictionary</small></span></button>
+      <button class="big-row" data-act="how">${A.icon('star', 28, '')}<span><b>How to play</b><small>The rules in plain words</small></span></button>
+      <button class="big-row" data-act="settings">${A.icon('gear', 28, '')}<span><b>Settings</b><small>Sound, motion, faith, age mode</small></span></button>
+      <button class="big-row" data-act="share-game">${A.icon('phone', 28, '')}<span><b>Share the game</b><small>Send it to a friend</small></span></button>
+      <button class="big-row" data-act="feedback">${A.icon('envelope', 28, '')}<span><b>Send feedback</b><small>On WhatsApp</small></span></button>
+      <button class="big-row" data-act="home">${A.icon('house', 28, '')}<span><b>Save and go home</b><small>Your game waits for you</small></span></button>
+    </div>
+    <button class="btn danger wide" data-act="abandon">Abandon this run</button>`;
+}
+
+function rulesSheet() {
+  openSheet(`${sheetHead('', 'This world\'s rules')}<p class="muted">Every game draws two rules, so the best plan changes from run to run.</p>${(run.rules || []).map((id) => `<div class="insight" style="--ic:var(--orange)"><b>${esc(WORLD_RULES[id].name)}</b><p>${esc(WORLD_RULES[id].text)}</p></div>`).join('')}<button class="btn wide" data-act="close">Got it</button>`);
+}
+
+function thinkSheet() {
+  openSheet(`${sheetHead('', 'Think in probabilities')}${thinkHTML()}${(() => { const mm = E.mrMarket(run); return `<div class="insight" style="--ic:var(--sky)"><span class="lbl">Mr. Market</span><p>${mm.mood}, at ${mm.v.toFixed(2)}× fair value. ${mm.v < 0.9 ? 'A bargain: a margin of safety.' : mm.v > 1.15 ? 'Expensive: expect weaker years ahead.' : 'Close to fair value.'}</p></div>`; })()}<p class="note">Kelly bet sizing appears under "Show the maths" on risky choices in life events.</p><button class="btn wide" data-act="close">Close</button>`);
 }
 
 // ------------------------------------------------------------------ learning panels
@@ -793,9 +1308,6 @@ const moodName = (s) => STATE_INFO[s].name;
 function thinkHTML() {
   if (run.eraId) return '';
   const learnM = run.learnMode;
-  if (!learnM && !P.settings.lens) {
-    return `<section class="think"><div class="sec-h"><h2>Probability lens</h2><button class="linkish" data-act="lens">Open</button></div><p class="why">See base rates, what the headlines imply, and forecast the year.</p></section>`;
-  }
   const { prior: pr, post, hints } = E.posterior(run);
   const decided = run.forecast != null;
   const showPost = decided || !learnM;
@@ -827,7 +1339,6 @@ function thinkHTML() {
     <div class="fc-q">Will the index fund beat inflation over ${span}? <span class="muted">(%)</span></div>
     <div class="fc-chips">${chips}</div>
     ${reveal}
-    ${!learnM ? '<button class="linkish" data-act="lens" style="justify-self:start">Hide lens</button>' : ''}
   </section>`;
 }
 
@@ -1146,8 +1657,9 @@ function menuSheet() {
 function nextTurn(force = false) {
   if (!run || run.phase !== 'alloc') return;
   if (!force && needsForecast()) {
-    toast('Make your forecast first: will the index beat inflation?');
-    const t = document.querySelector('.think');
+    toast('Make your call first: will the index beat inflation?');
+    if (tab !== 'year') { tab = 'year'; renderGame(); }
+    const t = document.querySelector('.fc-card');
     if (t) t.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth', block: 'center' });
     return;
   }
@@ -1193,7 +1705,8 @@ function playout(res) {
     <div class="play">
       <div class="years">Age ${res.age0} → ${res.age1}</div>
       <div class="play-scene ${delta0 >= 0 ? 'rise' : 'fall'}">${sceneFor(run, { mood: res.state, expr: res.state === 'crash' ? 'shocked' : delta0 >= 0 ? 'cheer' : 'tired', label: `${W.word} over your town` })}</div>
-      <div class="mood" style="--mc:${info.color}">${W.word.toUpperCase()}</div>
+      <div class="mood flip" style="--mc:${info.color}">${W.word.toUpperCase()}</div>
+      ${res.seqHit ? `<div class="chip-line seq">${A.icon('storm', 22, '')} <b>A late crash.</b> Near the finish, a fall like this hurts most. Savings were untouched.</div>` : ''}
       <p class="mood-line">${esc(info.name)}: ${esc(info.line)}</p>
       ${res.path && run.learnMode ? '<canvas class="path" id="path"></canvas>' : ''}
       ${rows ? `<ul class="rows">${rows}</ul>` : '<p class="note" style="text-align:center">You had nothing invested. The market moved without you.</p>'}
@@ -1201,15 +1714,42 @@ function playout(res) {
       ${notes ? `<div class="notes">${notes}</div>` : ''}
       <div class="big-nw"><span class="lbl">Net worth</span><b id="roll" class="${res.nw1 >= res.nw0 ? 'up' : 'down'}">${f(res.nw0)}</b></div>
       ${verdict}
+      ${res.golden ? `<div class="golden">${A.icon('sparkle', 40, '')}<div><span class="kicker">Golden event</span><b>${esc(res.golden.title)}</b><p>${esc(res.golden.text)}</p></div></div>` : ''}
+      ${res.milestones && res.milestones.length ? `<div class="unlock-list">${res.milestones.map((m) => `<span>${A.icon('trophy', 16, '')} ${esc(E.MILESTONES[m])}</span>`).join('')}</div>` : ''}
+      ${res.envelope ? `<button class="envelope ${res.envelope.big ? 'big' : ''}" data-act="envelope">${A.icon('envelope', 44, '')}<span><b>Mystery envelope</b><small>Tap to open</small></span></button>` : ''}
       ${moments ? `<span class="lbl">What this year teaches</span>${moments}` : ''}
-      <button class="btn primary wide" data-act="to-event">${res.quiet ? 'On to next year' : 'Continue'}</button>
+      <button class="btn primary wide" data-act="to-event" id="go-on">${res.quiet ? 'On to next year' : 'Continue'}</button>
     </div>`);
   const pc_ = document.getElementById('path');
   if (pc_) drawPath(pc_, res.path);
+  if (res.golden) { setTimeout(() => { SFX.win(); coinBurst(60); }, 900); }
+  if (res.milestones && res.milestones.length) setTimeout(() => SFX.card(), 1200);
+  lastEnvelope = res.envelope || null;
+  startAutoplay();
   const delta = res.nw1 - res.nw0;
   setTimeout(() => rollNumber(document.getElementById('roll'), res.nw0, res.nw1, 1000), 350);
   if (res.state === 'crash') { SFX.crash(); shake(); buzz([60, 40, 120]); } else if (delta >= 0) { SFX.gain(); } else { SFX.loss(); }
   if (delta > Math.abs(res.nw0) * 0.25 && delta > 0) setTimeout(() => coinBurst(50, innerWidth / 2, innerHeight * 0.75), 900);
+}
+
+// 16+: after the reveal, the next step starts by itself unless you tap.
+let autoTimer = 0;
+let lastEnvelope = null;
+function stopAutoplay() { if (autoTimer) clearInterval(autoTimer); autoTimer = 0; const b = document.getElementById('go-on'); if (b && b.dataset.label) b.textContent = b.dataset.label; }
+function startAutoplay() {
+  stopAutoplay();
+  if (!adult() || !P.settings.autoplay || calm()) return;
+  const b = document.getElementById('go-on');
+  if (!b) return;
+  b.dataset.label = b.textContent;
+  let n = 6;
+  autoTimer = setInterval(() => {
+    n -= 1;
+    const btn = document.getElementById('go-on');
+    if (!btn) { stopAutoplay(); return; }
+    if (n <= 3 && n > 0) btn.textContent = `${btn.dataset.label} in ${n}…`;
+    if (n <= 0) { stopAutoplay(); btn.click(); }
+  }, 1000);
 }
 
 function eventCast(id) {
@@ -1220,20 +1760,45 @@ function eventCast(id) {
   return { castId, prop, expr, name, hype: who === 'hype' };
 }
 
+// The face at the top of an event: your partner, the person asking, or the cast.
+function eventFace(v) {
+  const P_ = run.partner;
+  if (v.cat === 'Partner' && P_ && P_.look && Object.keys(P_.look).length) return { html: A.lookPerson(P_.look, { age: run.age, size: 110, sex: P_.sex, expr: v.id === 'separation' ? 'worried' : 'neutral', label: P_.name }), name: P_.name, prop: v.id === 'p_upgrade' ? 'car' : 'payslip' };
+  if (v.id === 'circle') {
+    const x = v.v;
+    if (x.look) return { html: A.lookPerson(x.look, { age: run.age + 10, size: 110, expr: 'neutral', label: x.who }), name: `${x.who} · ${x.rel}`, prop: x.offer ? 'hand' : 'envelope' };
+    return { html: A.castFace('hype', 'neutral', 110, x.who), name: x.who, prop: 'phone' };
+  }
+  if (v.id === 'wedding') return { html: '', name: 'Love', prop: 'rings' };
+  const ec = eventCast(v.id);
+  return { html: A.castFace(ec.castId, ec.expr, 110, ec.name), name: ec.name, prop: ec.prop, hype: ec.hype };
+}
+
 function showEvent() {
   const v = E.eventView(run);
   if (!v) return showCards();
-  const ec = eventCast(v.id);
+  const face = eventFace(v);
+  const title = v.id === 'circle' ? (v.v.offer ? `${v.v.who} has an offer` : v.v.type === 'fraudster' ? `${v.v.who} gets in touch` : `${v.v.who} asks for help`) : v.title;
+  const clue = v.id === 'circle' && v.v.asked ? `<div class="insight clue" style="--ic:var(--violet)"><span class="lbl">You asked questions</span><p>${esc(v.v.clue)}</p></div>` : '';
+  if (v.id === 'wedding') {
+    openModal(`
+    <div class="ev-card"><span class="kicker">Love · Age ${run.age}</span><h2>${esc(v.title)}</h2><p>${esc(v.text)}</p></div>
+    <div class="cands">${v.choices.map((c, i) => (c.person ? `<button class="cand" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}>${A.lookPerson(c.person.look, { age: run.age, size: 84, sex: c.person.sex, label: c.person.name })}<b>${esc(c.person.name)}</b><small>Clue: ${esc(c.person.clue)}</small></button>` : '')).join('')}</div>
+    <div class="choices">${v.choices.map((c, i) => (c.person ? '' : `<button class="choice-btn" data-act="choose" data-i="${i}"><b>${esc(c.label)}</b><small>${esc(c.note)}</small></button>`)).join('')}</div>
+    <p class="note">A clue is right about 70% of the time. The truth comes out over your first years together.</p>`);
+    return;
+  }
   openModal(`
-    <div class="ev-card ${ec.hype ? 'hype' : ''}">
-      <div class="ev-art"><span class="ev-cast">${A.castFace(ec.castId, ec.expr, 110, ec.name)}</span><span class="ev-prop">${A.icon(ec.prop, 84, esc(v.title))}</span></div>
-      <span class="kicker">${esc(ec.name)} · ${esc(v.cat)} · Age ${run.age}</span>
-      <h2>${esc(v.title)}</h2>
+    <div class="ev-card ${face.hype ? 'hype' : ''}">
+      <div class="ev-art"><span class="ev-cast">${face.html}</span><span class="ev-prop">${A.icon(face.prop, 84, esc(title))}</span></div>
+      <span class="kicker">${esc(face.name)} · ${esc(v.cat)} · Age ${run.age}</span>
+      <h2>${esc(title)}</h2>
       <p>${esc(v.text)}</p>
-      ${ec.hype ? `<p class="hype-note">${A.icon('warn', 18, '')} You've seen this face before.</p>` : ''}
+      ${face.hype ? `<p class="hype-note">${A.icon('warn', 18, '')} You've seen this face before.</p>` : ''}
     </div>
-    <div class="choices">${v.choices.map((c, i) => `<button class="choice-btn" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}><b>${esc(c.label)}</b><small>${c.ok ? fxIcons(c.note) : 'Not enough cash'}</small></button>
-      ${c.math ? `<button class="linkish math-btn" data-act="math" data-i="${i}">Show the maths</button><div class="math" id="math-${i}" hidden>${mathHTML(c.math)}</div>` : ''}`).join('')}</div>`);
+    ${clue}
+    <div class="choices">${v.choices.map((c, i) => `<button class="choice-btn ${c.act === 'ask' ? 'ask' : ''}" data-act="choose" data-i="${i}" ${c.ok ? '' : 'disabled'}><b>${esc(c.label)}</b><small>${c.ok ? fxIcons(c.note) : 'Not enough cash'}</small></button>
+      ${c.math && run.think ? `<button class="linkish math-btn" data-act="math" data-i="${i}">Show the maths</button><div class="math" id="math-${i}" hidden>${mathHTML(c.math)}</div>` : ''}`).join('')}</div>`);
 }
 
 function showOutcome(text) {
@@ -1326,12 +1891,16 @@ function endRun(res) {
     if (run.mode === 'classic' && run.asc === P.maxAsc && P.maxAsc < ASCENSION.length - 1) { P.maxAsc += 1; res.ascUp = P.maxAsc; }
   }
   if (res.scammed) P.scamLesson = true;
+  for (const k of Object.keys(P.trophies)) P.trophies[k] = [...new Set([...(P.trophies[k] || []), ...((run.got && run.got[k]) || [])])];
+  if (res.life && res.reason !== 'quit') P.bestStars = Math.max(P.bestStars || 0, res.life.stars);
+  if (run.mode === 'sprint' && !P.sprintDone) { P.sprintDone = true; res.sprintUnlock = true; }
+  if (run.mode === 'daily' && res.reason !== 'quit') bumpStreak();
   P.principles = [...new Set([...(P.principles || []), ...(res.seenP || [])])];
   P.fcAll = [...(P.fcAll || []), ...run.fc.map((x) => ({ p: x.p, ideal: x.ideal, up: x.up }))].slice(-400);
-  if (run.mode === 'daily') P.daily[run.seed.replace('daily-', '')] = { score: res.score, reason: res.reason, age: res.age, grid: E.emojiGrid(run) };
+  if (run.mode === 'daily') P.daily[run.seed.replace('daily-', '')] = { score: res.score, reason: res.reason, age: res.age, grid: E.emojiGrid(run), stars: res.life ? res.life.stars : 0 };
   if (run.mode === 'weekly' && res.reason !== 'quit') P.weekly[weekNo()] = Math.max(P.weekly[weekNo()] || 0, res.score);
   if (run.mode === 'era') { const prev = P.eras[run.eraId]; P.eras[run.eraId] = { score: Math.max(prev ? prev.score : 0, res.score), won: won || (prev && prev.won) }; }
-  if (run.mode === 'duel') { const code = run.seed.replace('duel-', ''); const prev = P.duels[code]; if (!prev || res.score > prev.score) P.duels[code] = { score: res.score, reason: res.reason, age: res.age }; }
+  if (run.mode === 'duel') { const code = run.seed.replace('duel-', ''); const prev = P.duels[code]; if (!prev || res.score > prev.score) P.duels[code] = { score: res.score, reason: res.reason, age: res.age, stars: res.life ? res.life.stars : 0 }; }
   res.gained = gained;
   res.newTerms = newTerms;
   res.unlocks = [
@@ -1340,6 +1909,7 @@ function endRun(res) {
     ...ERAS.filter((e) => e.unlock > before && e.unlock <= P.wisdom).map((e) => `Era: ${e.name}`),
   ];
   if (res.ascUp) res.unlocks.push(`Ascension ${res.ascUp}`);
+  if (res.sprintUnlock) res.unlocks.unshift('The full life: every mode, and a whole lifetime to play');
   const done = run;
   run = null;
   persist();
@@ -1362,6 +1932,7 @@ function resultTitle(r) {
     case 'missed': return ['lose', 'Target missed'];
     case 'bankrupt': return ['lose', `Bankrupt at ${r.age}`];
     case 'quit': return ['lose', 'Run abandoned'];
+    case 'clock': if (r.sprint) return ['win', `Ten years done, age ${r.age}`]; return ['lose', `Still working at ${r.age}`];
     default: return ['lose', `Still working at ${r.age}`];
   }
 }
@@ -1369,9 +1940,30 @@ function resultTitle(r) {
 function shareText(done) {
   const r = done.result;
   const outcome = r.reason === 'free' ? `Free at ${r.age}` : r.reason === 'bankrupt' ? `Bankrupt at ${r.age}` : `Still working at ${r.age}`;
-  if (done.mode === 'daily') return `Tycoon Rush Daily ${done.seed.replace('daily-', '')}\n${E.emojiGrid(done)}\n${outcome} · Score ${r.score.toLocaleString()}\n${GAME_URL}`;
-  if (done.mode === 'duel') return `Tycoon Rush duel ${done.seed.replace('duel-', '')}: ${outcome}, score ${r.score.toLocaleString()}. Same market, can you beat me?\n${E.emojiGrid(done)}\n${GAME_URL}`;
-  return `Tycoon Rush: ${outcome}, score ${r.score.toLocaleString()}.\n${E.emojiGrid(done)}\n${GAME_URL}`;
+  const st = r.life ? ` · Life ${r.life.stars}★` : '';
+  const link = resultLink(done);
+  if (done.mode === 'daily') return `Tycoon Rush Daily ${done.seed.replace('daily-', '')}\n${E.emojiGrid(done)}\n${outcome}${st} · Score ${r.score.toLocaleString()}\n${link}`;
+  if (done.mode === 'duel') return `Tycoon Rush duel ${done.seed.replace('duel-', '')}: ${outcome}${st}, score ${r.score.toLocaleString()}. Same market, can you beat me?\n${E.emojiGrid(done)}\n${link}`;
+  return `Tycoon Rush: ${outcome}${st}, score ${r.score.toLocaleString()}.\n${E.emojiGrid(done)}\n${link}`;
+}
+
+const starsText = (n) => `${'★'.repeat(Math.floor(n))}${n % 1 ? '½' : ''}${'☆'.repeat(5 - Math.ceil(n))}`;
+
+function lifeScoreHTML(r) {
+  if (!r.life) return '';
+  const L = r.life;
+  const bar = (name, v, max) => `<div class="ls-part"><span>${name}</span><div class="jbar"><i style="width:${Math.round((v / max) * 100)}%"></i></div><b>${v.toFixed(1)}/${max}</b></div>`;
+  return `<div class="life-score"><span class="lbl">Life Score</span><div class="stars-big" aria-label="${L.stars} of 5 stars">${starsText(L.stars)}</div>
+    ${bar('Freedom', L.parts.freedom, 2)}${bar('Joy', L.parts.joy, 1)}${bar('Family', L.parts.family, 1)}${bar('People', L.parts.people, 1)}
+    <p class="note">${r.sprint ? 'Ten years in. A Sprint can\'t reach freedom, but the habits you built here are the ones that get you there.' : 'Free early, happy, a strong family and a good name. Many different lives can reach five stars.'}</p></div>`;
+}
+
+function heirHTML(done) {
+  const r = done.result;
+  if (!adult() || !['free', 'clock'].includes(r.reason) || r.sprint || done.eraId) return '';
+  const kid = (r.kids || []).filter((k) => k.age >= 16).sort((a, b) => b.age - a.age)[0];
+  if (!kid) return '';
+  return `<button class="big-row heir" data-act="heir">${kid.look ? A.lookPerson(kid.look, { age: kid.age, size: 56, sex: kid.sex }) : A.icon('family', 44, '')}<span><b>Carry on as ${esc(kid.name)}</b><small>Generation ${(done.gen || 1) + 1}: they inherit ${E.fmt(Math.max(0, r.nw) * 0.9, done.currency)} after costs, and start at ${Math.max(22, kid.age)}.</small></span><span>▸</span></button>`;
 }
 
 function results(done) {
@@ -1394,6 +1986,8 @@ function results(done) {
     <span class="kicker">${esc(E.MODES[done.mode].name)} · ${esc(CHARACTERS[done.char].name)}${done.asc ? ` · Ascension ${done.asc}` : ''}</span>
     <div class="res-scene">${resultScene(done)}</div>
     <h1 class="res-title ${tone_}">${esc(title)}</h1>
+    ${lifeScoreHTML(r)}
+    ${adult() && r.reason === 'clock' && r.ratio >= 0.85 ? `<button class="chip-line near-miss" data-act="again">${A.icon('flame', 22, '')} You were ${Math.max(1, Math.round((1 - r.ratio) * 100))}% from freedom. One more try? ▸</button>` : ''}
     <div class="score-box"><span class="lbl">Score</span><b>${r.score.toLocaleString()}</b></div>
     <div class="chart-wrap"><canvas class="chart" id="chart"></canvas>
       <div class="legend"><span><i style="background:#3ddc97"></i>Net worth</span><span><i style="background:#ffc53d"></i>Freedom Number (25× costs)</span></div></div>
@@ -1411,7 +2005,9 @@ function results(done) {
       ${r.unlocks.length ? `<div class="unlock-list">${r.unlocks.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}</div>
     ${share ? `<div class="share"><span class="lbl">Share</span><pre id="share-text">${esc(text)}</pre>
       <div class="share-actions"><button class="btn small" data-act="copy">Copy</button><a class="btn small" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a></div></div>` : ''}
+    ${heirHTML(done)}
     <button class="btn primary wide" data-act="report">${A.icon('payslip', 24, '')} Get my PDF report</button>
+    <button class="btn wide" data-act="share-card">${A.icon('phone', 22, '')} Share a picture of my life</button>
     <div class="share-actions">
       <button class="btn" data-act="feedback">${A.icon('envelope', 22, '')} Send feedback</button>
       <button class="btn" data-act="share-game">${A.icon('phone', 22, '')} Invite a friend</button>
@@ -1433,7 +2029,7 @@ const won = (r) => r.reason === 'free' || r.reason === 'target';
 
 function resultScene(done) {
   const r = done.result;
-  const opts = r.reason === 'free' ? { stage: 4, mood: 'boom', expr: 'cheer', label: 'You relax on the beach, free' }
+  const opts = r.reason === 'free' ? { stage: 4, beach: true, mood: 'boom', expr: 'cheer', label: 'You relax on the beach, free' }
     : r.reason === 'bankrupt' ? { stage: 0, mood: 'crash', expr: 'shocked', label: 'An empty room after going broke' }
       : r.reason === 'target' ? { mood: 'recov', expr: 'cheer', label: 'You came through the storm' }
         : { mood: 'steady', expr: 'tired', label: 'Still working' };
@@ -1561,22 +2157,20 @@ function glossarySheet() {
 
 function how() {
   page('How to play', `
-    <p><b>New here? Start with the Wisdom Journey.</b> It goes one year at a time and teaches as you play.</p>
+    <p><b>The goal:</b> build a life worth showing off. Get free (money that comes by itself covers your costs), stay happy, keep your family strong and your name good. The Life Score gives up to five stars for all four.</p>
     <ol class="how">
-      <li><b>Think.</b> The probability lens shows base rates: how often each market mood follows the last one. Headlines are evidence, right 80% of the time.</li>
-      <li><b>Forecast.</b> Say how likely the index is to beat inflation. After you commit, you see the careful answer, and every forecast is scored.</li>
-      <li><b>Plan.</b> Pay yourself first, pick a Graham-style mix, and switch on rebalancing. The plan runs every year, even when you are scared.</li>
-      <li><b>Review.</b> After each year, a mentor points out what it teaches, from Babylon, Rich Dad, Graham, Hill, Housel or probability.</li>
+      <li><b>Year</b> is your home screen: your home and family, three headlines, and the big button to live the year. Then comes the reveal, one life event, and a card.</li>
+      <li><b>Life</b>: where you live, how safe it is, your car, your partner and your children's schools. Everyday spending sets your clothes and your joy. Two frugal years in a row bring burnout.</li>
+      <li><b>Money</b>: tap an asset to put cash in or take it out. Set "pay yourself first". After your second game, <b>Think</b> opens: base rates, headlines, Mr. Market and bet sizing.</li>
+      <li><b>Map</b> (after 3 years): buy land across your country. Check the papers first; news about roads, airports and floods moves prices, and some headlines are rumours.</li>
+      <li><b>Circle</b>: relatives, friends and strangers ask for money. Each has a hidden character. Ask questions, help the genuine, set limits with takers, and never share codes.</li>
+      <li><b>Me</b>: your look, reports, the Library, settings and sharing.</li>
     </ol>
-    <p class="lbl">The basics, in every mode</p>
+    <p class="lbl">Good to know</p>
     <ol class="how">
-      <li>Each turn is one to four years of your life. Your salary lands, your living costs go out, and whatever is left sits in cash.</li>
-      <li>Read the three headlines. Most hint at what the next two years hold. Some are noise, and some are scams.</li>
-      <li>Tap an asset to move cash into it or out of it. Each one behaves differently in booms and crashes.</li>
-      <li>Press <b>Live 2 years</b>. Markets move, rent and profits arrive, and life throws you one event with a choice.</li>
-      <li>Pick one of three cards. Skills, tools and gambles stack into combos.</li>
-      <li>You win when passive income covers your living costs. You lose if you are broke for four years in a row, or reach 60 still working.</li>
-      <li>Higher lifestyle means more joy but a bigger Freedom Number. Too little joy leads to burnout.</li>
+      <li>Every game draws two world rules, so the best plan changes.</li>
+      <li>Near the finish, a late crash hurts most. Keep a few years of costs in savings.</li>
+      <li>You lose if you are broke for four years in a row. At 60 the game ends either way.</li>
       <li>Every run earns wisdom, which unlocks cards, characters and eras.</li>
     </ol>
     <p class="note">Everything is fictional, and it's a game, not financial advice. The lessons are real though.</p>`);
@@ -1590,6 +2184,10 @@ function settings(confirmReset = false) {
     ${row('timer', 'The market doesn\'t wait', 'A 20-second clock on every Classic turn.')}
     ${row('noBlitzTimer', 'No clock in Blitz', 'Take your time, even in Blitz.')}
     ${row('calm', 'Reduce motion', 'No shaking, bursts or rolling numbers.')}
+    ${adult() ? row('autoplay', 'Autoplay', 'After each year\'s reveal, carry on by itself in a few seconds unless you tap.') : ''}
+    ${adult() ? row('reminders', 'Reminders', 'A notification when your partner has news or rent is due. Needs permission; works best when the game is installed.') : ''}
+    <section class="field"><span class="lbl">Age mode</span><button class="btn wide" data-act="age-screen">${P.ageMode === 'u16' ? 'Under 16 (protected)' : '16 or over'} · change</button></section>
+    <section class="field"><span class="lbl">Giving wording (optional)</span><div class="seg">${Object.entries(FAITHS).map(([k, v]) => `<button class="${(P.faith || 'none') === k ? 'on' : ''}" data-act="faith" data-v="${k}">${esc(v.name)}</button>`).join('')}</div><span class="note">Changes only the words (tithe, zakat or charity). It never changes the maths.</span></section>
     <section class="field"><label class="lbl" for="cur">Your money</label><select id="cur" class="select">${Object.entries(CURRENCIES).map(([id, c]) => `<option value="${id}" ${s.currency === id ? 'selected' : ''}>${esc(c.sym.trim())} ${esc(c.name)}</option>`).join('')}</select></section>
     <div class="share-actions"><button class="btn" data-act="region-screen">${A.icon('map', 22, '')} Region</button><button class="btn" data-act="look-screen">${A.icon('smile', 22, '')} My look</button></div>
     <button class="btn wide" data-act="replay-intro">Watch the intro again</button>
@@ -1609,6 +2207,7 @@ function dailyScreen() {
   page('Daily Market', `
     <p class="muted">You have played today's market. A new one opens at midnight.</p>
     <div class="score-box"><span class="lbl">Today's score</span><b>${rec.score.toLocaleString()}</b></div>
+    ${P.streak.n ? `<div class="insight" style="--ic:var(--orange)"><span class="lbl">${A.icon('flame', 18, '')} Streak: ${P.streak.n} day${P.streak.n > 1 ? 's' : ''}</span><p>${adult() ? `Each day in a row adds 1% to your starting cash in new games (up to 30%). Miss a day and it resets, except for one free skip day a week. Streak freezes in hand: ${P.streak.freezes || 0}.` : 'Your streak never resets. Play when you like.'}</p>${adult() ? `<button class="btn small" data-act="freeze" ${P.wisdom >= 20 ? '' : 'disabled'}>Buy a streak freeze (20 wisdom)</button>` : ''}</div>` : ''}
     <div class="share"><span class="lbl">Share</span><pre id="share-text">${esc(text)}</pre>
       <div class="share-actions"><button class="btn small" data-act="copy">Copy</button><a class="btn small" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">WhatsApp</a></div></div>`);
 }
@@ -1689,7 +2288,7 @@ const ACT = {
     if (!choice || choice.outcome !== 'accepted') { P.installLater = Date.now(); saveProfile(); }
   },
   'install-later': () => { P.installLater = Date.now(); saveProfile(); closeLayer(); },
-  home: () => { persist(); home(); },
+  home: () => { setTeaser(); stopAutoplay(); persist(); home(); },
   resume: () => resume(),
   setup: (d) => setup(d.mode),
   'pick-char': (d) => { P.setup.char = d.id; saveProfile(); setup(); },
@@ -1711,8 +2310,17 @@ const ACT = {
   'region-screen': () => regionScreen(),
   region: (d) => { P.region = d.id; P.settings.currency = REGIONS[d.id].currencies[0]; saveProfile(); SFX.tap(); regionScreen(); },
   'look-screen': () => { if (!P.region) P.region = 'westafrica'; lookScreen(); },
-  look: (d) => { P.look[d.k] = d.k === 'hair' ? d.v : Number(d.v); saveProfile(); SFX.tap(); lookScreen(); },
-  'look-done': () => { if (!P.region) P.region = 'westafrica'; P.onboarded = true; saveProfile(); SFX.card(); home(); },
+  look: (d) => {
+    const k = d.k;
+    P.look[k] = ['hair', 'sex', 'build', 'wear'].includes(k) ? d.v : ['hijab', 'beard'].includes(k) ? !!d.v : Number(d.v);
+    if (k === 'sex' && d.v === 'f') P.look.beard = false;
+    saveProfile(); SFX.tap(); lookScreen();
+  },
+  'look-done': () => { if (!P.region) P.region = 'westafrica'; P.onboarded = true; saveProfile(); SFX.card(); if (!P.ageMode) ageScreen(); else home(); },
+  'age-mode': (d) => { P.ageMode = d.v; if (d.v === 'u16') { P.settings.autoplay = false; P.settings.reminders = false; } saveProfile(); SFX.card(); home(); },
+  'age-screen': () => ageScreen(),
+  sprint: () => startRun({ mode: 'sprint', char: 'graduate', currency: P.settings.currency, rules: false }),
+  board: () => boardScreen(),
   term: (d) => termSheet(d.id),
   'share-game': () => shareGame(),
   report: () => reportSheet(lastDone),
@@ -1739,7 +2347,8 @@ const ACT = {
   lens: () => { P.settings.lens = !P.settings.lens; saveProfile(); renderGame(); },
   fc: (d) => {
     if (run.learnMode && run.forecast != null) return;
-    if (E.setForecast(run, Number(d.p))) { SFX.tap(); persist(); renderGame(); const t = document.querySelector('.think'); if (t && run.learnMode) t.scrollIntoView({ block: 'nearest' }); }
+    const inSheet = !!layer.querySelector('.sheet');
+    if (E.setForecast(run, Number(d.p))) { SFX.tap(); persist(); renderGame(); if (inSheet) thinkSheet(); }
   },
   pyf: (d) => { if (E.setPlan(run, { pyf: Number(d.v) })) { SFX.tap(); persist(); renderGame(); } },
   mix: (d) => { if (E.setPlan(run, { mix: d.k })) { SFX.tap(); persist(); renderGame(); } },
@@ -1766,6 +2375,7 @@ const ACT = {
   era: (d) => startRun({ mode: 'era', char: 'graduate', eraId: d.id }),
   duel: () => duel(),
   'duel-new': () => duel(randomCode()),
+  'duel-code': (d) => duel(d.code),
   'duel-copy': () => { const v = document.getElementById('code').value.trim().toUpperCase(); copyText(`Play my Tycoon Rush duel: code ${v}\n${GAME_URL}`); },
   'duel-go': () => {
     const v = (document.getElementById('code').value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1777,16 +2387,61 @@ const ACT = {
   coll: (d) => collection(d.tab),
   how: () => how(),
   settings: () => settings(),
-  toggle: (d) => { P.settings[d.key] = !P.settings[d.key]; saveProfile(); applyCalm(); settings(); },
+  toggle: (d) => {
+    P.settings[d.key] = !P.settings[d.key];
+    saveProfile(); applyCalm();
+    if (d.key === 'reminders' && P.settings.reminders) setupReminders();
+    settings();
+  },
+  faith: (d) => { P.faith = d.v; saveProfile(); settings(); },
   'set-cur': (d) => { P.settings.currency = d.id; saveProfile(); settings(); },
   reset: () => settings(true),
   'reset-yes': () => { const keep = P.settings; P = { ...structuredClone(DEFAULTS), settings: keep }; run = null; saveProfile(); toast('Progress erased'); home(); },
 
+  tab: (d) => {
+    const lock = d.t !== 'year' && tabLock(d.t);
+    if (lock) { toast(lock); return; }
+    SFX.tap(); tab = d.t; closeLayer(); persist(); renderGame(); window.scrollTo(0, 0);
+  },
+  rules: () => rulesSheet(),
+  think: () => thinkSheet(),
+  costs: () => costsSheet(),
+  move: () => { moveCtx = null; moveSheet(); },
+  mv: (d) => {
+    const c = moveCtx;
+    if (d.k === 'buy') c.buy = d.v === '1'; else c[d.k] = d.v;
+    if (!HOMES[c.home].buy) c.buy = false;
+    moveSheet();
+  },
+  'mv-go': () => {
+    const c = moveCtx;
+    const ok = E.moveHome(run, c.home, c.district, { buy: c.buy, mortgage: c.mortgage, keepOld: c.keepOld });
+    if (!ok) { toast(c.buy ? 'Not enough cash for the deposit and moving costs.' : 'You can\'t move there right now.'); return; }
+    SFX.buy(); toast(c.buy ? 'Keys in hand. Welcome home.' : 'Moved in. New neighbours!');
+    closeLayer(); persist(); renderGame();
+  },
+  carsheet: () => carSheet(),
+  buycar: (d) => {
+    if (E.buyCar(run, d.id, d.loan === '1')) { SFX.buy(); toast(d.id === 'none' ? 'Car sold. Hello, bus.' : 'New wheels!'); closeLayer(); persist(); renderGame(); }
+    else toast('Not enough cash for that.');
+  },
+  security: (d) => { if (E.setSecurity(run, d.k, !run.home[d.k])) { SFX.tap(); persist(); renderGame(); } else if (d.k === 'cctv') toast('Not enough cash for CCTV.'); },
+  school: (d) => { if (E.setSchool(run, Number(d.i), d.id)) { SFX.tap(); persist(); renderGame(); } },
+  uni: (d) => { if (E.setUni(run, Number(d.i), d.v === '1')) { SFX.tap(); persist(); renderGame(); } },
+  zone: (d) => { if (!E.mapOpen(run)) { toast('The Map opens after your third year.'); return; } SFX.tap(); zoneSheet(d.id); },
+  landcheck: (d) => { if (E.checkLand(run, d.id)) { SFX.tap(); persist(); renderGame(); zoneSheet(d.id); } },
+  landbuy: (d) => { if (E.buyLand(run, d.id)) { SFX.buy(); toast('The plot is yours.'); persist(); renderGame(); zoneSheet(d.id); } },
+  landuse: (d) => { if (E.setLandUse(run, Number(d.i), d.u)) { SFX.tap(); if (d.u === 'build') toast('Built. The rent starts next year.'); persist(); renderGame(); } else if (d.u === 'build') toast('Building costs twice the land\'s value.'); },
+  sellland: (d) => { if (E.sellLand(run, Number(d.i))) { SFX.sell(); persist(); renderGame(); } },
+  person: (d) => personSheet(d.id),
+  giving: (d) => { if (E.setGiving(run, Number(d.v))) { SFX.tap(); persist(); renderGame(); } },
+  'settings-faith': () => settings(),
   menu: () => menuSheet(),
   close: () => closeLayer(),
   scrim: (d, el, e) => { if (e.target === el) closeLayer(); },
   abandon: () => {
-    openSheet(`${sheetHead('', 'Abandon this run?')}<p>You will get a small amount of wisdom for the words you learned, and no score.</p><button class="btn danger wide" data-act="abandon-yes">Abandon</button><button class="btn wide" data-act="close">Keep playing</button>`);
+    const lose = adult() ? `<div class="insight" style="--ic:var(--loss)"><span class="lbl">If you quit now you lose</span><ul class="clues"><li>${run.age - run.startAge} years of your life: ${f(E.netWorth(run))} built up</li>${run.partner ? `<li>Your life with ${esc(run.partner.name)}${run.kids.length ? ` and ${run.kids.length} child${run.kids.length > 1 ? 'ren' : ''}` : ''}</li>` : ''}<li>Your Life Score and the points for it</li>${run.milestones.length ? `<li>${run.milestones.length} milestone${run.milestones.length > 1 ? 's' : ''} on this run</li>` : ''}</ul></div>` : '';
+    openSheet(`${sheetHead('', 'Abandon this run?')}${lose}<p>You will get a small amount of wisdom for the words you learned, and no score. Your game is saved if you just go home instead.</p><button class="btn danger wide" data-act="abandon-yes">Abandon</button><button class="btn wide" data-act="close">Keep playing</button>`);
   },
   'abandon-yes': () => { const res = E.abandon(run); closeLayer(); endRun(res); },
   'glossary-sheet': () => glossarySheet(),
@@ -1838,13 +2493,45 @@ const ACT = {
   next: () => nextTurn(),
   playout: () => { const r = pendingPlay; pendingPlay = null; playout(r || run.lastResult); },
   'to-event': () => showEvent(),
-  choose: (d) => { const text = E.chooseEvent(run, Number(d.i)); if (text === null) return; SFX.tap(); persist(); showOutcome(text); },
+  choose: (d) => {
+    const wasCircle = run.pending && run.pending.id === 'circle';
+    const text = E.chooseEvent(run, Number(d.i));
+    if (text === null) return;
+    SFX.tap();
+    if (wasCircle) run.flags.circleNew = true;
+    persist();
+    if (text === E.AGAIN) { showEvent(); return; }
+    showOutcome(text);
+  },
   'to-cards': () => showCards(),
   take: (d) => { SFX.card(); takeCard(d.id); },
   results: () => results(lastDone),
+  heir: () => {
+    const d = lastDone;
+    const r = d && d.result;
+    const kid = r && (r.kids || []).filter((k) => k.age >= 16).sort((a, b) => b.age - a.age)[0];
+    if (!kid) return;
+    startRun({ mode: d.mode === 'journey' ? 'journey' : 'classic', char: 'graduate', currency: d.currency, inherit: Math.max(0, r.nw) * 0.9, gen: (d.gen || 1) + 1, startAge: Math.max(22, kid.age), sex: kid.sex });
+    run.look = { ...P.look, ...(kid.look || {}), sex: kid.sex };
+    run.heirName = kid.name;
+    persist(); renderGame();
+    toast(`${kid.name} takes over. Generation ${run.gen}.`);
+  },
+  'share-card': () => shareCard(),
+  freeze: () => { if (P.wisdom < 20) return; P.wisdom -= 20; P.streak.freezes = (P.streak.freezes || 0) + 1; saveProfile(); toast('Streak freeze saved for a day you miss.'); dailyScreen(); },
+  'break-on': () => { closeLayer(); if (run && run.phase === 'alloc') startTimer(); },
+  envelope: (d, el) => {
+    const e = lastEnvelope;
+    if (!e || el.classList.contains('open')) return;
+    el.classList.add('open');
+    SFX.card(); if (e.big) coinBurst(50);
+    const what = e.kind === 'cash' ? `${f(e.amt)} in cash` : e.kind === 'wisdom' ? `${e.amt} wisdom` : `a card: ${e.card}`;
+    el.innerHTML = `${A.icon(e.big ? 'sparkle' : 'gift', 44, '')}<span><b>${e.big ? 'Big one!' : 'Inside:'}</b><small>${esc(what)}</small></span>`;
+  },
   again: () => {
     const d = lastDone;
     if (!d) return home();
+    if (d.mode === 'sprint') return setup('journey');
     if (d.mode === 'daily') return dailyScreen();
     if (d.mode === 'duel') return duel(d.seed.replace('duel-', ''));
     if (d.mode === 'era') return eras();
@@ -1853,6 +2540,16 @@ const ACT = {
   },
   copy: () => copyText(document.getElementById('share-text').textContent),
 };
+
+// Leaving mid-year sets up a cliffhanger: that event opens first next time.
+function setTeaser() {
+  if (!run || run.phase !== 'alloc' || run.teaser || run.eraId) return;
+  const c = run.circle && run.circle[run.turn % Math.max(1, run.circle.length)];
+  if (run.partner && !run.partner.legacy) { run.teaser = `${run.partner.name} says: "We need to talk about money…"`; run.forceEvent = 'p_budget'; }
+  else if (c && run.age - run.startAge >= 2) { run.teaser = `${c.name} left a voice note: "Call me back, it's urgent…"`; run.forceEvent = 'circle'; }
+  else { run.teaser = 'A letter from your boss is waiting on your desk…'; run.forceEvent = 'promo'; }
+  saveTeaser();
+}
 
 function resume() {
   run = P.run;
@@ -1864,6 +2561,7 @@ function resume() {
 }
 
 document.addEventListener('click', (e) => {
+  if (autoTimer && e.isTrusted && !(e.target.closest('#go-on'))) stopAutoplay();
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   const fn = ACT[el.dataset.act];
@@ -1889,15 +2587,18 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id === 'mort') updatePropSlider();
   if (e.target.id === 'me-bizManaged') { P.me.bizManaged = e.target.checked; saveProfile(); }
+  if (['me-home', 'me-district', 'me-car'].includes(e.target.id)) { P.me[e.target.id.slice(3)] = e.target.value; saveProfile(); }
   if (e.target.id === 'me-liveIn') { P.me.liveIn = e.target.checked; saveProfile(); const pv = document.getElementById('me-preview'); if (pv) pv.innerHTML = mePreview(); }
   if (e.target.id === 'cur') { P.settings.currency = e.target.value; saveProfile(); if (app.querySelector('.char-strip')) setup(); }
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && layer.querySelector('.sheet')) closeLayer(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { persist(); saveTeaser(); } });
 addEventListener('resize', () => { if (run && run.phase === 'alloc') drawSparks(); });
 
 applyCalm();
+ingestLink();
 home();
+loadNewsPack();
 offerInstall();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

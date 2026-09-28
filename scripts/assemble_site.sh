@@ -52,8 +52,12 @@ fi
 if [ -d "$root/tycoon" ]; then
   mkdir -p "$out/tycoon"
   cp "$root/tycoon/index.html" "$root/tycoon/sw.js" "$root/tycoon/manifest.webmanifest" "$root/tycoon/icon.svg" "$out/tycoon/"
+  # App icons for the home screen; the service worker caches these too, so a
+  # missing one would stop the offline install.
+  cp "$root"/tycoon/*.png "$out/tycoon/" 2>/dev/null || true
   cp -R "$root/tycoon/js" "$out/tycoon/js"
   cp -R "$root/tycoon/fonts" "$out/tycoon/fonts"
+  if [ -d "$root/tycoon/news" ]; then cp -R "$root/tycoon/news" "$out/tycoon/news"; fi
   echo "Game       -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
 fi
 

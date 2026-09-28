@@ -14,7 +14,7 @@ function play(opts, bot = () => {}) {
     if (run.learnMode) E.setForecast(run, E.upOdds(run).ideal);
     assert.ok(E.live(run));
     let ci = 0;
-    while (run.phase === 'event' && E.chooseEvent(run, ci) === null) ci += 1;
+    for (let g = 0; run.phase === 'event' && g < 20; g++) { const out = E.chooseEvent(run, ci); ci = out === E.AGAIN ? 0 : ci + 1; }
     E.makeOffer(run, E.unlockedCards(999));
     res = E.pickCard(run, run.quiet ? null : run.offer[0]);
   }
@@ -133,15 +133,18 @@ test('buying below fair value really does pay more (margin of safety)', () => {
 
 test('paying yourself first never borrows', () => {
   // Pay covers living costs but not a 50% plan on top: the plan gets what is left.
-  const run = E.newRun({ mode: 'journey', char: 'heir', currency: 'USD', seed: 'pyf', aim: 45 });
+  const run = E.newRun({ mode: 'journey', char: 'graduate', currency: 'USD', seed: 'pyf', aim: 45 });
   run.cash = 0;
   E.setLife(run, 1);
   E.setPlan(run, { pyf: 0.5 });
   E.setForecast(run, 0.5);
+  const before = run.cash;
   const res = E.live(run);
   assert.ok(res.pyfShort > 0);
   assert.ok(res.pyf > 0);
-  assert.ok(run.cash >= -1e-6, String(run.cash));
+  // The plan only invests what pay left over after living costs.
+  const left = before + res.flows.filter((x) => ['Salary', 'Living costs', 'Giving', 'Car loan repaid'].includes(x.label) || x.label.endsWith('\'s pay')).reduce((s, x) => s + x.v, 0);
+  assert.ok(res.pyf <= left + 1e-6, `${res.pyf} vs ${left}`);
 });
 
 test('journey years alternate between events and quiet years, with forecasts scored', () => {

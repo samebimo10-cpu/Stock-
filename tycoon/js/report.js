@@ -7,7 +7,7 @@
 // the currency code (NGN 2.4M) rather than its symbol.
 
 import * as E from './engine.js';
-import { CURRENCIES, CHARACTERS, STATE_INFO, ASSETS, LESSONS, LIFESTYLES } from './content.js';
+import { CURRENCIES, CHARACTERS, STATE_INFO, ASSETS, LESSONS, LIFESTYLES, HOMES, DISTRICTS } from './content.js';
 import { PRINCIPLES, BOOKS } from './learn.js';
 
 // ------------------------------------------------------------------ a tiny PDF writer
@@ -200,6 +200,26 @@ export function judge(run) {
     `Passive income covers ${Math.round(prog * 100)}% of your bowl${run.result && run.result.reason === 'free' ? `, free at ${run.result.age}` : ''}.`,
     aimScore >= 0.85 ? 'Goal reached. Consider what "enough" means to you now.' : 'Write a date on the goal and check it each year; adjust the plan, not the goal.', 'h_aim');
 
+  if (run.partner || (run.kids && run.kids.length) || (run.flags && run.flags.separated)) {
+    const P = run.partner;
+    const kids = run.kids || [];
+    const trust = P ? P.trust / 100 : 0.2;
+    const school = kids.length ? kids.reduce((s, k) => s + (k.schoolYrs ? k.upSum / k.schoolYrs / 0.2 : 0.3), 0) / kids.length : 0.6;
+    const fam = 0.6 * trust + 0.4 * clamp(school, 0, 1) - (run.flags.separated ? 0.3 : 0);
+    add('family', 'Family and home', fam,
+      `${P ? `Married to ${P.name}, trust ${Math.round(P.trust)}/100${P.revealed ? ` (a ${P.type})` : ''}` : run.flags.separated ? 'Separated along the way' : 'Single'}${kids.length ? `; ${kids.length} child${kids.length > 1 ? 'ren' : ''}` : ''}. Home: ${(HOMES[run.home.id] || {}).name || ''} in a ${((DISTRICTS[run.home.district] || {}).name || '').toLowerCase()}.`,
+      fam >= 0.85 ? 'A strong household. Keep budgeting together.' : 'Frugal living, a cramped home and money secrets all cost trust. Budget together and give children the best school you can afford.', 'p_reasonable');
+  }
+  if (run.circle && run.circle.length) {
+    const given = run.circle.reduce((s, c) => s + c.given, 0);
+    const back = run.circle.reduce((s, c) => s + c.returned, 0);
+    const lost = run.circle.filter((c) => ['taker', 'schemer'].includes(c.type)).reduce((s, c) => s + c.given - c.returned, 0);
+    const ppl = 0.7 * (run.rep / 100) + 0.3 * Math.min(1, (run.giving || 0) / 0.05) - Math.min(0.3, lost / Math.max(1, run.salary));
+    add('people', 'Your Circle and giving', ppl,
+      `Reputation ${Math.round(run.rep)}/100. Gave ${money(given, run.currency)} to people you know, got ${money(back, run.currency)} back${lost > 0 ? `; ${money(lost, run.currency)} went to takers and schemers` : ''}.${run.giving ? ` Giving jar: ${Math.round(run.giving * 100)}% of income.` : ''}`,
+      ppl >= 0.85 ? 'Generous and wise. Your name will help you when trouble comes.' : 'Ask questions before sending money. Help the genuine, set limits with takers.', 'b_lend');
+  }
+
   if (run.quizAsked && run.quizAsked.length) {
     add('learn', 'Learning the ideas', run.quizRight / run.quizAsked.length,
       `Answered ${run.quizRight} of ${run.quizAsked.length} mentor questions correctly.`,
@@ -262,6 +282,22 @@ export function buildReport(run, { name = '', date = new Date(), modeName = '', 
     pdf.text(bx + 8, pdf.y - 34, v, { size: textWidth(v, 11, true) > bw - 14 ? 8.5 : 11, bold: true });
   });
   pdf.y -= 62;
+
+  // Life Score: freedom, joy, family and people.
+  const LS = res && res.life ? res.life : E.lifeScore(run, 'clock');
+  if (run.stats) {
+    pdf.ensure(70);
+    pdf.text(X, pdf.y - 12, `Life Score: ${LS.stars} of 5 stars`, { size: 13, bold: true, color: '#8a6200' });
+    const parts = [['Freedom', LS.parts.freedom, 2], ['Joy', LS.parts.joy, 1], ['Family', LS.parts.family, 1], ['People', LS.parts.people, 1]];
+    const pw = (inner - 18) / 4;
+    parts.forEach(([k, v, max], i) => {
+      const px = X + i * (pw + 6);
+      pdf.text(px, pdf.y - 30, `${k} ${v.toFixed(1)}/${max}`, { size: 8.5, color: '#5a5078' });
+      pdf.rect(px, pdf.y - 44, pw, 7, '#ece6fb');
+      pdf.rect(px, pdf.y - 44, pw * clamp(v / max, 0, 1), 7, '#e0a100');
+    });
+    pdf.y -= 60;
+  }
 
   // Net worth against the Freedom Number.
   const hist = run.hist;

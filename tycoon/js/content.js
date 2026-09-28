@@ -48,22 +48,24 @@ export const REGIONS = {
   middleeast: { name: 'Middle East', currencies: ['AED', 'EGP'], guide: 'samira', bus: 'minibus', food: 'falafel', x: 58, y: 43 },
 };
 
+// Everyday spending: food, clothes and outings. Housing, cars, schools and
+// family are separate choices in the life layer (below).
 export const LIFESTYLES = [
-  { name: 'Frugal', mult: 0.75, joy: -8, blurb: 'Rice and beans, no outings.' },
-  { name: 'Modest', mult: 1, joy: 0, blurb: 'Shared flat, bus to work.' },
-  { name: 'Comfy', mult: 1.3, joy: 4, blurb: 'Your own flat and the odd holiday.' },
-  { name: 'Lavish', mult: 1.75, joy: 7, blurb: 'New car, nice restaurants.' },
-  { name: 'Baller', mult: 2.4, joy: 10, blurb: 'Designer everything.' },
+  { name: 'Frugal', mult: 0.72, joy: -8, blurb: 'Rice and beans, no outings.' },
+  { name: 'Modest', mult: 1, joy: 0, blurb: 'Home cooking and the odd outing.' },
+  { name: 'Comfy', mult: 1.35, joy: 4, blurb: 'Eating out and new clothes.' },
+  { name: 'Lavish', mult: 1.85, joy: 7, blurb: 'Fine dining and holidays.' },
+  { name: 'Baller', mult: 2.6, joy: 10, blurb: 'Designer everything.' },
 ];
 
 export const CHARACTERS = {
-  graduate: { name: 'The Graduate', blurb: 'Low salary, no debt, long runway.', salary: 24000, costs: 16800, cash: 3000, life: 1, unlock: 0 },
-  heir: { name: 'The Heir', blurb: 'Big starting cash and a lavish habit you must rein in.', salary: 20000, costs: 16800, cash: 200000, life: 3, joy: 75, unlock: 0 },
-  farmer: { name: 'The Farmer', blurb: 'Starts with a farm business. Weather hits harder.', salary: 12000, costs: 13500, cash: 3000, biz: 50000, life: 1, unlock: 40, weather: 2 },
-  hustler: { name: 'The Hustler', blurb: 'Income swings wildly. Starts holding crypto.', salary: 26000, costs: 16800, cash: 1000, crypto: 12000, life: 1, unlock: 100, volatile: 0.35 },
+  graduate: { name: 'The Graduate', blurb: 'Low salary, no debt, long runway.', salary: 24000, costs: 16800, cash: 3000, life: 1, unlock: 0, home: 'studio', district: 'suburb', car: 'none' },
+  heir: { name: 'The Heir', blurb: 'Big starting cash and a lavish habit you must rein in.', salary: 20000, costs: 16800, cash: 200000, life: 3, joy: 75, unlock: 0, home: 'flat2', district: 'upscale', car: 'saloon' },
+  farmer: { name: 'The Farmer', blurb: 'Starts with a farm business. Weather hits harder.', salary: 12000, costs: 13500, cash: 3000, biz: 50000, life: 1, unlock: 40, weather: 2, home: 'studio', district: 'inner', car: 'none' },
+  hustler: { name: 'The Hustler', blurb: 'Income swings wildly. Starts holding crypto.', salary: 26000, costs: 16800, cash: 1000, crypto: 12000, life: 1, unlock: 100, volatile: 0.35, home: 'studio', district: 'inner', car: 'none' },
   // Not picked from the list: used when a player starts from their own real life.
   me: { name: 'You', blurb: 'Your real age, money and goals.', salary: 24000, costs: 16800, cash: 0, life: 1, unlock: 0, custom: true },
-  sailor: { name: 'The Sailor', blurb: 'High pay, but at sea every other turn: you can only invest in port, and it gets lonely.', salary: 38000, costs: 21000, cash: 4000, life: 1, unlock: 180, sailor: true },
+  sailor: { name: 'The Sailor', blurb: 'High pay, but at sea every other turn: you can only invest in port, and it gets lonely.', salary: 38000, costs: 21000, cash: 4000, life: 1, unlock: 180, sailor: true, home: 'studio', district: 'suburb', car: 'none' },
 };
 
 export const ASSETS = {
@@ -244,25 +246,16 @@ export const EVENTS = [
     ],
   },
   {
-    id: 'wedding', cat: 'Life', title: 'Wedding bells', w: 2, once: true, cond: (run) => !run.flags.married && run.age < 45,
-    setup: (run) => ({ big: 1.1 * run.salary, small: 0.25 * run.salary }),
-    text: () => 'You are getting married! Two incomes, shared bills, and a party to plan.',
+    id: 'baby', cat: 'Family', title: 'A baby is on the way', w: (run) => [8, 4, 2][run.kids.length] || 0, cond: (run) => run.partner && run.kids.length < 3 && run.age < 46,
+    text: (v, h, run) => `Congratulations! Nappies, noise and a lot of joy are coming.${run.home && run.home.id === 'room' || run.home.id === 'studio' ? ' You will need a bigger home soon.' : ''}`,
     choices: [
-      { label: (v, h) => `Big party (${h.f(v.big)})`, note: '+18 joy', fx: (run, h, v) => { const n = h.expense(v.big); h.marry(); h.joy(18); return `Five hundred guests and a live band. ${n}`; } },
-      { label: (v, h) => `Small ceremony (${h.f(v.small)})`, note: '+8 joy', fx: (run, h, v) => { const n = h.expense(v.small); h.marry(); h.joy(8); return `Close family, good food, no debt. ${n}`; } },
-    ],
-  },
-  {
-    id: 'baby', cat: 'Life', title: 'A baby is on the way', w: 2, cond: (run) => run.flags.married && (run.flags.kids || 0) < 3 && run.age < 46,
-    text: () => 'Congratulations. Nappies, school fees and a lot of joy are coming.',
-    choices: [
-      { label: 'Nanny and private school', note: 'Costs +25%, +16 joy', fx: (run, h) => { h.costMult(1.25); h.joy(16); h.kid(); return 'Only the best for the little one.'; } },
-      { label: 'Family help and hand-me-downs', note: 'Costs +10%, +10 joy', fx: (run, h) => { h.costMult(1.1); h.joy(10); h.kid(); return 'Grandma moves in to help.'; } },
+      { label: 'Hire a nanny', note: 'Costs more until they start school, +14 joy', fx: (run, h) => { h.kid(0.12); h.joy(14); h.trust(6); return 'A nanny helps with the nights. Your costs go up.'; } },
+      { label: 'Family help and hand-me-downs', note: 'Cheaper, +10 joy', fx: (run, h) => { h.kid(0.03); h.joy(10); return 'Grandma moves in to help.'; } },
     ],
   },
   {
     id: 'medical', cat: 'Health', title: 'Hospital bill', w: 2,
-    setup: (run) => ({ best: 0.5 * run.salary, cheap: 0.18 * run.salary }),
+    setup: (run) => { const k = run.rules && run.rules.includes('hospitalFees') ? 1.5 : 1; return { best: 0.5 * run.salary * k, cheap: 0.18 * run.salary * k }; },
     text: (v, h) => (h.has('health_cover') ? 'You need an operation. Your health cover kicks in.' : 'You need an operation. The good hospital is expensive.'),
     choices: [
       {
@@ -281,22 +274,13 @@ export const EVENTS = [
     ],
   },
   {
-    id: 'blacktax', cat: 'Family', title: 'Family needs help', w: 2,
-    setup: (run) => ({ amt: 0.3 * run.salary }),
-    text: (v, h) => `Your uncle's shop burned down and the family asks you for ${h.f(v.amt)}.`,
-    choices: [
-      { label: 'Send the money', note: '+6 joy', fx: (run, h, v) => { const n = h.expense(v.amt); h.joy(6); return `The family is grateful. ${n}`; } },
-      { label: 'Say no this time', note: '−10 joy', fx: (run, h) => { h.joy(-10); return 'Awkward phone calls for months.'; } },
-    ],
-  },
-  {
-    id: 'car', cat: 'Life', title: 'Your car dies', w: 1.7,
+    id: 'car', cat: 'Car', title: 'Your car dies', w: 1.7, cond: (run) => run.car && run.car.id !== 'none',
     setup: (run) => ({ fix: 0.12 * run.salary }),
     text: () => 'The engine is gone. The mechanic shakes his head.',
     choices: [
-      { label: 'New car on a loan', note: 'Costs +8% for good, +8 joy', fx: (run, h) => { h.costMult(1.08); h.joy(8); h.term('creep'); return 'That new-car smell. And a monthly payment.'; } },
+      { label: 'New saloon on a loan', note: 'Loan payments, +6 joy', fx: (run, h) => { h.newCar('saloon', true); h.joy(6); h.term('creep'); return 'That new-car smell. And a loan to pay off.'; } },
       { label: (v, h) => `Rebuild the engine (${h.f(v.fix)})`, note: 'One-off cost', fx: (run, h, v) => `Runs like new, mostly. ${h.expense(v.fix)}` },
-      { label: 'Take the bus', note: '−5 joy', fx: (run, h) => { h.joy(-5); return 'Long commutes, more podcasts.'; } },
+      { label: 'Sell it for scrap and take the bus', note: '−4 joy', fx: (run, h) => { h.scrapCar(); h.joy(-4); return 'Long commutes, more podcasts, no car costs.'; } },
     ],
   },
   {
@@ -336,9 +320,9 @@ export const EVENTS = [
   },
   {
     id: 'burnout', cat: 'Health', title: 'Burnout', w: 0, forced: true,
-    text: () => 'You are exhausted and your doctor says something has to give. Too little joy for too long does this.',
+    text: (v, h, run) => (run.flags.frugalBurn ? 'Two years of squeezing every coin: no outings, no rest, cheap food. You are exhausted and your doctor says something has to give.' : 'You are exhausted and your doctor says something has to give. Too little joy for too long does this.'),
     choices: [
-      { label: 'Take a sabbatical', note: 'Lose half a year of pay, +35 joy', fx: (run, h) => { h.cash(-0.5 * run.salary); h.joy(35); return 'Six months off. You come back whole.'; } },
+      { label: 'Take a sabbatical', note: 'Lose half a year of pay, joy comes back', fx: (run, h) => { h.cash(-0.5 * run.salary); h.joy(run.flags.frugalBurn ? 15 : 35); return run.flags.frugalBurn ? 'Six months off. It helps, but the tight budget is still waiting.' : 'Six months off. You come back whole.'; } },
       { label: 'Push through', note: '+8 joy, salary −15%', fx: (run, h) => { h.joy(8); h.salary(0.85); return 'You keep going, but your work suffers.'; } },
     ],
   },
@@ -353,28 +337,11 @@ export const EVENTS = [
     ],
   },
   {
-    id: 'loan', cat: 'Friends', title: 'A friend asks for a loan', w: 1.3,
-    setup: (run) => ({ amt: 0.25 * run.salary }),
-    text: (v, h) => `An old classmate needs ${h.f(v.amt)} to cover rent. "I'll pay you back in 3 months."`,
+    id: 'renthike', cat: 'Home', title: 'Landlord raises the rent', w: 1.6, cond: (run) => run.home && !run.home.own,
+    text: () => 'Your landlord puts the rent up 25%. Owning your home would stop this.',
     choices: [
-      {
-        label: 'Lend it', note: '50/50 you see it again',
-        math: (run, v) => ({ kind: 'cost', rows: [{ p: 0.5, v: 0, label: 'Paid back' }, { p: 0.5, v: -v.amt, label: 'Never repaid' }] }),
-        fx: (run, h, v) => {
-          h.cash(-v.amt);
-          if (h.r() < 0.5) { h.cash(v.amt); h.joy(4); return 'Paid back in full, with a thank-you card.'; }
-          h.joy(-4); return 'Three months became never.';
-        },
-      },
-      { label: 'Politely decline', note: '−4 joy', fx: (run, h) => { h.joy(-4); return 'They understand. Mostly.'; } },
-    ],
-  },
-  {
-    id: 'renthike', cat: 'Home', title: 'Landlord raises the rent', w: 1.6, cond: (run) => run.h.prop.v <= 0,
-    text: () => 'Your landlord puts the rent up 25%. Owning property would stop this.',
-    choices: [
-      { label: 'Pay it', note: 'Costs +8%', fx: (run, h) => { h.costMult(1.08); return 'Paid. Your costs creep up.'; } },
-      { label: 'Move further out', note: '−6 joy', fx: (run, h) => { h.joy(-6); return 'Cheaper place, longer commute.'; } },
+      { label: 'Pay it', note: 'Rent +25% while you live here', fx: (run, h) => { h.rentUp(1.25); return 'Paid. Your costs creep up.'; } },
+      { label: 'Move somewhere cheaper', note: 'A cheaper district, −6 joy', fx: (run, h) => { h.joy(-6); return h.moveCheaper(); } },
     ],
   },
   {
@@ -656,4 +623,227 @@ export const TIPS = [
   'Read the headlines. They hint at what the next two years will bring, but some are noise or scams.',
   'Freedom means passive income covers your living costs. Watch the bar at the top.',
   'Cheaper living lowers your Freedom Number, but too little joy leads to burnout.',
+];
+
+// ------------------------------------------------------------------ the life layer
+//
+// Prices are in multiples of the starting yearly salary, so the currency's
+// scale handles every country. They rise with prices during a run.
+
+export const HOMES = {
+  room: { name: 'Shared room', long: 'Shared room (face-me-I-face-you, hostel)', rent: 0.10, buy: null, joy: -6, beds: 0, upkeep: 0 },
+  studio: { name: 'Studio', long: 'Self-contain / studio', rent: 0.20, buy: 3, joy: 0, beds: 1, upkeep: 0.01 },
+  flat2: { name: '2-bed flat', long: '2-bed flat', rent: 0.35, buy: 6, joy: 4, beds: 2, upkeep: 0.01 },
+  house: { name: 'Family house', long: '3–4-bed house / duplex', rent: 0.60, buy: 12, joy: 7, beds: 4, upkeep: 0.01 },
+  mansion: { name: 'Mansion', long: 'Mansion', rent: 1.20, buy: 30, joy: 10, beds: 6, upkeep: 0.03 },
+};
+export const HOME_ORDER = ['room', 'studio', 'flat2', 'house', 'mansion'];
+
+// Districts are types, not real places, so safety is never pinned on a real
+// community. Land (the Map) uses real regions.
+export const DISTRICTS = {
+  inner: { name: 'Crowded inner city', price: 0.7, security: 1, flood: 0.5, commute: 0, school: 0, blurb: 'Cheap and close to work. Busy, and not very safe.' },
+  suburb: { name: 'Working suburb', price: 1.0, security: 2, flood: 0.2, commute: -3, school: 1, blurb: 'Ordinary streets and a long commute.' },
+  gated: { name: 'New gated estate', price: 1.3, security: 3, flood: 0.6, commute: -3, school: 2, blurb: 'Gates and guards on the outskirts. Some estates flood.' },
+  upscale: { name: 'Established upscale area', price: 2.0, security: 4, flood: 0.2, commute: 0, school: 3, blurb: 'Leafy, safe and central. Good schools nearby.' },
+  waterfront: { name: 'Prime waterfront', price: 3.5, security: 5, flood: 0.5, commute: 0, school: 3, blurb: 'The best addresses in the country, on the water.' },
+};
+export const DISTRICT_ORDER = ['inner', 'suburb', 'gated', 'upscale', 'waterfront'];
+
+// Yearly cost as a share of salary; CCTV is paid once.
+export const SECURITY = {
+  levy: { name: 'Estate levy', cost: 0.02, once: false },
+  guard: { name: 'Private guard', cost: 0.05, once: false },
+  cctv: { name: 'CCTV and alarm', cost: 0.08, once: true },
+};
+
+export const CARS = {
+  none: { name: 'No car', long: 'Bus, okada or matatu', price: 0, run: 0.04, dep: 0, joy: -2, theft: 0 },
+  used: { name: 'Used small car', price: 0.4, run: 0.06, dep: 0.10, joy: 2, theft: 0.3 },
+  saloon: { name: 'New saloon', price: 1.2, run: 0.08, dep: 0.15, joy: 4, theft: 0.6 },
+  suv: { name: 'SUV', price: 2.5, run: 0.12, dep: 0.15, joy: 6, theft: 1 },
+  luxury: { name: 'Luxury car', price: 6, run: 0.20, dep: 0.20, joy: 8, theft: 1.4 },
+};
+export const CAR_ORDER = ['none', 'used', 'saloon', 'suv', 'luxury'];
+
+// A partner's type is hidden. Their card shows one clue, which is right about
+// 70% of the time; the truth comes out over the first years together.
+export const PARTNERS = {
+  saver: { name: 'Saver', income: 0.5, costs: 0.9, joy: 2, clue: 'keeps a savings tin', line: 'Careful with money. Hates waste.' },
+  balanced: { name: 'Balanced', income: 0.7, costs: 1, joy: 4, clue: 'plans a monthly budget', line: 'Steady, fair and easy to plan with.' },
+  spender: { name: 'Spender', income: 0.6, costs: 1.25, joy: 6, clue: 'loves nice things', line: 'Fun, generous, and fond of upgrades.' },
+  builder: { name: 'Builder', income: 0.4, costs: 1.05, joy: 3, clue: 'runs a small shop', line: 'Always building something. It might take off.' },
+  taker: { name: 'Taker', income: 0.1, costs: 1.35, joy: 5, clue: 'always the life of the party', line: 'Charming at first. The bills come later.' },
+};
+export const PARTNER_TYPES = ['saver', 'balanced', 'spender', 'builder', 'taker'];
+
+// Fee per child per year. `uplift` raises the chance the child does well.
+export const SCHOOLS = {
+  public: { name: 'Public school', fee: 0.03, uplift: 0, rank: 0 },
+  budget: { name: 'Budget private', fee: 0.10, uplift: 0.06, rank: 1 },
+  good: { name: 'Good private', fee: 0.25, uplift: 0.13, rank: 2 },
+  intl: { name: 'International', fee: 0.60, uplift: 0.2, rank: 3, joy: 2 },
+};
+export const SCHOOL_ORDER = ['public', 'budget', 'good', 'intl'];
+export const UNI_ABROAD = { name: 'University abroad', fee: 1.5, years: 4, uplift: 0.12 };
+
+export const KID_OUTCOMES = {
+  independent: 'Independent: a job, a flat and their own life.',
+  helping: 'Doing well and sending money home.',
+  support: 'Still needs your support.',
+};
+
+// Two of these are drawn from the seed for each run, so the best plan changes.
+export const WORLD_RULES = {
+  propTax: { name: 'Property tax doubles', text: 'Owning property costs an extra 1% of its value a year.' },
+  indexFees: { name: 'Index fees 2%', text: 'Index funds charge 2% a year.' },
+  noRemote: { name: 'Remote jobs banned', text: 'The Remote Job card never appears.' },
+  rentControl: { name: 'Rent control', text: 'Rents are 20% lower, for tenants and for landlords.' },
+  tightMoney: { name: 'Tight money', text: 'Savings pay 2 points more; mortgages and loans cost 2 points more.' },
+  savingsTax: { name: 'Tax on interest', text: 'Savings interest is taxed at 30%.' },
+  feeBoom: { name: 'School fees soar', text: 'School fees are 50% higher.' },
+  carBan: { name: 'Car import ban', text: 'Cars cost twice as much.' },
+  landRush: { name: 'Land rush', text: 'Land grows 3 points a year faster.' },
+  wageFreeze: { name: 'Wage freeze', text: 'Pay only keeps up with prices for the first 10 years.' },
+  hotJobs: { name: 'Hot job market', text: 'Pay grows 1 point a year faster.' },
+  crimeWave: { name: 'Crime wave', text: 'Break-ins and car theft are twice as likely.' },
+  wetDecade: { name: 'Wet decade', text: 'Floods are twice as likely.' },
+  bizHoliday: { name: 'Small business tax holiday', text: 'Business profit +20%.' },
+  cheapMort: { name: 'Cheap mortgages', text: 'Mortgages cost 2 points less.' },
+  strictBanks: { name: 'Strict lenders', text: 'Banks lend only 50% of a property\'s price, not 70%.' },
+  bigFamily: { name: 'Big family', text: 'Relatives and friends ask for help twice as often.' },
+  cryptoBan: { name: 'Crypto banned', text: 'Crypto is closed.' },
+  dividendTax: { name: 'Dividend tax', text: 'Index funds and stocks earn 0.5 points a year less.' },
+  hospitalFees: { name: 'Hospital fees rise', text: 'Medical bills are 50% higher.' },
+};
+
+// ------------------------------------------------------------------ the Circle
+//
+// Relatives, friends, colleagues and strangers who ask for money. Each has a
+// hidden character the player learns to read.
+export const CIRCLE_TYPES = {
+  genuine: { name: 'Genuine need', tell: 'Rare, specific, pays back or thanks you.', lesson: 'Help within a set budget.' },
+  taker: { name: 'Chronic taker', tell: 'Vague stories, repeats, never repays.', lesson: 'Set limits kindly.' },
+  schemer: { name: 'Schemer', tell: 'Pressure, no documents, angry at questions.', lesson: 'Check before you send.' },
+  helper: { name: 'Helper', tell: 'Asks for nothing up front.', lesson: 'Good networks pay.' },
+  fraudster: { name: 'Fraudster', tell: 'Urgency, guaranteed returns, asks for codes.', lesson: 'Never share codes; walk away from guarantees.' },
+};
+
+// What each type asks for. {name} and {amt} are filled in.
+export const CIRCLE_ASKS = {
+  genuine: [
+    { text: '{name}\'s mother is in hospital and the bill is {amt}. They send you a photo of the invoice.', clue: 'The hospital confirms the bill when you call. {name} offers to pay you back monthly.' },
+    { text: '{name} is short {amt} for a child\'s school fees this term.', clue: 'The school\'s letter has the exact amount, and {name} has paid you back before.' },
+    { text: '{name}\'s shop burned down. They need {amt} to restock.', clue: 'Neighbours confirm the fire. {name} has a plan to reopen within a month.' },
+  ],
+  taker: [
+    { text: '{name} calls again: "Something urgent came up. Can you send {amt}? I\'ll explain later."', clue: 'When you ask what for, the story changes twice. This is the third "emergency" this year.' },
+    { text: '{name} needs {amt} "to sort out a small issue" before the weekend.', clue: '{name} can\'t say what the issue is. The last loan was never mentioned again.' },
+  ],
+  schemer: [
+    { text: '{name} wants {amt} to invest in a "sure" business: "I\'ll handle everything, just send it."', clue: 'No business plan, no documents, and {name} gets angry when you ask to see the shop.' },
+    { text: '{name} found land for you: "Send {amt} now and I\'ll handle the papers."', clue: 'No survey, no seller\'s name, and the price keeps going up. "Why don\'t you trust me?"' },
+  ],
+  helper: [
+    { text: '{name} has a lead: "My company is hiring. Want me to put your name forward?"', clue: '{name} asks for nothing. They helped someone else get a job last year.', offer: 'job' },
+    { text: '{name} knows a genuine seller with land at 20% off, full title, papers ready.', clue: '{name} asks for nothing and suggests you get your own survey first.', offer: 'land' },
+    { text: '{name} has a tip: "Before you buy anything big, talk to my accountant. First chat is free."', clue: '{name} asks for nothing. The accountant is registered.', offer: 'tip' },
+  ],
+  fraudster: [
+    { text: 'An SMS from "your bank": "Your account is blocked. Reply with the code we just sent to unlock it."', clue: 'Banks never ask for codes. The message came from an ordinary mobile number.', stranger: 'A "bank officer"' },
+    { text: 'A land agent offers a plot in a new estate: "Pay {amt} by Friday, only three plots left."', clue: 'The agent has no office address, and the estate is not on the land registry.', stranger: 'A land agent' },
+    { text: 'A forex guru on social media: "Send {amt}, get 10% a week, guaranteed."', clue: 'Guaranteed weekly returns, and the "proof" screenshots are all the same.', stranger: 'A forex guru' },
+    { text: 'An investment club at church/mosque/work pays members 20% a month. They want {amt} from you.', clue: 'The returns come from new members\' money. Nobody can say what the club invests in.', stranger: 'An investment club' },
+  ],
+};
+
+// First names by region, so the people in your life feel like your people.
+export const NAMES = {
+  westafrica: { m: ['Tunde', 'Emeka', 'Kwame', 'Chinedu', 'Kofi', 'Seun', 'Ibrahim', 'Yaw', 'Obinna', 'Femi'], f: ['Ada', 'Ngozi', 'Ama', 'Funmi', 'Efua', 'Chioma', 'Aisha', 'Yetunde', 'Akosua', 'Bisi'] },
+  eastafrica: { m: ['Otieno', 'Kamau', 'Baraka', 'Juma', 'Mwangi', 'Kiprop', 'Omondi', 'Salim'], f: ['Wanjiru', 'Akinyi', 'Njeri', 'Zawadi', 'Amani', 'Chebet', 'Achieng', 'Neema'] },
+  southasia: { m: ['Arjun', 'Rahul', 'Imran', 'Vikram', 'Ali', 'Sanjay', 'Hamza', 'Rohan'], f: ['Priya', 'Ananya', 'Ayesha', 'Neha', 'Fatima', 'Kavya', 'Sana', 'Meera'] },
+  eastasia: { m: ['Wei', 'Hiroshi', 'Min-jun', 'Jun', 'Kenji', 'Jae', 'Paolo', 'Hao'], f: ['Mei', 'Yuki', 'Ji-woo', 'Lin', 'Sakura', 'Soo-ah', 'Maria', 'Xin'] },
+  latam: { m: ['Carlos', 'Diego', 'Mateo', 'João', 'Luis', 'Rafael', 'Andrés', 'Pedro'], f: ['Rosa', 'Lucía', 'Camila', 'Ana', 'Valentina', 'Beatriz', 'Sofía', 'Gabriela'] },
+  caribbean: { m: ['Andre', 'Marlon', 'Devon', 'Omar', 'Kemar', 'Dwayne', 'Jermaine', 'Ricardo'], f: ['Marcia', 'Shanique', 'Kerry-Ann', 'Tanya', 'Simone', 'Nadine', 'Latoya', 'Keisha'] },
+  europe_na: { m: ['Joe', 'Sam', 'Tom', 'Lukas', 'Mike', 'Ben', 'Jonas', 'Chris'], f: ['Emma', 'Sophie', 'Anna', 'Kate', 'Laura', 'Mia', 'Lena', 'Rachel'] },
+  middleeast: { m: ['Omar', 'Youssef', 'Khalid', 'Tarek', 'Karim', 'Hassan', 'Ahmed', 'Rami'], f: ['Samira', 'Layla', 'Noor', 'Mariam', 'Huda', 'Salma', 'Yasmin', 'Dina'] },
+};
+
+// Wording for the giving jar. It changes the words only, never the maths.
+export const FAITHS = {
+  none: { name: 'None', jar: 'Charity', verb: 'give to charity' },
+  christian: { name: 'Christian', jar: 'Tithe', verb: 'pay your tithe' },
+  muslim: { name: 'Muslim', jar: 'Zakat', verb: 'pay zakat' },
+  other: { name: 'Other', jar: 'Giving', verb: 'give' },
+};
+
+// ------------------------------------------------------------------ land across your country
+//
+// Six zone types in every country. Prices are per plot, in starting salaries.
+export const ZONE_TYPES = {
+  capital: { name: 'Capital', price: 6, growth: 0.02, driver: 'Government spending', risk: 'Government acquisition', farm: 0 },
+  mega: { name: 'Commercial megacity', price: 8, growth: 0.03, driver: 'Population and business', risk: 'Flooding, double-sales, land grabbers', farm: 0 },
+  industry: { name: 'Oil and industry belt', price: 4, growth: 0.01, driver: 'Oil price and new plants', risk: 'Pollution, unrest, oil slumps', farm: 0.3 },
+  corridor: { name: 'Growth corridor', price: 2, growth: 0.025, driver: 'New roads, rail and airports', risk: 'Projects get cancelled', farm: 0.6 },
+  farm: { name: 'Farm belt', price: 0.6, growth: 0.01, driver: 'Food prices and harvests', risk: 'Weather and conflict', farm: 1 },
+  coast: { name: 'Coastal and rural', price: 0.4, growth: 0.005, driver: 'Tourism and new ports', risk: 'Flooding and erosion', farm: 0.5 },
+};
+export const ZONE_ORDER = ['capital', 'mega', 'industry', 'corridor', 'farm', 'coast'];
+
+// Real regions, used only for land prices and news.
+export const COUNTRIES = {
+  NGN: { name: 'Nigeria', zones: { capital: 'Abuja (FCT)', mega: 'Lagos', industry: 'Rivers (Port Harcourt)', corridor: 'Ogun (new highways)', farm: 'Benue and Niger', coast: 'Bayelsa coast' } },
+  GHS: { name: 'Ghana', zones: { capital: 'Greater Accra', mega: 'Kumasi', industry: 'Tema and Western (oil)', corridor: 'Accra–Kumasi highway towns', farm: 'Northern and Bono', coast: 'Volta coast' } },
+  KES: { name: 'Kenya', zones: { capital: 'Nairobi', mega: 'Mombasa', industry: 'Athi River', corridor: 'Konza and Kajiado', farm: 'Rift Valley', coast: 'Kilifi and Lamu coast' } },
+  INR: { name: 'India', zones: { capital: 'Delhi NCR', mega: 'Mumbai', industry: 'Gujarat (Jamnagar)', corridor: 'Pune–Nashik corridor', farm: 'Punjab', coast: 'Konkan coast' } },
+  PKR: { name: 'Pakistan', zones: { capital: 'Islamabad', mega: 'Karachi', industry: 'Faisalabad', corridor: 'CPEC route towns', farm: 'Punjab farmland', coast: 'Gwadar coast' } },
+  CNY: { name: 'China', zones: { capital: 'Beijing', mega: 'Shanghai', industry: 'Shanxi (coal and steel)', corridor: 'Chengdu–Chongqing', farm: 'Henan', coast: 'Hainan' } },
+  JPY: { name: 'Japan', zones: { capital: 'Tokyo', mega: 'Osaka', industry: 'Aichi (car plants)', corridor: 'Maglev line towns', farm: 'Hokkaido', coast: 'Okinawa' } },
+  KRW: { name: 'South Korea', zones: { capital: 'Seoul', mega: 'Busan', industry: 'Ulsan (shipyards)', corridor: 'Sejong and new towns', farm: 'Jeolla farmland', coast: 'Jeju' } },
+  PHP: { name: 'Philippines', zones: { capital: 'Metro Manila', mega: 'Cebu', industry: 'Batangas', corridor: 'Clark and New Clark City', farm: 'Central Luzon', coast: 'Palawan coast' } },
+  MXN: { name: 'Mexico', zones: { capital: 'Mexico City', mega: 'Monterrey', industry: 'Tabasco (oil)', corridor: 'Bajío corridor', farm: 'Sinaloa farmland', coast: 'Riviera Maya coast' } },
+  BRL: { name: 'Brazil', zones: { capital: 'Brasília', mega: 'São Paulo', industry: 'Macaé (offshore oil)', corridor: 'Goiás corridor', farm: 'Mato Grosso', coast: 'Bahia coast' } },
+  JMD: { name: 'Jamaica', zones: { capital: 'Kingston', mega: 'Montego Bay', industry: 'Clarendon (bauxite)', corridor: 'Highway 2000 towns', farm: 'St Elizabeth', coast: 'Portland and Negril coast' } },
+  USD: { name: 'United States', zones: { capital: 'Washington DC area', mega: 'New York', industry: 'Texas oil belt', corridor: 'Sun Belt suburbs', farm: 'Midwest farmland', coast: 'Gulf Coast' } },
+  EUR: { name: 'Germany', zones: { capital: 'Berlin', mega: 'Frankfurt', industry: 'Ruhr', corridor: 'New rail-line towns', farm: 'Bavarian farmland', coast: 'Baltic coast' } },
+  GBP: { name: 'United Kingdom', zones: { capital: 'London', mega: 'Manchester', industry: 'Aberdeen (North Sea)', corridor: 'Midlands new towns', farm: 'East Anglia', coast: 'Cornwall coast' } },
+  AED: { name: 'United Arab Emirates', zones: { capital: 'Abu Dhabi', mega: 'Dubai', industry: 'Ruwais (oil and gas)', corridor: 'Dubai South (new airport)', farm: 'Al Ain oases', coast: 'Ras Al Khaimah coast' } },
+  EGP: { name: 'Egypt', zones: { capital: 'New Administrative Capital', mega: 'Cairo', industry: 'Suez industrial zone', corridor: 'Sokhna–Suez corridor', farm: 'Nile Delta', coast: 'North Coast' } },
+};
+
+// What the paperwork says, and how often it goes wrong over ten years.
+export const TITLES = {
+  full: { name: 'Full registered title', short: 'Full title', discount: 0, hazard: 0.002 },
+  progress: { name: 'Title in progress (consent pending)', short: 'In progress', discount: 0.2, hazard: 0.01 },
+  receipt: { name: 'Family receipt only', short: 'Receipt only', discount: 0.45, hazard: 0.035 },
+};
+
+// Region-tagged news that moves land. `real` is how often it is true. Effects:
+// land: zone multipliers over this turn (and `next` turn); other effects are
+// applied in the engine by id.
+export const ZONE_NEWS = [
+  { id: 'airport', text: 'Government approves new airport near {zone}', real: 0.7, zone: 'corridor', land: 1.25, next: 1.25 },
+  { id: 'road', text: 'Road project in {zone} stalled, contractor walks off', real: 0.8, zone: 'corridor', land: 0.85 },
+  { id: 'acquire', text: 'State to acquire land in {zone} for new government offices', real: 0.8, zone: 'capital', acquire: true },
+  { id: 'rains', text: 'Heavy rains forecast, flood warnings for {zone}', real: 0.8, zone: 'coast', land: 0.9, also: 'mega', flood: true },
+  { id: 'subsidy', text: 'Fuel subsidy removed, transport fares jump', real: 0.9, zone: null, costs: 1.05, oil: 0.15 },
+  { id: 'float', text: 'Central bank floats the currency', real: 0.8, zone: null, fxOnly: true, dev: 0.25 },
+  { id: 'election', text: 'Election year: campaigns heat up in {zone}', real: 1, zone: 'capital', land: 1.2, next: 0.88 },
+  { id: 'imf', text: 'IMF deal agreed, currency steadies', real: 0.8, zone: null, banks: 0.12 },
+  { id: 'oilhigh', text: 'Oil prices hit a 5-year high', real: 0.8, zone: 'industry', land: 1.15, oil: 0.2 },
+  { id: 'grabbers', text: 'Land grabbers demanding "foundation fees" in {zone}', real: 0.9, zone: 'mega', grab: true },
+  { id: 'port', text: 'New deep-sea port planned for {zone}', real: 0.7, zone: 'coast', land: 1.3 },
+  { id: 'harvest', text: 'Record harvest expected in {zone}', real: 0.8, zone: 'farm', land: 1.08, farmYield: 1.3 },
+  { id: 'drought', text: 'Drought warning for {zone}', real: 0.8, zone: 'farm', land: 0.95, farmYield: 0.5 },
+  { id: 'rail', text: 'New rail line to reach {zone}', real: 0.7, zone: 'corridor', land: 1.2 },
+  { id: 'unrest', text: 'Protests shut down plants in {zone}', real: 0.8, zone: 'industry', land: 0.88 },
+];
+
+// ------------------------------------------------------------------ rare golden events
+export const GOLDEN = [
+  { id: 'viral', title: 'You went viral', text: 'A video of you explaining money to your niece gets ten million views. A brand calls.', fx: 'cash', k: 0.6 },
+  { id: 'split', title: 'Your shares split', text: 'A company you own splits its shares and the price keeps climbing.', fx: 'index', k: 0.1 },
+  { id: 'station', title: 'A station on your street', text: 'The new rail line stops right by your home.', fx: 'home', k: 0.15 },
+  { id: 'scout', title: 'A talent scout calls', text: 'A rival firm wants you, and pays for it.', fx: 'salary', k: 0.2 },
+  { id: 'repaid', title: 'An old debt repaid', text: 'Someone you helped years ago turns up with the money, and interest.', fx: 'cash', k: 0.35 },
 ];

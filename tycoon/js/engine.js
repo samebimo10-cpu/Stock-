@@ -6,7 +6,9 @@
 
 import {
   CURRENCIES, LIFESTYLES, CHARACTERS, ASSETS, COMPANIES, NEWS, SWANS, CARDS, EVENTS,
-  ERAS, CHALLENGES, GLOSSARY,
+  ERAS, CHALLENGES, GLOSSARY, HOMES, HOME_ORDER, DISTRICTS, DISTRICT_ORDER, SECURITY, CARS,
+  PARTNERS, PARTNER_TYPES, SCHOOLS, SCHOOL_ORDER, UNI_ABROAD, KID_OUTCOMES, WORLD_RULES,
+  CIRCLE_TYPES, CIRCLE_ASKS, NAMES, ZONE_TYPES, ZONE_ORDER, COUNTRIES, TITLES, ZONE_NEWS, GOLDEN,
 } from './content.js';
 import { PRINCIPLES, MOMENTS, PLANS, QUIZ } from './learn.js';
 
@@ -151,6 +153,8 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
   let val = 0.9 + 0.2 * r();
   let rate = policyRate(infl, state, prof);
   let forceCrash = false;
+  let carry = {};
+  const country = COUNTRIES[currency] || COUNTRIES.USD;
   const out = [];
 
   for (let t = 0; t < turns; t++) {
@@ -174,6 +178,28 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
         + INFL_MOOD[state] * prof.mood + ((swan && swan.infl) || 0) + (adj.infl || 0),
       prof.lo, prof.hi,
     );
+    // Region news: land, oil, banks and the currency. Some of it is only rumour.
+    const znRoll = r();
+    const znPick = r();
+    const znTrue = r();
+    let Z = null;
+    let zReal = false;
+    if (!era && znRoll < 0.4) {
+      const pool = ZONE_NEWS.filter((z) => !z.fxOnly || prof.fx);
+      Z = pool[Math.floor(znPick * pool.length)];
+      zReal = znTrue < Z.real;
+    }
+    const land = {};
+    const tilt = { boom: 0.02, steady: 0, over: 0.03, crash: -0.05, recov: 0.01 }[state];
+    for (const z of ZONE_ORDER) land[z] = Math.pow(Math.max(0.3, 1 + ZONE_TYPES[z].growth + tilt + 0.06 * r.normal()), ypt) * (carry[z] || 1);
+    carry = {};
+    if (Z && zReal && Z.land) {
+      land[Z.zone] *= Z.land;
+      if (Z.also) land[Z.also] *= Z.land;
+      if (Z.next) carry[Z.zone] = Z.next;
+    }
+    const seqRoll = r();
+
     const newRate = policyRate(infl, state, prof);
     const dRate = newRate - rate;
     rate = newRate;
@@ -195,6 +221,8 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
       let x = c.beta * idxReal + (Math.pow(Math.max(0.05, 1 + c.alpha + c.idio * r.normal()), k) - 1);
       if (companyNews && companyNews.co === i) x += companyNews.dir * companyNews.size;
       if (adj.co && adj.co[i] != null) x += adj.co[i];
+      if (Z && zReal && Z.oil && c.id === 'NXO') x += Z.oil;
+      if (Z && zReal && Z.banks && c.id === 'ZNK') x += Z.banks;
       return x;
     });
 
@@ -208,8 +236,9 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
     if (prof.fx) {
       const perYear = infl - prof.devGap + prof.devNoise * devNoise;
       fxDev = Math.pow(Math.max(0.5, 1 + perYear), ypt) - 1;
-      devJump = devRoll < prof.jumpP * k || !!(adj.dev) || !!(swan && swan.dev);
-      if (devJump) fxDev = (1 + fxDev) * (1 + (adj.dev || (swan && swan.dev) || prof.jump)) - 1;
+      const zDev = Z && zReal && Z.dev ? Z.dev : 0;
+      devJump = devRoll < prof.jumpP * k || !!(adj.dev) || !!(swan && swan.dev) || !!zDev;
+      if (devJump) fxDev = (1 + fxDev) * (1 + (adj.dev || (swan && swan.dev) || zDev || prof.jump)) - 1;
     }
 
     const toNom = (x) => Math.max(-0.99, (1 + x) * Math.pow(1 + infl, ypt) - 1);
@@ -224,6 +253,14 @@ export function genMarket({ seed, turns, ypt, currency, asc = 0, era = null }) {
         fx: prof.fx ? Math.pow(1.04, ypt) * (1 + fxDev) - 1 : 0,
       },
       fxDev, bizMult, hustle, companyNews, devJump, rug: rugRoll < 0.05 * k,
+      land: Object.fromEntries(ZONE_ORDER.map((z) => [z, land[z] * Math.pow(1 + infl, ypt) - 1])),
+      seq: seqRoll,
+      zone: Z ? {
+        id: Z.id, real: zReal, zone: Z.zone,
+        text: Z.text.replace('{zone}', Z.zone ? country.zones[Z.zone] : ''),
+        acquire: zReal && !!Z.acquire, grab: zReal && !!Z.grab, flood: zReal && !!Z.flood,
+        costs: zReal && Z.costs ? Z.costs : 1, farmYield: zReal && Z.farmYield ? Z.farmYield : Z.flood && zReal ? 0.6 : 1,
+      } : null,
     };
     m.news = genNews(r, m, prof.fx, asc);
     out.push(m);
@@ -245,8 +282,10 @@ function genNews(r, m, naira, asc) {
   items.push(moodItem(null));
   // Slot 2: currency, a company, or interest rates.
   const honest = r() < 0.8;
-  if (m.devJump && naira) {
+  if (m.devJump && naira && !(m.zone && m.zone.id === 'float')) {
     items.push({ kind: 'signal', real: true, tag: 'fx', text: r.pick(NEWS.fx) });
+  } else if (m.zone) {
+    items.push({ kind: 'signal', real: m.zone.real, tag: 'zone', zone: m.zone.zone, id: m.zone.id, text: m.zone.text });
   } else if (m.companyNews) {
     const cn = m.companyNews;
     const dir = honest ? cn.dir : -cn.dir;
@@ -272,6 +311,7 @@ function genNews(r, m, naira, asc) {
 // ---------------------------------------------------------------- run setup
 
 export const MODES = {
+  sprint: { name: '10-Year Sprint', ypt: 2, startAge: 22, timer: 0, years: 10 },
   journey: { name: 'Wisdom Journey', ypt: 1, startAge: 22, timer: 0, learn: true },
   classic: { name: 'Classic', ypt: 2, startAge: 22, timer: 0 },
   blitz: { name: 'Blitz', ypt: 4, startAge: 24, timer: 15 },
@@ -280,6 +320,14 @@ export const MODES = {
   era: { name: 'Eras', ypt: 2, startAge: 22, timer: 0 },
   weekly: { name: 'Weekly Challenge', ypt: 2, startAge: 22, timer: 0 },
 };
+
+// Two world rules per run, drawn from the seed so a Daily or a Duel shares them.
+export function drawRules(seed) {
+  const r = rngFor(seed, 'rules', 0);
+  const keys = Object.keys(WORLD_RULES);
+  const a = keys.splice(Math.floor(r() * keys.length), 1)[0];
+  return [a, keys[Math.floor(r() * keys.length)]];
+}
 
 export function newRun(opts) {
   const mode = MODES[opts.mode] || MODES.classic;
@@ -292,23 +340,23 @@ export function newRun(opts) {
   // A real-life start: the player's own age, money and goals, in their own
   // currency (actual amounts, so no scaling).
   const me = !era && opts.me ? opts.me : null;
-  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : ch && ch.startAge ? ch.startAge : mode.startAge;
+  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : opts.startAge ? clamp(Math.round(opts.startAge), 16, 50) : ch && ch.startAge ? ch.startAge : mode.startAge;
   const ypt = mode.ypt;
-  const deadline = Math.max(asc >= 12 ? 56 : 60, me ? startAge + 8 : 0);
+  const deadline = mode.years ? startAge + mode.years : Math.max(asc >= 12 ? 56 : 60, me ? startAge + 8 : 0);
   const turns = era ? era.states.length : Math.max(3, Math.round((deadline - startAge) / ypt));
   const seed = String(opts.seed != null ? opts.seed : Math.floor(Math.random() * 1e9));
 
   const run = {
-    v: 1, seed, mode: opts.mode || 'classic', char: opts.char || 'graduate', currency, asc,
+    v: 2, seed, mode: opts.mode || 'classic', char: opts.char || 'graduate', currency, asc,
     eraId: era ? era.id : null, challengeId: ch ? ch.id : null,
-    ypt, turns, startAge, age: startAge, turn: 0, phase: 'alloc',
+    ypt, turns, startAge, age: startAge, turn: 0, phase: 'alloc', deadline,
     salary: c.salary * scale * (ch && ch.salaryMult ? ch.salaryMult : 1),
     baseCosts: c.costs * scale * (asc >= 10 ? 1.1 : 1),
     costMult: 1,
     life: ch && ch.lockLife != null ? ch.lockLife : c.life,
     startLife: ch && ch.lockLife != null ? ch.lockLife : c.life,
     joy: c.joy != null ? c.joy : 60,
-    cash: c.cash * scale * (asc >= 4 ? 0.5 : 1) * (ch && ch.cashMult ? ch.cashMult : 1),
+    cash: c.cash * scale * (asc >= 4 ? 0.5 : 1) * (ch && ch.cashMult ? ch.cashMult : 1) * (1 + clamp(opts.cashBoost || 0, 0, 0.3)) + (opts.inherit || 0),
     h: {
       save: 0, index: 0, stocks: COMPANIES.map(() => 0), crypto: (c.crypto || 0) * scale, fx: 0,
       prop: { v: 0, debt: 0, bought: -1 },
@@ -326,8 +374,9 @@ export function newRun(opts) {
     negTurns: 0, lastResult: null, pending: null, offer: null, result: null,
     flow: { buy: {}, sell: {} },
     salaryStart: c.salary * scale,
-    // The learning layer.
+    // The learning layer. Probability tools unlock after a player's first runs.
     learnMode: !!mode.learn,
+    think: opts.think !== false,
     aim: opts.aim || null,
     plan: { pyf: 0, mix: 'balanced', rebalance: false },
     forecast: null, fc: [],
@@ -335,12 +384,28 @@ export function newRun(opts) {
     seenP: [], recentMoments: [], quiz: null, quizAsked: [], quizRight: 0,
     // A diary of every year and every decision, for the end-of-game report.
     journal: [],
+    // The life layer: where you live, what you drive, who you live with.
+    sex: opts.sex === 'f' ? 'f' : 'm',
+    region: opts.region || 'westafrica',
+    home: { id: c.home || 'studio', district: c.district || 'suburb', own: false, levy: false, guard: false, cctv: false, rentMult: 1 },
+    car: { id: c.car || 'none', v: 0, loan: 0, loan0: 0 },
+    partner: null, kids: [], nanny: 0,
+    circle: [], rep: 50, giving: 0,
+    land: [], zonePx: Object.fromEntries(ZONE_ORDER.map((z) => [z, 1])), deals: {},
+    rules: era || mode.years || opts.rules === false ? [] : drawRules(seed),
+    feeIdx: 1, frugalYears: 0, milestones: [], got: { homes: [], cars: [], districts: [], zones: [], golden: [] },
+    stats: { joySum: 0, years: 0, trustSum: 0, trustYears: 0, givingSum: 0 },
+    envelopes: !!opts.envelopes, weekend: !!opts.weekend, bonusWisdom: 0, gen: opts.gen || 1,
+    forceEvent: null, teaser: null,
   };
+  run.car.v = CARS[run.car.id].price * run.salaryStart;
   run.market = genMarket({ seed, turns, ypt, currency, asc, era });
   run.rate = policyRate(run.infl, 'steady', profileOf(currency));
   run.h.biz.profit = bizProfit(run, 1);
   learn(run, 'freedom');
   if (me) applyMe(run, me);
+  initLife(run);
+  run.circle = makeCircle(run);
   run.hist.push(snapshot(run));
   if (run.aim) seeP(run, 'h_aim');
   return run;
@@ -351,7 +416,7 @@ function applyMe(run, me) {
   run.char = 'me';
   run.custom = true;
   run.salary = n(me.pay) * 12;
-  run.salaryStart = run.salary;
+  run.salaryStart = Math.max(1, run.salary);
   run.life = 1;
   run.startLife = 1;
   run.baseCosts = Math.max(1, n(me.costs) * 12);
@@ -369,6 +434,49 @@ function applyMe(run, me) {
   run.goal = n(me.goal) * 12;
   if (me.aim) run.aim = clamp(Math.round(me.aim), run.startAge + 1, 90);
   run.flags.skillAge = run.startAge;
+  run.home.id = HOMES[me.home] ? me.home : 'studio';
+  run.home.district = DISTRICTS[me.district] ? me.district : 'suburb';
+  run.home.own = h.prop.home > 0;
+  run.car.id = CARS[me.car] ? me.car : 'none';
+  // A car you already own counts at about 60% of the new price.
+  run.car.v = 0.6 * CARS[run.car.id].price * run.salaryStart;
+}
+
+// The starting home, car and district are already inside a character's living
+// costs, so split those costs into "everyday" spending plus the life layer.
+function initLife(run) {
+  const lc = lifeCosts(run).total;
+  run.baseCosts = Math.max(0.4 * run.baseCosts, run.baseCosts - lc);
+  run.refJoy = lifeJoy(run);
+  gotIt(run, 'homes', run.home.id);
+  gotIt(run, 'districts', run.home.district);
+  if (run.car.id !== 'none') gotIt(run, 'cars', run.car.id);
+}
+
+// Saved games from before the life layer carry on with sensible defaults.
+export function upgradeRun(run) {
+  if (!run || run.v >= 2) return run;
+  const c = CHARACTERS[run.char] || CHARACTERS.graduate;
+  run.v = 2;
+  run.deadline = run.startAge + run.turns * run.ypt;
+  run.think = true;
+  run.sex = 'm';
+  run.region = run.region || 'westafrica';
+  run.home = { id: c.home || 'studio', district: c.district || 'suburb', own: (run.h.prop.home || 0) > 0, levy: false, guard: false, cctv: false, rentMult: 1 };
+  run.car = { id: 'none', v: 0, loan: 0, loan0: 0 };
+  run.partner = run.flags.married ? { name: 'Your partner', sex: 'f', type: 'balanced', trust: 60, revealed: true, since: run.age, pay: 0, legacy: true, look: {} } : null;
+  run.kids = Array.from({ length: run.flags.kids || 0 }, (_, i) => ({ name: `Child ${i + 1}`, sex: i % 2 ? 'f' : 'm', born: run.age - 2 - i * 2, school: 'public', legacy: true, upSum: 0, schoolYrs: 0 }));
+  run.nanny = 0;
+  run.circle = []; run.rep = 50; run.giving = 0;
+  run.land = []; run.zonePx = Object.fromEntries(ZONE_ORDER.map((z) => [z, 1])); run.deals = {};
+  run.rules = [];
+  run.feeIdx = run.prices; run.frugalYears = 0; run.milestones = [];
+  run.got = { homes: [], cars: [], districts: [], zones: [], golden: [] };
+  run.stats = { joySum: 0, years: 0, trustSum: 0, trustYears: 0, givingSum: 0 };
+  run.envelopes = false; run.bonusWisdom = 0; run.gen = 1; run.forceEvent = null; run.teaser = null;
+  initLife(run);
+  run.circle = makeCircle(run);
+  return run;
 }
 
 // ---------------------------------------------------------------- read helpers
@@ -381,12 +489,21 @@ export const lifeLocked = (run) => { const ch = challenge(run); return !!(ch && 
 
 export function isOpen(run, asset) {
   if (asset === 'fx' && !profileOf(run.currency).fx) return false;
+  if (asset === 'crypto' && rule(run, 'cryptoBan')) return false;
   const ch = challenge(run);
   return !(ch && ch.off && ch.off.includes(asset));
 }
 
+// Living costs a year: everyday spending (food, clothes, outings) scaled by
+// lifestyle and household, plus the life layer: home, car, security, children.
+export function everyday(run) {
+  const P = run.partner;
+  const household = P && !P.legacy ? 1.4 * PARTNERS[P.type].costs : 1;
+  return run.baseCosts * LIFESTYLES[run.life].mult * run.costMult * (has(run, 'frugal_genius') ? 0.9 : 1) * household;
+}
+
 export function costs(run) {
-  return run.baseCosts * LIFESTYLES[run.life].mult * run.costMult * (has(run, 'frugal_genius') ? 0.9 : 1);
+  return everyday(run) + (run.home ? lifeCosts(run).total : 0);
 }
 
 export const stocksTotal = (run) => run.h.stocks.reduce((s, x) => s + x, 0);
@@ -402,15 +519,16 @@ export function holdings(run) {
 export function netWorth(run) {
   const h = run.h;
   return run.cash + h.save + h.index + stocksTotal(run) + h.crypto + h.fx + h.prop.v - h.prop.debt
-    + h.biz.c + (h.ponzi ? h.ponzi.v : 0) + (h.angel ? h.angel.amt : 0) + (h.scam || 0);
+    + h.biz.c + (h.ponzi ? h.ponzi.v : 0) + (h.angel ? h.angel.amt : 0) + (h.scam || 0)
+    + (run.car ? run.car.v - run.car.loan : 0) + (run.land ? landValue(run) : 0);
 }
 
 // The home you live in earns no rent (it saves rent, which is already in your
 // living costs); only the rest of your property is let out.
 export const rentable = (run) => Math.max(0, run.h.prop.v - (run.h.prop.home || 0));
-export const rentYield = (run) => profileOf(run.currency).rent * (has(run, 'landlord') ? 1.25 : 1);
-export const mortRate = (run) => run.rate + 0.03;
-export const debtRate = (run) => run.rate + 0.15;
+export const rentYield = (run) => profileOf(run.currency).rent * (has(run, 'landlord') ? 1.25 : 1) * (rule(run, 'rentControl') ? 0.8 : 1);
+export const mortRate = (run) => run.rate + 0.03 + (rule(run, 'tightMoney') ? 0.02 : 0) - (rule(run, 'cheapMort') ? 0.02 : 0);
+export const debtRate = (run) => run.rate + 0.15 + (rule(run, 'tightMoney') ? 0.02 : 0);
 export const bizManaged = (run) => run.h.biz.managed || has(run, 'manager_pro');
 
 export function bizProfit(run, mood) {
@@ -420,6 +538,7 @@ export function bizProfit(run, mood) {
   let p = c * 0.18 * mood / (1 + c / K);
   if (has(run, 'franchise')) p *= 1.3;
   if (has(run, 'golden_goose')) p *= 2;
+  if (rule(run, 'bizHoliday')) p *= 1.2;
   if (run.h.biz.managed && !has(run, 'manager_pro')) p *= 0.75;
   return p;
 }
@@ -434,9 +553,10 @@ export function passive(run) {
   const mort = h.prop.debt * mortRate(run);
   const debt = run.cash < 0 ? -run.cash * debtRate(run) : 0;
   const biz = bizManaged(run) ? h.biz.profit : 0;
-  let total = invest + rent + biz - mort - debt;
+  const farm = run.land ? farmIncome(run) : 0;
+  let total = invest + rent + biz + farm - mort - debt;
   if (has(run, 'tax_smart') && total > 0) total *= 1.1;
-  return { invest, rent, biz, mort, debt, total };
+  return { invest, rent, biz, farm, mort, debt, total };
 }
 
 // The bowl passive income has to fill: today's living costs, or the income the
@@ -451,6 +571,303 @@ function snapshot(run) {
 export function learn(run, id) {
   if (GLOSSARY[id] && !run.learned.includes(id)) run.learned.push(id);
 }
+
+// ---------------------------------------------------------------- the life layer
+
+export const rule = (run, id) => !!(run.rules && run.rules.includes(id));
+// Today's price of one starting salary: the unit every life price is quoted in.
+export const unit = (run) => run.salaryStart * run.prices;
+const gotIt = (run, kind, id) => { if (run.got && !run.got[kind].includes(id)) run.got[kind].push(id); };
+
+export const lifeJoy = (run) => HOMES[run.home.id].joy + CARS[run.car.id].joy + DISTRICTS[run.home.district].commute;
+export const carLoanRate = (run) => run.rate + 0.08 + (rule(run, 'tightMoney') ? 0.02 : 0);
+export const ltv = (run) => (rule(run, 'strictBanks') ? 0.5 : 0.7);
+export const homePrice = (run, id, d) => (HOMES[id].buy || 0) * unit(run) * DISTRICTS[d].price;
+export const homeRent = (run, id, d) => HOMES[id].rent * unit(run) * DISTRICTS[d].price * (rule(run, 'rentControl') ? 0.8 : 1);
+export const carPrice = (run, id) => CARS[id].price * unit(run) * (rule(run, 'carBan') ? 2 : 1);
+export const kidAge = (run, k) => run.age - k.born;
+const feeUnit = (run) => run.salaryStart * (run.feeIdx || run.prices) * (rule(run, 'feeBoom') ? 1.5 : 1);
+
+export function stars(run) {
+  const h = run.home;
+  return Math.min(5, DISTRICTS[h.district].security + (h.levy ? 1 : 0) + (h.guard ? 1 : 0) + (h.cctv ? 1 : 0));
+}
+
+export function kidCost(run, k) {
+  if (k.legacy) return 0;
+  const a = kidAge(run, k);
+  let c = 0;
+  if (a < 18) c += 0.06 * unit(run);
+  if (a >= 5 && a < 18) c += SCHOOLS[k.school].fee * feeUnit(run);
+  if (a >= 18 && a < 22 && k.uni === 'abroad') c += UNI_ABROAD.fee * feeUnit(run);
+  if (a >= 22 && k.outcome === 'support') c += 0.1 * unit(run);
+  return c;
+}
+
+export function lifeCosts(run) {
+  const o = { rent: 0, upkeep: 0, tax: 0, car: 0, loan: 0, security: 0, kids: 0, nanny: 0 };
+  const H = HOMES[run.home.id];
+  if (run.home.own) o.upkeep = (run.h.prop.home || 0) * H.upkeep;
+  else o.rent = homeRent(run, run.home.id, run.home.district) * (run.home.rentMult || 1);
+  if (rule(run, 'propTax')) o.tax = 0.01 * run.h.prop.v;
+  o.car = CARS[run.car.id].run * unit(run);
+  o.loan = run.car.loan > 0 ? run.car.loan * carLoanRate(run) : 0;
+  o.security = ((run.home.levy ? SECURITY.levy.cost : 0) + (run.home.guard ? SECURITY.guard.cost : 0)) * run.salary;
+  for (const k of run.kids) o.kids += kidCost(run, k);
+  if (run.nanny && run.kids.some((k) => kidAge(run, k) < 6)) o.nanny = run.nanny * unit(run);
+  o.total = o.rent + o.upkeep + o.tax + o.car + o.loan + o.security + o.kids + o.nanny;
+  return o;
+}
+
+// Schools you can reach from where you live. Frugal living caps it at budget.
+export function schoolsOpen(run) {
+  const max = Math.min(DISTRICTS[run.home.district].school, run.life === 0 ? 1 : 3);
+  return SCHOOL_ORDER.filter((id) => SCHOOLS[id].rank <= Math.max(0, max));
+}
+
+export const mapOpen = (run) => run.age - run.startAge >= 3 || (run.land && run.land.length > 0);
+export const plotPrice = (run, z) => ZONE_TYPES[z].price * run.salaryStart * ((run.zonePx && run.zonePx[z]) || 1);
+export const landValue = (run) => run.land.reduce((s, l) => s + (l.lost ? 0 : l.plots * plotPrice(run, l.zone)), 0);
+export const farmRate = (run, z) => 0.09 * ZONE_TYPES[z].farm * (run.char === 'farmer' ? 1.5 : 1);
+export function farmIncome(run) {
+  return run.land.reduce((s, l) => s + (l.use === 'farm' && !l.lost ? l.plots * plotPrice(run, l.zone) * farmRate(run, l.zone) : 0), 0);
+}
+
+function offerRaw(run, z) {
+  const r = rngFor(run.seed, `plot|${z}`, run.turn);
+  const claimed = r.weighted({ full: 0.5, progress: 0.3, receipt: 0.2 });
+  const u = r();
+  const truth = claimed === 'full' ? (u < 0.7 ? 'full' : u < 0.88 ? 'progress' : 'receipt') : claimed === 'progress' ? (u < 0.7 ? 'progress' : 'receipt') : 'receipt';
+  const price = plotPrice(run, z) * (1 - TITLES[claimed].discount) * (0.9 + 0.2 * r());
+  return { claimed, truth, price };
+}
+
+// This year's plot for sale in a zone. The true paperwork shows only after a check.
+export function landOffer(run, z) {
+  const o = offerRaw(run, z);
+  const st = run.deals[`${run.turn}|${z}`] || {};
+  return { zone: z, claimed: o.claimed, truth: st.checked ? o.truth : null, price: o.price, checkCost: 0.03 * o.price, checked: !!st.checked, sold: !!st.sold };
+}
+
+export function checkLand(run, z) {
+  if (!canAct(run)) return false;
+  const key = `${run.turn}|${z}`;
+  const st = run.deals[key] || {};
+  const o = offerRaw(run, z);
+  if (st.checked || st.sold || run.cash < 0.03 * o.price) return false;
+  run.cash -= 0.03 * o.price;
+  run.deals[key] = { ...st, checked: true };
+  return true;
+}
+
+export function buyLand(run, z) {
+  if (!canAct(run) || !ZONE_TYPES[z]) return false;
+  const key = `${run.turn}|${z}`;
+  const st = run.deals[key] || {};
+  const o = offerRaw(run, z);
+  if (st.sold || run.cash < o.price) return false;
+  run.cash -= o.price;
+  run.land.push({ zone: z, plots: 1, paid: o.price, title: o.truth, checked: !!st.checked, use: 'hold', bt: run.turn, built: false });
+  run.deals[key] = { ...st, sold: true };
+  run.flow.buy.land = (run.flow.buy.land || 0) + o.price;
+  gotIt(run, 'zones', z);
+  return true;
+}
+
+// A plot from someone you trust: full title, below the market price.
+function giftPlot(run, z, discount) {
+  const price = plotPrice(run, z) * (1 - discount);
+  run.cash -= price;
+  run.land.push({ zone: z, plots: 1, paid: price, title: 'full', checked: true, use: 'hold', bt: run.turn, built: false });
+  gotIt(run, 'zones', z);
+  return price;
+}
+
+export function setLandUse(run, i, use) {
+  const l = run.land[i];
+  if (!canAct(run) || !l || l.lost || l.built) return false;
+  if (use === 'farm' && ZONE_TYPES[l.zone].farm <= 0) return false;
+  if (use === 'build') {
+    const cost = 2 * l.plots * plotPrice(run, l.zone);
+    if (run.cash < cost) return false;
+    run.cash -= cost;
+    run.h.prop.v += cost * 0.97;
+    run.h.prop.bought = run.turn;
+    l.built = true; l.use = 'built';
+    learn(run, 'passive');
+    return true;
+  }
+  l.use = use === 'farm' ? 'farm' : 'hold';
+  return true;
+}
+
+export function sellLand(run, i) {
+  const l = run.land[i];
+  if (!canAct(run) || !l || l.lost || l.bt === run.turn) return false;
+  const v = l.plots * plotPrice(run, l.zone);
+  run.cash += v * 0.94;
+  run.flow.sell.land = (run.flow.sell.land || 0) + v;
+  run.land.splice(i, 1);
+  learn(run, 'liquidity');
+  return true;
+}
+
+// Move house. Buying uses the property engine; the home you live in saves
+// rent but earns none. The old home is sold, or kept and let out.
+export function moveHome(run, id, d, { buy = false, mortgage = false, keepOld = false } = {}) {
+  if (!canAct(run) || !HOMES[id] || !DISTRICTS[d]) return false;
+  if (id === run.home.id && d === run.home.district && buy === run.home.own) return false;
+  if (buy && !HOMES[id].buy) return false;
+  const p = run.h.prop;
+  const homeV = run.home.own ? p.home || 0 : 0;
+  const share = p.v > 0 ? homeV / p.v : 0;
+  const debtOut = p.debt * share;
+  const cashIn = homeV > 0 && !keepOld ? homeV * (1 - feeFor(run, 'prop')) - debtOut : 0;
+  const moving = 0.02 * unit(run);
+  const price = buy ? homePrice(run, id, d) : 0;
+  const equity = buy ? (mortgage ? price * (1 - ltv(run)) : price) : 0;
+  if (run.cash + cashIn - moving < equity) return false;
+  if (homeV > 0) {
+    if (keepOld) p.home = 0;
+    else { p.v -= homeV; p.debt -= debtOut; p.home = 0; run.cash += cashIn; run.flow.sell.prop = (run.flow.sell.prop || 0) + homeV; }
+  }
+  run.cash -= moving + equity;
+  if (buy) {
+    p.v += price * 0.97; p.debt += price - equity; p.home = price * 0.97; p.bought = run.turn;
+    run.flow.buy.prop = (run.flow.buy.prop || 0) + equity;
+    if (mortgage) { learn(run, 'mortgage'); learn(run, 'leverage'); }
+    learn(run, 'passive');
+  }
+  run.home = { id, district: d, own: buy, levy: false, guard: false, cctv: false, rentMult: 1 };
+  gotIt(run, 'homes', id);
+  gotIt(run, 'districts', d);
+  return true;
+}
+
+export function setSecurity(run, key, on) {
+  if (!canAct(run) || !SECURITY[key]) return false;
+  if (key === 'cctv') {
+    const c = SECURITY.cctv.cost * run.salary;
+    if (run.home.cctv || !on || run.cash < c) return false;
+    run.cash -= c;
+    run.home.cctv = true;
+    return true;
+  }
+  run.home[key] = !!on;
+  return true;
+}
+
+function carSwap(run, id, loan) {
+  const trade = run.car.v * 0.9 - run.car.loan;
+  if (id === 'none') { run.cash += trade; run.car = { id: 'none', v: 0, loan: 0, loan0: 0 }; return true; }
+  const price = carPrice(run, id);
+  const need = loan ? Math.max(0, 0.1 * price - Math.max(0, trade)) : price - trade;
+  if (run.cash < need) return false;
+  run.cash -= need;
+  const borrowed = loan ? price - Math.max(0, trade) - need : 0;
+  run.car = { id, v: price, loan: borrowed, loan0: borrowed };
+  gotIt(run, 'cars', id);
+  learn(run, 'creep');
+  return true;
+}
+
+export function buyCar(run, id, loan = false) {
+  if (!canAct(run) || !CARS[id] || id === run.car.id) return false;
+  return carSwap(run, id, loan);
+}
+
+export function setSchool(run, i, id) {
+  const k = run.kids[i];
+  if (!canAct(run) || !k || !schoolsOpen(run).includes(id)) return false;
+  k.school = id;
+  return true;
+}
+
+export function setUni(run, i, abroad) {
+  const k = run.kids[i];
+  if (!canAct(run) || !k) return false;
+  const a = kidAge(run, k);
+  if (a < 16 || a >= 22) return false;
+  k.uni = abroad ? 'abroad' : 'home';
+  return true;
+}
+
+export function setGiving(run, g) {
+  if (!canAct(run)) return false;
+  run.giving = clamp(Math.round(g * 100) / 100, 0, 0.15);
+  return true;
+}
+
+// ---------------------------------------------------------------- people
+
+function pickName(run, r, sex, avoid = []) {
+  const pool = (NAMES[run.region] || NAMES.westafrica)[sex].filter((n) => !avoid.includes(n));
+  return pool.length ? r.pick(pool) : r.pick((NAMES[run.region] || NAMES.westafrica)[sex]);
+}
+const usedNames = (run) => [...run.circle.map((c) => c.name), ...(run.partner ? [run.partner.name] : []), ...run.kids.map((k) => k.name)];
+
+function randomLook(r, age, sex = null) {
+  const hairs = sex === 'm' ? ['short', 'afro', 'curly', 'bald', 'short'] : sex === 'f' ? ['long', 'bun', 'braids', 'curly', 'wrap', 'afro'] : ['short', 'afro', 'long', 'bun', 'braids', 'curly', 'wrap', 'bald'];
+  return { sex, skin: Math.floor(r() * 6), hair: r.pick(hairs), beard: sex === 'm' && r() < 0.25, hairColor: Math.floor(r() * 4), outfit: Math.floor(r() * 6), build: r.pick(['slim', 'average', 'heavy']), age };
+}
+
+function makeCircle(run) {
+  const r = rngFor(run.seed, 'circle', 'init');
+  const rels = [['Uncle', 'm', 30], ['Auntie', 'f', 28], ['Cousin', null, 3], ['Friend', null, 1], ['Old classmate', null, 0], ['Colleague', null, 8]];
+  rels.splice(Math.floor(r() * rels.length), 1);
+  const out = [];
+  rels.forEach(([rel, sx, older], i) => {
+    const sex = sx || (r() < 0.5 ? 'm' : 'f');
+    const name = pickName(run, r, sex, out.map((c) => c.name));
+    const type = r.weighted({ genuine: 0.35, taker: 0.25, schemer: 0.15, helper: 0.25 });
+    out.push({ id: `c${i}`, rel, name, sex, type, ageGap: older, look: randomLook(r, run.startAge + older, sex), given: 0, returned: 0, asks: 0, clues: [], known: false });
+  });
+  return out;
+}
+
+function addInLaw(run, P, r) {
+  const sex = r() < 0.5 ? 'm' : 'f';
+  const type = P.type === 'taker' ? 'taker' : r.weighted({ genuine: 0.4, taker: 0.3, schemer: 0.1, helper: 0.2 });
+  run.circle.push({ id: `c${run.circle.length}`, rel: sex === 'm' ? 'Brother-in-law' : 'Sister-in-law', name: pickName(run, r, sex, usedNames(run)), sex, type, ageGap: 2, inlaw: true, look: randomLook(r, run.age + 2, sex), given: 0, returned: 0, asks: 0, clues: [], known: false });
+}
+
+// Three people you might marry. Each card shows one clue, right about 70% of the time.
+function partnerCandidates(run) {
+  const r = rngFor(run.seed, 'partner', run.turn);
+  const sex = run.sex === 'f' ? 'm' : 'f';
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    const type = r.weighted({ saver: 0.22, balanced: 0.26, spender: 0.22, builder: 0.16, taker: 0.14 });
+    const honest = r() < 0.7;
+    const clueType = honest ? type : r.pick(PARTNER_TYPES.filter((t) => t !== type));
+    out.push({ name: pickName(run, r, sex, [...usedNames(run), ...out.map((c) => c.name)]), sex, type, clue: PARTNERS[clueType].clue, look: randomLook(r, run.age + Math.floor(r() * 5) - 2, sex) });
+  }
+  return out;
+}
+
+function marry(run, cand) {
+  const r = rngFor(run.seed, 'marry', run.turn);
+  const T = PARTNERS[cand.type];
+  run.partner = { name: cand.name, sex: cand.sex, type: cand.type, look: cand.look, trust: 60, zero: 0, revealed: false, revealAt: 2 + Math.floor(r() * 3), since: run.age, pay: T.income * run.salary, biz: 0 };
+  run.flags.married = true;
+  addInLaw(run, run.partner, r);
+}
+
+function newKid(run, nanny) {
+  const r = rngFor(run.seed, 'kid', run.turn);
+  const sex = r() < 0.5 ? 'm' : 'f';
+  const P = run.partner;
+  const look = randomLook(r, 0, sex);
+  if (P && P.look) look.skin = Math.round(((P.look.skin ?? 2) + (run.lookSkin ?? (P.look.skin ?? 2))) / 2);
+  run.kids.push({ name: pickName(run, r, sex, usedNames(run)), sex, born: run.age, school: 'public', uni: null, outcome: null, upSum: 0, schoolYrs: 0, look });
+  run.nanny = nanny;
+  run.flags.kids = run.kids.length;
+}
+
+const trust = (run, d) => { if (run.partner) run.partner.trust = clamp(run.partner.trust + d, 0, 100); };
+const rep = (run, d) => { run.rep = clamp(run.rep + d, 0, 100); };
+
+export const circleOpen = (run) => run.circle.some((c) => c.asks > 0) || run.rep !== 50 || run.giving > 0;
 
 // ---------------------------------------------------------------- player actions
 
@@ -803,6 +1220,225 @@ export function answerQuiz(run, i) {
   return out;
 }
 
+// ---------------------------------------------------------------- life events (partner, Circle)
+
+export const AGAIN = '\u0001again';
+
+function upHome(run) {
+  const i = HOME_ORDER.indexOf(run.home.id);
+  if (i >= HOME_ORDER.length - 1) return false;
+  const id = HOME_ORDER[i + 1];
+  if (run.home.own) return false;
+  run.home = { ...run.home, id, rentMult: 1 };
+  gotIt(run, 'homes', id);
+  return true;
+}
+
+function split(run) {
+  const h = run.h;
+  const half = (x) => x / 2;
+  if (run.cash > 0) run.cash = half(run.cash);
+  h.save = half(h.save); h.index = half(h.index); h.crypto = half(h.crypto); h.fx = half(h.fx);
+  h.stocks = h.stocks.map(half);
+  h.prop.v = half(h.prop.v); h.prop.debt = half(h.prop.debt); if (h.prop.home) h.prop.home = half(h.prop.home);
+  h.biz.c = half(h.biz.c); h.biz.profit = bizProfit(run, 1);
+  run.land.forEach((l, i) => { if (i % 2 === 1) l.lost = true; });
+  run.land = run.land.filter((l) => !l.lost);
+  run.partner = null;
+  run.flags.married = false;
+  run.flags.separated = (run.flags.separated || 0) + 1;
+}
+
+function circleAct(run, h, v, act) {
+  const m = v.mid ? run.circle.find((c) => c.id === v.mid) : null;
+  const who = m ? m.name : v.who;
+  const T = v.type;
+  if (act === 'ask') {
+    v.asked = true;
+    if (m && !m.clues.includes(v.clue)) m.clues.push(v.clue);
+    if (T === 'schemer') rep(run, -1);
+    seeP(run, 'x_clues');
+    return AGAIN;
+  }
+  if (m) m.asks += 1;
+  if (T === 'helper') {
+    if (act === 'no') { rep(run, -1); return `${who} shrugs. Maybe next time.`; }
+    if (m) m.known = true;
+    rep(run, 2);
+    if (v.offer === 'job') { h.salary(1.08); h.skill(); return `${who} put your name forward. New job, 8% more pay.`; }
+    if (v.offer === 'land') {
+      const price = giftPlot(run, v.zone, 0.2);
+      return `A real seller with real papers. You bought a plot in ${COUNTRIES[run.currency].zones[v.zone]} for ${h.f(price)}, 20% below the market.`;
+    }
+    h.joy(3);
+    return 'The accountant spots two things to fix and one to stop. You feel more in control.';
+  }
+  if (act === 'no') {
+    rep(run, { genuine: -5, taker: -2, schemer: -1, fraudster: 0 }[T]);
+    if (T === 'genuine') h.joy(-4);
+    if (T === 'taker') { h.joy(-2); if (m && m.asks >= 2) m.known = true; }
+    if (T === 'fraudster') { learn(run, 'ponzi'); return 'You ignore it. Good call: it was a scam.'; }
+    return {
+      genuine: `${who} understands, but it stings. Word gets around.`,
+      taker: `${who} tells everyone you have changed.`,
+      schemer: `${who} finds someone else to ask.`,
+    }[T];
+  }
+  const amt = act === 'part' ? v.amt / 2 : v.amt;
+  const n = h.expense(amt, true);
+  if (m) m.given += amt;
+  if (T === 'genuine') { rep(run, act === 'part' ? 3 : 6); h.joy(act === 'part' ? 1 : 4); return `${who} is grateful: "I won't forget this." ${n}`; }
+  if (T === 'taker') { rep(run, act === 'part' ? 1 : 2); if (m && m.asks >= 2) m.known = true; return `${who} thanks you, and asks when you can do it again. ${n}`; }
+  if (T === 'schemer') {
+    if (m) m.known = true;
+    if (h.r() < 0.2) { run.cash += amt * 1.3; if (m) m.returned += amt * 1.3; return `Against the odds, it worked. ${who} pays you back with a little extra.`; }
+    run.log.scam += amt / run.salary; run.flags.scammed = true; learn(run, 'ponzi');
+    return `Nothing ever happened with the money, and ${who} stops answering. ${n}`;
+  }
+  run.log.scam += amt / run.salary; run.flags.scammed = true; learn(run, 'ponzi');
+  return `It was a scam. The money is gone. ${n}`;
+}
+
+const LIFE_EVENTS = [
+  {
+    id: 'wedding', cat: 'Love', title: 'Someone special', w: (run) => (run.age >= 24 && run.age <= 36 ? 7 : 2.5),
+    cond: (run) => !run.partner && run.age >= 21 && run.age < 48 && (run.flags.weddingSkip == null || run.age - run.flags.weddingSkip >= 4),
+    setup: (run) => ({ cands: partnerCandidates(run), cost: 0.3 * run.salary }),
+    text: (v, h) => `Three people have caught your eye. You only get a first impression: one clue each, and a clue is right about 70% of the time. A small wedding costs about ${h.f(v.cost)}.`,
+    choices: (run, v) => [
+      ...v.cands.map((c) => ({
+        label: `Marry ${c.name}`, note: `Clue: ${c.clue}`, person: c, lesson: 'x_clues',
+        fx: (r2, h) => { const n = h.expense(v.cost); marry(r2, c); h.joy(10); return `A small, happy wedding. ${n}`; },
+      })),
+      { label: 'Not now', note: 'Stay single for a while', fx: (r2) => { r2.flags.weddingSkip = r2.age; return 'You focus on yourself for now.'; } },
+    ],
+  },
+  {
+    id: 'p_budget', cat: 'Partner', title: 'We need to talk about money', w: (run) => (run.partner && !run.partner.legacy ? 1.3 : 0),
+    text: (v, h, run) => `${run.partner.name} wants to sit down and talk about the household money.`,
+    choices: [
+      {
+        label: 'Set a joint budget together', note: '+8 trust',
+        fx: (run, h) => {
+          h.trust(8); h.joy(2); run.partner.revealAt -= 1;
+          return { saver: 'They already had a spreadsheet ready.', balanced: 'Done in an hour. Easy.', spender: 'They agree, then book a weekend away.', builder: 'They want a line in it for "the shop".', taker: 'They agree to everything and change nothing.' }[run.partner.type];
+        },
+      },
+      {
+        label: 'Let them run the money', note: 'You find out what they do with it',
+        fx: (run, h) => {
+          const P = run.partner; P.revealed = true;
+          if (P.type === 'saver') { run.plan.pyf = Math.max(run.plan.pyf, 0.2); h.trust(10); return 'They set up automatic saving: 20% of your pay goes to you first.'; }
+          if (P.type === 'balanced') { h.trust(6); return 'Bills paid on time, a little saved, a little enjoyed.'; }
+          if (P.type === 'spender') { h.life(1); h.trust(8); return 'New sofa, new clothes, new everything. Your everyday spending goes up a level.'; }
+          if (P.type === 'builder') { const a = 0.2 * run.salary; h.cash(-a); P.biz += a; h.trust(8); return `${h.f(a)} goes into their shop.`; }
+          const a = 0.4 * run.salary; h.cash(-a); h.trust(4); return `${h.f(a)} disappears. "It went to family," they say.`;
+        },
+      },
+      { label: 'Change the subject', note: '−6 trust', fx: (run, h) => { h.trust(-6); return 'The silence at dinner says a lot.'; } },
+    ],
+  },
+  {
+    id: 'p_upgrade', cat: 'Partner', title: 'A bigger house and a new car?',
+    w: (run) => (run.partner && !run.partner.legacy ? (['spender', 'taker'].includes(run.partner.type) ? 1.4 : 0.4) : 0),
+    text: (v, h, run) => `${run.partner.name} has seen a bigger place for rent, and a new saloon car "at a good price".`,
+    choices: [
+      { label: 'Upgrade both', note: 'Bigger rented home, new car on a loan, +10 trust', fx: (run, h) => { const a = upHome(run); const b = carSwap(run, 'saloon', true); h.trust(10); h.joy(6); h.term('creep'); return `${a ? 'A bigger home. ' : ''}${b ? 'A new car on a loan. ' : ''}Your costs just jumped.`; } },
+      { label: 'Just the car', note: 'New car on a loan, +4 trust', fx: (run, h) => { const b = carSwap(run, 'saloon', true); h.trust(4); h.term('creep'); return b ? 'A new car in the drive, and a loan to pay.' : 'You couldn\'t raise the deposit. Maybe next year.'; } },
+      { label: 'Not yet', note: '−10 trust', lesson: 'r_doodads', fx: (run, h) => { h.trust(run.partner.type === 'saver' ? 4 : -10); return run.partner.type === 'saver' ? 'They look relieved. "I was testing you."' : 'They go quiet for a week.'; } },
+    ],
+  },
+  {
+    id: 'p_business', cat: 'Partner', title: 'Back my business?', w: (run) => (run.partner && run.partner.type === 'builder' && !run.partner.biz0 ? 1.6 : 0),
+    setup: (run) => ({ amt: 0.5 * run.salary }),
+    text: (v, h, run) => `${run.partner.name} wants ${h.f(v.amt)} to grow their business. It could take off, or it could fail.`,
+    choices: [
+      {
+        label: (v, h) => `Back it (${h.f(v.amt)})`, note: '+12 trust, 45% chance it takes off', need: (run, v) => run.cash >= v.amt, lesson: 'x_ev',
+        math: (run, v) => ({ kind: 'stake', stake: v.amt, rows: [{ p: 0.45, m: 3.5, label: 'It takes off (their pay more than doubles)' }, { p: 0.55, m: 0, label: 'It struggles and closes' }] }),
+        fx: (run, h, v) => { h.cash(-v.amt); run.partner.biz0 = v.amt; run.partner.bizT = run.turn; run.partner.revealed = true; h.trust(12); return 'They hug you. The sign goes up next month.'; },
+      },
+      { label: 'Not now', note: '−6 trust', fx: (run, h) => { h.trust(-6); return 'They carry on small, on their own.'; } },
+    ],
+  },
+  {
+    id: 'p_debts', cat: 'Partner', title: 'Hidden debts', w: (run) => (run.partner && run.partner.type === 'taker' ? 1.6 : 0),
+    setup: (run) => ({ amt: 0.6 * run.salary }),
+    text: (v, h, run) => `A letter arrives: ${run.partner.name} owes ${h.f(v.amt)} to a lender you have never heard of.`,
+    choices: [
+      { label: (v, h) => `Pay it off (${h.f(v.amt)})`, note: '+2 trust', fx: (run, h, v) => { const n = h.expense(v.amt, true); run.partner.revealed = true; h.trust(2); return `Cleared. They promise it won't happen again. ${n}`; } },
+      { label: 'Refuse', note: '−15 trust, −6 joy', fx: (run, h) => { run.partner.revealed = true; h.trust(-15); h.joy(-6); return 'A long, loud night. The debt is theirs to sort out.'; } },
+    ],
+  },
+  {
+    id: 'p_inlaws', cat: 'Partner', title: 'Your in-laws need money',
+    w: (run) => (run.partner && !run.partner.legacy ? (run.partner.type === 'taker' ? 1.3 : 0.5) : 0),
+    setup: (run) => ({ amt: 0.25 * run.salary }),
+    text: (v, h, run) => `${run.partner.name}'s family asks for ${h.f(v.amt)} for a family ceremony.`,
+    choices: [
+      { label: (v, h) => `Send it (${h.f(v.amt)})`, note: '+6 trust', fx: (run, h, v) => { const n = h.expense(v.amt, true); h.trust(6); h.rep(3); return `The family is delighted. ${n}`; } },
+      { label: 'Say no', note: '−12 trust', fx: (run, h) => { h.trust(run.partner.type === 'taker' ? -15 : -12); h.rep(-4); return 'Your partner is embarrassed in front of their family.'; } },
+    ],
+  },
+  {
+    id: 'separation', cat: 'Partner', title: 'Your partner wants to separate', w: 0, forced: true,
+    setup: (run) => ({ cost: 0.15 * run.salary }),
+    text: (v, h, run) => `Trust has been gone for a long time. ${run.partner.name} says it is over.`,
+    choices: [
+      { label: (v, h) => `Try counselling (${h.f(v.cost)})`, note: 'Half the time it works', fx: (run, h, v) => { const n = h.expense(v.cost); if (h.r() < 0.5) { run.partner.trust = 30; run.partner.zero = 0; return `Slowly, you learn to talk again. ${n}`; } split(run); h.joy(-25); return `It didn't work. You split everything you own, half each. ${n}`; } },
+      { label: 'Split fairly', note: 'Everything you own, half each', fx: (run, h) => { split(run); h.joy(-25); return 'You go your separate ways. Everything you owned is split in half.'; } },
+    ],
+  },
+  {
+    id: 'circle', cat: 'Circle', title: 'Someone asks for help', w: (run) => (run.circle.length ? 2.3 : 0),
+    setup: (run) => {
+      const r = rngFor(run.seed, 'circle', run.turn);
+      let m = null;
+      if (r() >= 0.22) {
+        const w = {};
+        for (const c of run.circle) w[c.id] = { taker: 3, genuine: 1.2, schemer: 1.2, helper: 1 }[c.type];
+        m = run.circle.find((c) => c.id === r.weighted(w));
+      }
+      const type = m ? m.type : 'fraudster';
+      const a = r.pick(CIRCLE_ASKS[type]);
+      const who = m ? m.name : a.stranger;
+      const base = { genuine: 0.3, taker: 0.2, schemer: 0.6, fraudster: 0.5, helper: 0 }[type];
+      const amt = a.stranger === 'A "bank officer"' ? 0.5 * (Math.max(0, run.cash) + run.h.save) : base * run.salary;
+      const f = (n) => fmt(n, run.currency);
+      return {
+        mid: m ? m.id : null, who, rel: m ? m.rel : 'Stranger', type, amt, offer: a.offer || null,
+        zone: r.pick(['corridor', 'farm', 'coast']), asked: false, look: m ? m.look : null,
+        text: a.text.replace(/\{name\}/g, who).replace('{amt}', f(amt)),
+        clue: a.clue.replace(/\{name\}/g, who),
+      };
+    },
+    text: (v) => v.text,
+    choices: (run, v) => {
+      const ask = v.asked ? [] : [{ label: 'Ask questions', note: 'Find out more first', act: 'ask', fx: (r2, h) => circleAct(r2, h, v, 'ask') }];
+      if (v.type === 'helper') {
+        const price = v.offer === 'land' ? plotPrice(run, v.zone) * 0.8 : 0;
+        return [
+          { label: v.offer === 'land' ? `Buy the plot (${fmt(price, run.currency)})` : 'Yes please', note: v.offer === 'job' ? '+8% pay' : v.offer === 'land' ? 'Full title, 20% off' : '+3 joy', need: () => run.cash >= price, fx: (r2, h) => circleAct(r2, h, v, 'give') },
+          ...ask,
+          { label: 'No thanks', note: '', fx: (r2, h) => circleAct(r2, h, v, 'no') },
+        ];
+      }
+      const f = (n) => fmt(n, run.currency);
+      const sms = v.who === 'A "bank officer"';
+      return [
+        { label: sms ? 'Reply with the code' : `Give ${f(v.amt)}`, note: sms ? 'Unlock your account' : '', fx: (r2, h) => circleAct(r2, h, v, 'give') },
+        ...(v.type === 'fraudster' ? [] : [{ label: `Give part (${f(v.amt / 2)})`, note: '', fx: (r2, h) => circleAct(r2, h, v, 'part') }]),
+        ...ask,
+        { label: sms ? 'Ignore it' : 'Say no', note: '', fx: (r2, h) => circleAct(r2, h, v, 'no') },
+      ];
+    },
+  },
+];
+
+export const ALL_EVENTS = [...EVENTS, ...LIFE_EVENTS];
+export const evById = (id) => ALL_EVENTS.find((e) => e.id === id);
+const choicesOf = (ev, run, v) => (typeof ev.choices === 'function' ? ev.choices(run, v) : ev.choices);
+
 // ---------------------------------------------------------------- event helpers
 
 function helpers(run, r) {
@@ -815,8 +1451,19 @@ function helpers(run, r) {
     life: (d) => { if (!lifeLocked(run)) run.life = clamp(run.life + d, 0, LIFESTYLES.length - 1); },
     costMult: (k) => { run.costMult *= k; },
     flag: (k, v = true) => { run.flags[k] = v; },
-    marry: () => { run.flags.married = true; run.salary *= 1.35; run.costMult *= 1.3; },
-    kid: () => { run.flags.kids = (run.flags.kids || 0) + 1; },
+    kid: (nanny) => newKid(run, nanny),
+    trust: (d) => trust(run, d),
+    rep: (d) => rep(run, d),
+    newCar: (id, loan) => carSwap(run, id, loan),
+    scrapCar: () => { run.cash += 0.1 * run.car.v - run.car.loan; run.car = { id: 'none', v: 0, loan: 0, loan0: 0 }; },
+    rentUp: (k) => { run.home.rentMult = (run.home.rentMult || 1) * k; },
+    moveCheaper: () => {
+      const i = DISTRICT_ORDER.indexOf(run.home.district);
+      if (i > 0) { run.home = { ...run.home, district: DISTRICT_ORDER[i - 1], levy: false, guard: false, rentMult: 1 }; return `You move to a ${DISTRICTS[run.home.district].name.toLowerCase()}. Cheaper, and further from what you like.`; }
+      const j = HOME_ORDER.indexOf(run.home.id);
+      if (j > 0) { run.home = { ...run.home, id: HOME_ORDER[j - 1], rentMult: 1 }; return 'You move to a smaller place nearby.'; }
+      return 'There is nowhere cheaper. You pay up anyway.';
+    },
     skill: () => { run.flags.skillAge = run.age; },
     term: (id) => learn(run, id),
     scam: (n) => { run.log.scam += n / run.salary; run.flags.scammed = true; learn(run, 'ponzi'); },
@@ -855,16 +1502,18 @@ function helpers(run, r) {
 
 export function eventView(run) {
   if (!run.pending) return null;
-  const ev = EVENTS.find((e) => e.id === run.pending.id);
+  const ev = evById(run.pending.id);
   const h = helpers(run, () => 0.5);
   const v = run.pending.v;
   return {
-    id: ev.id, cat: ev.cat, title: ev.title,
+    id: ev.id, cat: ev.cat, title: ev.title, v,
     text: ev.text(v, h, run),
-    choices: ev.choices.map((c) => ({
+    choices: choicesOf(ev, run, v).map((c) => ({
       label: typeof c.label === 'function' ? c.label(v, h) : c.label,
       note: c.note || '',
       ok: !c.need || c.need(run, v),
+      person: c.person || null,
+      act: c.act || null,
       math: c.math ? mathView(run, c.math(run, v, h)) : null,
     })),
   };
@@ -886,14 +1535,28 @@ function drawEvent(run) {
   const m = run.market[run.turn];
   const r = rngFor(run.seed, 'ev', run.turn);
   if (m.devJump && profileOf(run.currency).fx) return 'deval';
+  if (run.partner && run.partner.zero >= 2) return 'separation';
+  if (run.frugalYears >= 2) { run.frugalYears = 0; run.flags.frugalBurn = true; return 'burnout'; }
   if (run.joy < 20 && r() < 0.65) return 'burnout';
+  if (run.forceEvent) {
+    const f = evById(run.forceEvent);
+    run.forceEvent = null;
+    run.teaser = null;
+    if (f && (!f.cond || f.cond(run))) return f.id;
+  }
   const recent = run.seenEv.slice(-5);
   const pool = {};
-  for (const e of EVENTS) {
+  for (const e of ALL_EVENTS) {
     if (e.forced || recent.includes(e.id)) continue;
     if (e.once && run.seenEv.includes(e.id)) continue;
     if (e.cond && !e.cond(run)) continue;
-    pool[e.id] = e.w * (e.id === 'promo' && has(run, 'networker') ? 2 : 1);
+    let w = typeof e.w === 'function' ? e.w(run) : e.w;
+    if (e.id === 'promo' && has(run, 'networker')) w *= 2;
+    if (run.life === 0 && e.id === 'medical') w *= 1.8;
+    if (run.life === 0 && e.id === 'car') w *= 2;
+    if (e.id === 'medical' && rule(run, 'hospitalFees')) w *= 1.3;
+    if (e.id === 'circle' && rule(run, 'bigFamily')) w *= 2;
+    if (w > 0) pool[e.id] = w;
   }
   return r.weighted(pool);
 }
@@ -921,6 +1584,15 @@ export function live(run) {
   const valNow = m.val;
   const scam0 = run.log.scam;
   const lifeStart = run.lifeStart != null ? run.lifeStart : run.startLife;
+  const S = unit(run);
+  const P = run.partner;
+  const k2 = y / 2;
+  // The final stretch: near freedom (or near 60), a sharp crash is the worst
+  // thing that can happen, so the game makes it likelier. Savings are untouched.
+  const prog0 = clamp(passive(run).total / bowl(run), 0, 2);
+  const near = !run.eraId && !MODES[run.mode].years && (prog0 >= 0.75 || run.age + y > run.deadline - 10);
+  const seqHit = near && m.seq != null && m.seq < 0.16 * k2 && m.state !== 'crash';
+  res.seqHit = seqHit;
 
   // Salary and living costs over the period.
   const drift = Math.pow(1 + m.infl, (y - 1) / 2);
@@ -928,8 +1600,21 @@ export function live(run) {
   if (c.volatile) pay *= m.hustle;
   if (m.swan === 'pandemic' && !has(run, 'remote_job')) pay *= 0.7;
   const spend = costs(run) * y * drift;
-  run.cash += pay - spend;
-  res.flows.push({ label: 'Salary', v: pay }, { label: 'Living costs', v: -spend });
+  const partnerPay = P && !P.legacy ? P.pay * y * drift : 0;
+  const kidHelp = run.kids.filter((kd) => kd.outcome === 'helping').length * 0.1 * S * y;
+  const given = run.giving * (pay + partnerPay);
+  run.cash += pay + partnerPay + kidHelp - spend - given;
+  res.flows.push({ label: 'Salary', v: pay });
+  if (partnerPay) res.flows.push({ label: `${P.name}'s pay`, v: partnerPay });
+  if (kidHelp) res.flows.push({ label: 'Money from your children', v: kidHelp });
+  res.flows.push({ label: 'Living costs', v: -spend });
+  if (given) res.flows.push({ label: 'Giving', v: -given, giving: true });
+  res.given = given;
+  if (run.car.loan > 0) {
+    const princ = Math.min(run.car.loan, ((run.car.loan0 || run.car.loan) / 4) * y);
+    run.cash -= princ; run.car.loan -= princ;
+    res.flows.push({ label: 'Car loan repaid', v: -princ });
+  }
 
   // The plan runs by itself: pay yourself first, then rebalance to the mix.
   const mix = PLANS[run.plan.mix] || PLANS.balanced;
@@ -955,7 +1640,11 @@ export function live(run) {
 
   // Market returns, bent by cards.
   const soldRisk = RISKY.some((a) => (run.flow.sell[a] || 0) > 0);
+  const SEQ = { index: -0.25, stocks: -0.28, crypto: -0.35 };
   const adj = (x, asset) => {
+    if (seqHit && SEQ[asset]) x = (1 + x) * (1 + SEQ[asset]) - 1;
+    if (asset === 'index' && rule(run, 'indexFees')) x = (1 + x) * Math.pow(0.98, y) - 1;
+    if ((asset === 'index' || asset === 'stocks') && rule(run, 'dividendTax')) x = (1 + x) * Math.pow(0.995, y) - 1;
     if (RISKY.includes(asset)) {
       if (run.lev > 0) x *= 2;
       if (asset === 'crypto' && has(run, 'degen')) x *= 1.5;
@@ -965,7 +1654,8 @@ export function live(run) {
     }
     return Math.max(-0.99, x);
   };
-  const saveRet = has(run, 'compound') ? Math.pow(1 + m.rate + 0.02, y) - 1 : m.ret.save;
+  let saveRet = Math.pow(1 + m.rate + (has(run, 'compound') ? 0.02 : 0) + (rule(run, 'tightMoney') ? 0.02 : 0), y) - 1;
+  if (rule(run, 'savingsTax')) saveRet *= 0.7;
   const gains = {};
   gains.save = h.save * saveRet; h.save += gains.save;
   gains.index = h.index * adj(m.ret.index, 'index'); h.index += gains.index;
@@ -973,8 +1663,47 @@ export function live(run) {
   h.stocks = h.stocks.map((v, i) => { const g = v * adj(m.ret.stocks[i], 'stocks'); gains.stocks += g; return v + g; });
   gains.crypto = h.crypto * adj(m.ret.crypto, 'crypto'); h.crypto += gains.crypto;
   gains.fx = h.fx * m.ret.fx; h.fx += gains.fx;
-  gains.prop = h.prop.v * m.ret.prop; h.prop.v += gains.prop;
-  if (h.prop.home) h.prop.home *= 1 + m.ret.prop;
+  const propRet = seqHit ? (1 + m.ret.prop) * 0.95 - 1 : m.ret.prop;
+  gains.prop = h.prop.v * propRet; h.prop.v += gains.prop;
+  if (h.prop.home) h.prop.home *= 1 + propRet;
+  if (run.car.v > 0) {
+    const c0 = run.car.v;
+    run.car.v *= Math.pow(1 - CARS[run.car.id].dep, y);
+    gains.car = run.car.v - c0;
+    res.carDep = -gains.car;
+  }
+
+  // Land: zone prices move with the region's news; farms pay a harvest.
+  const land0 = landValue(run);
+  for (const z of ZONE_ORDER) run.zonePx[z] *= (m.land ? 1 + m.land[z] : Math.pow(1 + m.infl, y)) * (rule(run, 'landRush') ? Math.pow(1.03, y) : 1);
+  gains.land = landValue(run) - land0;
+  const rl = rngFor(run.seed, 'land', t);
+  let farm = 0;
+  for (const l of run.land) {
+    const val = l.plots * plotPrice(run, l.zone);
+    const zn = COUNTRIES[run.currency].zones[l.zone];
+    if (l.use === 'farm') {
+      const weather = (m.zone ? m.zone.farmYield : 1) * { boom: 1.05, steady: 1, over: 1, crash: 0.85, recov: 1 }[m.state] * (0.67 + 0.66 * rl());
+      farm += val * farmRate(run, l.zone) * weather * y;
+    }
+    if (m.zone && m.zone.acquire && l.zone === m.zone.zone) {
+      const paid = val * (0.4 + 0.2 * rl());
+      run.cash += paid; l.lost = true;
+      res.notes.push(`The government took your land in ${zn} and paid ${fmt(paid, run.currency)}, well under its value.`);
+      continue;
+    }
+    if (m.zone && m.zone.grab && l.zone === m.zone.zone) {
+      const fee = 0.05 * val; run.cash -= fee;
+      res.notes.push(`Land grabbers in ${zn} demanded a "foundation fee" of ${fmt(fee, run.currency)}.`);
+    }
+    if (rl() < 1 - Math.pow(1 - TITLES[l.title].hazard, y)) {
+      res.titleProblem = true;
+      if (l.title === 'receipt') { l.lost = true; res.notes.push(`Your plot in ${zn} had been sold to two people, and the other buyer had better papers. The plot is gone.`); }
+      else { const fee = (l.title === 'progress' ? 0.2 : 0.1) * val; run.cash -= fee; res.notes.push(`A dispute over your plot in ${zn}. Lawyers and fees cost ${fmt(fee, run.currency)}.`); }
+    }
+  }
+  if (run.land.some((l) => l.lost)) { gains.land -= run.land.filter((l) => l.lost).reduce((s2, l) => s2 + l.plots * plotPrice(run, l.zone), 0); run.land = run.land.filter((l) => !l.lost); }
+  if (farm) { run.cash += farm; res.flows.push({ label: 'Farm harvests', v: farm }); }
 
   if (prev === 'crash' && has(run, 'contrarian')) {
     const bonus = 0.12 * ((run.flow.buy.index || 0) + (run.flow.buy.stocks || 0));
@@ -1006,6 +1735,60 @@ export function live(run) {
     run.log.debt += interest / run.salary;
     res.flows.push({ label: 'Debt interest', v: -interest });
     learn(run, 'debt');
+  }
+
+  // Break-ins, car theft and floods, from the player's own dice.
+  const li = rngFor(run.seed, 'life', t);
+  const st = stars(run);
+  const crime = rule(run, 'crimeWave') ? 2 : 1;
+  if (li() < [0.16, 0.1, 0.06, 0.03, 0.012][st - 1] * crime * k2) {
+    const loss = Math.max(0, run.cash) * (0.1 + 0.3 * li());
+    run.cash -= loss; run.joy = clamp(run.joy - 8, 0, 100);
+    res.notes.push(`Thieves broke into your home${loss > 0 ? ` and took ${fmt(loss, run.currency)} in cash and goods` : ''}. Better security makes this rarer.`);
+    res.incident = 'breakin';
+  }
+  if (run.car.id !== 'none' && li() < CARS[run.car.id].theft * [0.12, 0.08, 0.05, 0.025, 0.01][st - 1] * crime * k2) {
+    res.notes.push(`Your ${CARS[run.car.id].name.toLowerCase()} was stolen. It wasn't insured${run.car.loan > 0 ? ', and you still owe the loan' : ''}.`);
+    run.cash -= run.car.loan; run.car = { id: 'none', v: 0, loan: 0, loan0: 0 };
+    run.joy = clamp(run.joy - 6, 0, 100);
+    res.incident = res.incident || 'cartheft';
+  }
+  if (li() < DISTRICTS[run.home.district].flood * 0.1 * (rule(run, 'wetDecade') ? 2 : 1) * (m.zone && m.zone.flood ? 2 : 1) * k2) {
+    const fix = 0.08 * S;
+    run.cash -= fix; run.joy = clamp(run.joy - 5, 0, 100);
+    if (run.home.own && h.prop.home) { const cut = h.prop.home * 0.05; h.prop.home -= cut; h.prop.v -= cut; }
+    res.notes.push(`Floodwater came into your home. Repairs cost ${fmt(fix, run.currency)}.`);
+    res.incident = res.incident || 'flood';
+  }
+
+  // The Circle: genuine people pay back; a good name brings help in a crisis.
+  const rc = rngFor(run.seed, 'circlepay', t);
+  for (const c of run.circle) {
+    const owed = c.given - c.returned;
+    if (c.type === 'genuine' && owed > 0 && rc() < 0.35 * k2) {
+      const back = owed * (0.5 + 0.5 * rc());
+      run.cash += back; c.returned += back; c.known = true;
+      res.notes.push(`${c.name} paid you back ${fmt(back, run.currency)}.`);
+      res.repaid = c.name;
+    }
+  }
+  rep(run, (50 - run.rep) * 0.04 * k2);
+  if (run.giving > 0) {
+    rep(run, Math.min(3, run.giving * 40) * k2);
+    if (rc() < run.giving * 1.5 * k2) {
+      if (rc() < 0.5) { run.salary *= 1.05; res.notes.push('Someone you helped through your giving put you forward for a better role: +5% pay.'); }
+      else { const g = 0.15 * run.salary; run.cash += g; res.notes.push(`A person you once helped sends a big customer your way: +${fmt(g, run.currency)}.`); }
+    }
+  }
+  if (run.cash < 0) {
+    if (run.rep >= 65 && t - (run.flags.helpT ?? -9) >= 3) {
+      const g = 0.3 * run.salary;
+      run.cash += g; run.flags.helpT = t; rep(run, -5);
+      res.notes.push(`Your Circle rallied round when you were short: ${fmt(g, run.currency)} to tide you over.`);
+    } else if (run.rep <= 30 && !run.flags.aloneSeen) {
+      run.flags.aloneSeen = true;
+      res.notes.push('You are short of money and nobody in your Circle picks up. Your name matters when trouble hits.');
+    }
   }
 
   // Scams and side bets resolve.
@@ -1076,25 +1859,114 @@ export function live(run) {
   run.infl = m.infl; run.rate = m.rate;
   run.prices *= Math.pow(1 + m.infl, y);
   run.baseCosts *= Math.pow(1 + m.infl, y);
-  const realGrowth = Math.max(0, 0.026 - 0.0009 * (run.age - 22)) - (run.asc >= 5 ? 0.01 : 0);
+  run.feeIdx = (run.feeIdx || 1) * Math.pow((1 + m.infl) * 1.03, y);
+  if (m.zone && m.zone.costs !== 1) { run.costMult *= m.zone.costs; res.notes.push('Fuel subsidy removed: everyday costs rise 5% for good.'); }
+  let realGrowth = Math.max(0, 0.026 - 0.0009 * (run.age - 22)) - (run.asc >= 5 ? 0.01 : 0);
+  if (rule(run, 'wageFreeze') && run.age - run.startAge < 10) realGrowth = 0;
+  if (rule(run, 'hotJobs')) realGrowth += 0.01;
   if (has(run, 'remote_job') && profileOf(run.currency).fx) run.salary *= (1 + m.fxDev) * Math.pow(1 + realGrowth, y);
   else run.salary *= Math.pow((1 + realGrowth) * (1 + m.infl), y);
-  let dj = LIFESTYLES[run.life].joy;
+  // Partner and children: pay, trust, schooling and grown-up outcomes.
+  if (P && !P.legacy) {
+    P.pay *= Math.pow((1 + realGrowth) * (1 + m.infl), y);
+    if (P.biz0 && !P.bizDone && run.turn - P.bizT >= Math.max(1, Math.round(2 / y))) {
+      P.bizDone = true;
+      if (rngFor(run.seed, 'pbiz', t)() < 0.45) { P.pay *= 2.2; res.notes.push(`${P.name}'s business took off. Their income more than doubled.`); }
+      else res.notes.push(`${P.name}'s business struggled and closed. The money is gone.`);
+    }
+    let dt = 3;
+    if (run.life === 0) dt -= 8;
+    if (run.home.id === 'room') dt -= 8; else if (HOMES[run.home.id].beds >= 2) dt += 2;
+    if (run.kids.length && HOMES[run.home.id].beds < 2) dt -= 5;
+    if (P.type === 'spender' && run.life < 2) dt -= 5;
+    if (P.type === 'saver' && run.life >= 3) dt -= 5;
+    if (P.type === 'saver' && run.plan.pyf >= 0.2) dt += 3;
+    if (P.type === 'taker') dt -= 3;
+    if (run.cash < 0) dt -= 4;
+    P.trust = clamp(P.trust + dt * k2, 0, 100);
+    P.zero = P.trust <= 0 ? (P.zero || 0) + 1 : 0;
+    if (P.type === 'saver' && run.cash < 0 && !P.potUsed) {
+      P.potUsed = true; P.revealed = true;
+      const pot = 0.5 * run.salary; run.cash += pot;
+      res.notes.push(`${P.name} opens a secret savings tin: ${fmt(pot, run.currency)} to get you out of the hole.`);
+    }
+    if (!P.revealed && run.age + y - P.since >= P.revealAt) { P.revealed = true; res.partnerReveal = P.type; }
+  }
+  if (run.life === 0 && run.kids.some((kd) => SCHOOLS[kd.school].rank > 1)) {
+    run.kids.forEach((kd) => { if (SCHOOLS[kd.school].rank > 1) kd.school = 'budget'; });
+    res.notes.push('Money is too tight for private school fees. The children move to a budget school.');
+  }
+  for (const kd of run.kids) {
+    if (kd.legacy) continue;
+    const a0 = run.age - kd.born;
+    if (a0 >= 5 && a0 < 18) { kd.upSum += SCHOOLS[kd.school].uplift * y; kd.schoolYrs += y; }
+    if (a0 >= 18 && a0 < 22 && kd.uni === 'abroad') kd.abroad = true;
+    if (a0 < 22 && a0 + y >= 22 && !kd.outcome) {
+      const kr = rngFor(run.seed, `kid|${kd.name}`, t);
+      const up = kd.schoolYrs ? kd.upSum / kd.schoolYrs : 0;
+      const sx = (st - 3) * 0.02;
+      const pHelp = clamp(0.12 + up + (kd.abroad ? UNI_ABROAD.uplift : 0) + sx, 0.05, 0.6);
+      const pSup = clamp(0.28 - up - (kd.abroad ? 0.06 : 0) - sx, 0.05, 0.5);
+      const u = kr();
+      kd.outcome = u < pHelp ? 'helping' : u < pHelp + pSup ? 'support' : 'independent';
+      res.kidOutcome = { name: kd.name, outcome: kd.outcome };
+    }
+  }
+  if (run.life === 0) run.frugalYears += y; else run.frugalYears = 0;
+
+  let dj = LIFESTYLES[run.life].joy + lifeJoy(run) - run.refJoy;
   if (has(run, 'side_hustle')) dj -= 3;
   if (run.flags.gig) dj -= 3;
-  if (run.flags.married) dj += 2;
+  if (P && P.legacy) dj += 2;
+  else if (P) dj += P.type === 'taker' && P.revealed ? -2 : PARTNERS[P.type].joy / 2;
+  dj += Math.min(2, run.kids.filter((kd) => !kd.outcome).length);
+  dj += run.kids.filter((kd) => kd.school === 'intl' && !kd.outcome).length;
+  if (run.kids.some((kd) => run.age - kd.born < 18) && HOMES[run.home.id].beds < 2) dj -= 4;
+  dj += Math.min(2, run.giving * 40);
   if (run.asc >= 8) dj -= 2;
   if (c.sailor) dj -= 2;
   if (m.state === 'crash' && nw0 > 0 && netWorth(run) < nw0 * 0.8) dj -= 4;
   run.joy = clamp(run.joy + dj * Math.min(1, y / 2), has(run, 'stoic') ? 30 : 0, 100);
+  run.stats.joySum += run.joy * y; run.stats.years += y;
+  if (run.partner && !run.partner.legacy) { run.stats.trustSum += run.partner.trust * y; run.stats.trustYears += y; }
+  run.stats.givingSum += run.giving * y;
   run.age += y;
   if (run.lev > 0) run.lev -= 1;
   if (run.cash > 0.2 * Math.max(netWorth(run), 1)) run.flags.idle = (run.flags.idle || 0) + 1; else run.flags.idle = 0;
+
+  // Rare golden events, and (16+) a mystery envelope every year.
+  const gr = rngFor(run.seed, 'gold', t);
+  if (!run.eraId && gr() < 0.02 * y * (run.weekend ? 3 : 1)) {
+    const g = GOLDEN[Math.floor(gr() * GOLDEN.length)];
+    if (g.fx === 'cash') run.cash += g.k * run.salary;
+    else if (g.fx === 'salary') run.salary *= 1 + g.k;
+    else if (g.fx === 'index' && h.index > 0) h.index *= 1 + g.k;
+    else if (g.fx === 'home' && run.home.own && h.prop.home) { const up = h.prop.home * g.k; h.prop.home += up; h.prop.v += up; }
+    else run.cash += 0.15 * run.salary;
+    res.golden = { id: g.id, title: g.title, text: g.text };
+    gotIt(run, 'golden', g.id);
+  }
+  if (run.envelopes) {
+    const er = rngFor(run.seed, 'env', t);
+    const big = er() < 1 / 8;
+    const kind = er.pick(['cash', 'wisdom', 'card']);
+    const env = { kind, big };
+    if (kind === 'cash') { env.amt = (big ? 0.5 : 0.05) * run.salary; run.cash += env.amt; }
+    else if (kind === 'wisdom') { env.amt = big ? 15 : 2; run.bonusWisdom += env.amt; }
+    else {
+      const legends = CARDS.filter((c) => c.legendary && !has(run, c.id));
+      if (big && legends.length) { const c = legends[Math.floor(er() * legends.length)]; run.cards.push(c.id); if (c.take) c.take(run, helpers(run, er)); env.card = c.name; }
+      else { run.charges.insider = (run.charges.insider || 0) + 1; env.card = 'Insider Whisper'; }
+    }
+    res.envelope = env;
+  }
 
   res.nw1 = netWorth(run);
   res.passive = passive(run).total;
   res.costs = costs(run);
   res.bowl = bowl(run);
+  res.milestones = [];
+  for (const ms of milestonesNow(run)) if (!run.milestones.includes(ms)) { run.milestones.push(ms); res.milestones.push(ms); }
 
   // Forecast scoring.
   if (fc) {
@@ -1176,8 +2048,15 @@ export function live(run) {
   if (investedNow > 3 * run.salary && !run.flags.compSeen) { run.flags.compSeen = true; mo.push(['compound', '3']); }
   if (run.cash < 0) mo.push(['debt', `${Math.round(debtRate(run) * 100)}%`]);
   if (run.aim && run.age >= run.aim - 5 && run.age - y < run.aim - 5) mo.push(['aim_near', String(run.aim), `${Math.round(Math.min(1, res.passive / res.bowl) * 100)}%`]);
-  if (run.learnMode && t === 0) mo.push(['base_intro']);
-  if (run.learnMode && t === 1) mo.push(['bayes_intro']);
+  if (run.learnMode && run.think && t === 0) mo.push(['base_intro']);
+  if (run.learnMode && run.think && t === 1) mo.push(['bayes_intro']);
+  if (seqHit) mo.push(['seq_hit']);
+  else if (near && prog0 >= 0.75 && !run.flags.stretchSeen) { run.flags.stretchSeen = true; mo.push(['final_stretch']); }
+  if (res.carDep > 0 && !run.flags.carDepSeen) { run.flags.carDepSeen = true; mo.push(['car_dep', money(res.carDep)]); }
+  if (res.partnerReveal) mo.push(['partner_reveal', PARTNERS[res.partnerReveal].name.toLowerCase()]);
+  if (res.kidOutcome) mo.push(['kid_outcome', res.kidOutcome.name, KID_OUTCOMES[res.kidOutcome.outcome]]);
+  if (res.titleProblem) mo.push(['title_problem']);
+  if (res.repaid) mo.push(['circle_repaid', res.repaid]);
   if (run.flags.allCures && !run.flags.allCuresSeen) { run.flags.allCuresSeen = true; mo.push(['all_cures']); }
 
   // Show new ideas first, and never the same moment two years running.
@@ -1204,6 +2083,10 @@ export function live(run) {
     fc: fc ? { p: fc.p, ideal: Math.round(fc.ideal * 100) / 100, up: fc.up } : null,
     moments: (res.moments || []).map((x) => x.id), notes: res.notes.slice(),
     event: null, card: null,
+    home: run.home.id, district: run.home.district, own: run.home.own, car: run.car.id,
+    trust: run.partner ? Math.round(run.partner.trust) : null, kids: run.kids.length, rep: Math.round(run.rep),
+    giving: run.giving, given: Math.round(given), land: Math.round(landValue(run)), seq: seqHit,
+    golden: res.golden ? res.golden.title : null, incident: res.incident || null,
   });
 
   // One-year turns keep life at the same pace as two-year ones: an event and
@@ -1217,7 +2100,7 @@ export function live(run) {
   }
   run.quiet = false;
   const evId = drawEvent(run);
-  const ev = EVENTS.find((e) => e.id === evId);
+  const ev = evById(evId);
   run.pending = { id: evId, v: ev.setup ? ev.setup(run) : {} };
   run.seenEv.push(evId);
   run.phase = 'event';
@@ -1226,20 +2109,23 @@ export function live(run) {
 
 export function chooseEvent(run, i) {
   if (run.phase !== 'event' || !run.pending) return null;
-  const ev = EVENTS.find((e) => e.id === run.pending.id);
-  const choice = ev.choices[i];
+  const ev = evById(run.pending.id);
+  const choice = choicesOf(ev, run, run.pending.v)[i];
   if (!choice || (choice.need && !choice.need(run, run.pending.v))) return null;
   const h = helpers(run, rngFor(run.seed, 'evo', run.turn));
   run.eventLesson = null;
   const text = choice.fx(run, h, run.pending.v) || '';
-  const lesson = choice.lesson || run.eventLesson;
+  if (text === AGAIN) return AGAIN;
+  const lesson = choice.lesson || run.eventLesson || (ev.id === 'circle' ? 'b_lend' : null) || (ev.id === 'burnout' && run.flags.frugalBurn ? 'p_reasonable' : null);
+  run.flags.frugalBurn = false;
   run.eventLesson = lesson || null;
   if (lesson) seeP(run, lesson);
   if (choice.math) seeP(run, 'x_ev');
   const entry = run.journal && run.journal[run.journal.length - 1];
   if (entry) {
     const view = typeof choice.label === 'function' ? choice.label(run.pending.v, h) : choice.label;
-    entry.event = { id: ev.id, title: ev.title, choice: view, note: choice.note || '', outcome: text, lesson: lesson || null };
+    const title = ev.id === 'circle' ? `${run.pending.v.who} (${run.pending.v.rel.toLowerCase()}) asked for help` : ev.title;
+    entry.event = { id: ev.id, title, choice: view, note: choice.note || '', outcome: text, lesson: lesson || null };
   }
   run.pending = null;
   run.phase = 'cards';
@@ -1254,7 +2140,7 @@ export const cardById = (id) => CARDS.find((c) => c.id === id);
 export function makeOffer(run, unlocked) {
   const r = rngFor(run.seed, 'card', run.turn);
   const n = has(run, 'coach') ? 4 : run.asc >= 11 ? 2 : 3;
-  const eligible = (c) => (c.stack || !has(run, c.id)) && (!c.cond || c.cond(run));
+  const eligible = (c) => (c.stack || !has(run, c.id)) && (!c.cond || c.cond(run)) && !(c.id === 'remote_job' && rule(run, 'noRemote'));
   const pool = CARDS.filter((c) => !c.legendary && unlocked.includes(c.id) && eligible(c));
   const legends = CARDS.filter((c) => c.legendary && eligible(c));
   const offer = [];
@@ -1309,6 +2195,53 @@ export function abandon(run) {
   return finish(run, 'quit');
 }
 
+// ---------------------------------------------------------------- milestones and the Life Score
+
+export const MILESTONES = {
+  efund: 'Emergency fund',
+  car: 'First car',
+  home: 'Own your home',
+  half: 'Half free',
+  cushion: '5 years of pay',
+  debtfree: 'Debt-free',
+  school: 'Kids through school',
+};
+
+function milestonesNow(run) {
+  const out = [];
+  if (run.h.save >= costs(run)) out.push('efund');
+  if (run.car.id !== 'none') out.push('car');
+  if (run.home.own) out.push('home');
+  if (passive(run).total >= 0.5 * bowl(run)) out.push('half');
+  if (netWorth(run) >= 5 * run.salary) out.push('cushion');
+  if (run.h.prop.debt > 0 || run.car.loan > 0 || run.cash < 0) run.flags.hadDebt = true;
+  else if (run.flags.hadDebt) out.push('debtfree');
+  if (run.kids.length && run.kids.every((k) => run.age - k.born >= 18)) out.push('school');
+  return out;
+}
+
+// The whole life, not only the age: freedom, joy, family and your name among
+// people. Several different lives can reach five stars.
+export function lifeScore(run, reason) {
+  const st = run.stats || { joySum: 0, years: 0, trustSum: 0, trustYears: 0, givingSum: 0 };
+  const years = Math.max(1, st.years);
+  const ratio = clamp(passive(run).total / bowl(run), 0, 1);
+  const freedom = reason === 'free' ? clamp(2 - Math.max(0, run.age - 38) * 0.06, 0.9, 2) : reason === 'bankrupt' ? 0 : MODES[run.mode] && MODES[run.mode].years ? 2 * clamp(ratio / 0.3, 0, 1) : 0.9 * ratio;
+  const avgJoy = st.years ? st.joySum / years : run.joy;
+  const joy = clamp((avgJoy - 30) / 50, 0, 1);
+  const trustAvg = st.trustYears ? st.trustSum / st.trustYears : null;
+  const partner = trustAvg != null ? 0.5 * (trustAvg / 100) * (run.flags.separated ? 0.6 : 1) : 0.25;
+  const kidScore = (k) => (k.outcome === 'helping' ? 1 : k.outcome === 'independent' ? 0.85 : k.outcome === 'support' ? 0.35
+    : clamp(0.45 + 2.5 * (k.schoolYrs ? k.upSum / k.schoolYrs : 0), 0, 1));
+  const kids = run.kids.length ? 0.5 * run.kids.reduce((s, k) => s + kidScore(k), 0) / run.kids.length : 0.2;
+  const people = 0.7 * (run.rep / 100) + 0.3 * Math.min(1, st.givingSum / years / 0.05);
+  const total = freedom + joy + partner + kids + people;
+  return {
+    stars: clamp(Math.round(total * 2) / 2, 0, 5), total,
+    parts: { freedom, joy, family: partner + kids, people }, avgJoy,
+  };
+}
+
 // ---------------------------------------------------------------- scoring
 
 export function finish(run, reason) {
@@ -1332,6 +2265,8 @@ export function finish(run, reason) {
   if (aimMet) bonus += 300;
   if (fstats && fstats.n >= 3) bonus += Math.round(Math.max(0, 0.25 - fstats.brier) * 4 * 300);
   bonus += run.quizRight * 25;
+  const life = lifeScore(run, reason);
+  if (reason !== 'quit') bonus += Math.round(life.stars * 150);
   score += bonus;
   score = Math.round(score * (1 + 0.15 * run.asc));
 
@@ -1356,11 +2291,16 @@ export function finish(run, reason) {
     reason, score, age: run.age, nw, passive: p.total, costs: C, ratio, joy: run.joy,
     worst, best, lesson: worst ? worst.key : 'none', earlier, annual,
     hist: run.hist.slice(), learned: run.learned.slice(), scammed: !!run.flags.scammed,
-    wisdom: Math.round(score / 40) + (reason === 'free' || reason === 'target' ? 10 : 2) + run.seenP.length,
+    wisdom: Math.round(score / 40) + (reason === 'free' || reason === 'target' ? 10 : 2) + run.seenP.length + (run.bonusWisdom || 0),
     learnMode: run.learnMode, aim: run.aim, aimMet, bonus, forecast: fstats,
     cureYears: run.cureYears.slice(), years: run.age - run.startAge,
     seenP: run.seenP.slice(), quizRight: run.quizRight, quizAsked: run.quizAsked.length,
     journal: (run.journal || []).slice(),
+    life, sprint: !!MODES[run.mode].years, rules: (run.rules || []).slice(), gen: run.gen || 1,
+    bonusWisdom: run.bonusWisdom || 0, got: run.got, milestones: (run.milestones || []).slice(),
+    kids: run.kids.map((k) => ({ name: k.name, age: run.age - k.born, outcome: k.outcome || null, sex: k.sex, look: k.look })),
+    partner: run.partner ? { name: run.partner.name, type: run.partner.type, trust: run.partner.trust, sex: run.partner.sex, look: run.partner.look } : null,
+    rep: run.rep, home: { ...run.home }, car: run.car.id, landV: landValue(run),
   };
   run.phase = 'done';
   return run.result;
