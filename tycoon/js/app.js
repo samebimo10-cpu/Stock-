@@ -402,6 +402,7 @@ function home() {
       <div class="stat"><b>${P.bestAge ?? '–'}</b><span>Free at</span></div>
       <div class="stat"><b>${P.runs}</b><span>Runs</span></div>
     </div>
+    ${standalone() ? '' : `<button class="btn wide" data-act="get-app">${A.icon('phone', 26, '')} Get the app · works offline</button>`}
     <nav class="homebar">
       <button class="btn small" data-act="look-screen">${A.icon('smile', 20, '')} Me</button>
       <button class="btn small" data-act="how">How to play</button>
@@ -1620,9 +1621,74 @@ async function copyText(text) {
   }
 }
 
+// ------------------------------------------------------------------ install as an app
+//
+// Anyone who opens the link in a browser is offered the home-screen app, the
+// same full-screen, offline game the owner has installed. Chrome and Edge give
+// a one-tap install; iPhones only allow Share > Add to Home Screen, so we show
+// those steps; Android in-app browsers (WhatsApp, Facebook) can't install, so
+// we offer to reopen the link in Chrome.
+
+let installEvt = null;
+const UA = navigator.userAgent;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/.test(UA);
+const inAppBrowser = () => /FBAN|FBAV|Instagram|WhatsApp|Line\/|Snapchat|TikTok|; wv\)/.test(UA);
+const INSTALL_SNOOZE_MS = 3 * 864e5;
+
+function installSheet() {
+  if (standalone()) return;
+  const chrome = `intent://${location.host}${location.pathname}#Intent;scheme=https;package=com.android.chrome;end`;
+  let body;
+  if (installEvt) {
+    body = `<button class="btn primary wide" data-act="install">${A.icon('phone', 22, '')} Install Tycoon Rush</button>`;
+  } else if (isIOS()) {
+    body = `${inAppBrowser() ? '<p class="note">First open this page in <b>Safari</b> (tap ⋯ or the compass, then Open in Safari).</p>' : ''}
+      <ol class="install-steps"><li>Tap <b>Share</b> <span class="ios-share" aria-hidden="true">⬆</span> at the bottom of Safari</li><li>Scroll down and tap <b>Add to Home Screen</b></li><li>Tap <b>Add</b></li></ol>`;
+  } else if (isAndroid()) {
+    body = `<a class="btn primary wide" href="${chrome}">${A.icon('phone', 22, '')} Open in Chrome to install</a>
+      <ol class="install-steps"><li>In Chrome, tap the menu <b>⋮</b> at the top right</li><li>Tap <b>Install app</b> or <b>Add to Home screen</b></li></ol>`;
+  } else {
+    body = '<ol class="install-steps"><li>Open your browser menu</li><li>Choose <b>Install app</b> or <b>Add to Home screen</b></li></ol>';
+  }
+  openSheet(`<div data-install>${sheetHead('', 'Get the app')}
+    ${guideSay('Put Tycoon Rush on your home screen. It opens full screen like an app and works with no internet.')}
+    ${body}
+    <button class="btn ghost wide" data-act="install-later">Not now</button></div>`);
+}
+
+function offerInstall() {
+  if (standalone() || (P.installLater && Date.now() - P.installLater < INSTALL_SNOOZE_MS)) return;
+  // Give Chrome a moment to announce that one-tap install is available.
+  setTimeout(() => { if (!standalone() && !layer.innerHTML.trim()) installSheet(); }, 1500);
+}
+
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvt = e;
+  if (layer.querySelector('[data-install]')) installSheet();
+});
+addEventListener('appinstalled', () => {
+  installEvt = null;
+  if (layer.querySelector('[data-install]')) closeLayer();
+  toast('Installed! Open Tycoon Rush from your home screen.');
+});
+
 // ------------------------------------------------------------------ actions
 
 const ACT = {
+  'get-app': () => installSheet(),
+  install: async () => {
+    if (!installEvt) return installSheet();
+    const evt = installEvt;
+    installEvt = null;
+    evt.prompt();
+    const choice = await evt.userChoice.catch(() => null);
+    closeLayer();
+    if (!choice || choice.outcome !== 'accepted') { P.installLater = Date.now(); saveProfile(); }
+  },
+  'install-later': () => { P.installLater = Date.now(); saveProfile(); closeLayer(); },
   home: () => { persist(); home(); },
   resume: () => resume(),
   setup: (d) => setup(d.mode),
@@ -1832,6 +1898,7 @@ addEventListener('resize', () => { if (run && run.phase === 'alloc') drawSparks(
 
 applyCalm();
 home();
+offerInstall();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   // When a new version takes over an open game, reload once so the player
