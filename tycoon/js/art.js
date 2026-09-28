@@ -26,107 +26,294 @@ const S = `stroke="${O}" stroke-width="3" stroke-linejoin="round" stroke-linecap
 const s2 = `stroke="${O}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"`;
 
 // ------------------------------------------------------------------ people
+//
+// Semi-realistic illustrated people, closer to a storybook than a cartoon:
+// three tones per skin colour, necks and shoulders, body builds, subtle
+// expressions, and ageing (grey hair from 45, lines at 50, reading glasses at
+// 55). Clothes follow money, from a plain T-shirt to designer, with regional
+// dress as an option. All drawn in code so the offline cache stays small.
 
+const hexRgb = (h) => { const n = parseInt(h.slice(1, 7), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+export const mix = (a, b, t) => { const A = hexRgb(a); const B = hexRgb(b); return `#${A.map((x, i) => Math.round(x + (B[i] - x) * t).toString(16).padStart(2, '0')).join('')}`; };
+const dark = (c, t) => mix(c, '#1a0f0a', t);
+const light = (c, t) => mix(c, '#ffffff', t);
+let uid = 0;
+const nextId = () => `p${(uid = (uid + 1) % 1e6)}`;
+
+export const BUILDS = ['slim', 'average', 'heavy'];
+// Regional dress. `style` (0–4) still sets how rich the details are.
+export const WEARS = ['none', 'agbada', 'kaftan', 'ankara', 'sari', 'kurta', 'suit'];
+export const WEAR_NAMES = { none: 'Everyday clothes', agbada: 'Agbada', kaftan: 'Kaftan', ankara: 'Ankara print', sari: 'Sari', kurta: 'Kurta', suit: 'Suit' };
+export const STYLE_NAMES = ['Plain T-shirt', 'Shirt', 'Smart casual', 'Tailored', 'Designer'];
+
+function greyed(hc, age) {
+  if (age < 45) return hc;
+  return mix(hc, '#cfcbd6', Math.min(0.85, (age - 45) / 18));
+}
+
+// Hair behind the head, then in front. Head spans x 33.5–66.5, top at y 21.
 function hairBack(style, c) {
+  const sh = dark(c, 0.25);
   switch (style) {
-    case 'afro': return `<circle cx="50" cy="42" r="31" fill="${c}" ${S}/>`;
-    case 'long': return `<path d="M25 52 C22 24 38 18 50 18 C63 18 79 24 75 52 L80 92 L20 92 Z" fill="${c}" ${S}/>`;
-    case 'braids': return `<rect x="21" y="44" width="9" height="46" rx="4" fill="${c}" ${S}/><rect x="70" y="44" width="9" height="46" rx="4" fill="${c}" ${S}/>`;
-    case 'curly': return [26, 38, 50, 62, 74].map((x, i) => `<circle cx="${x}" cy="${i % 2 ? 22 : 27}" r="11" fill="${c}" ${S}/>`).join('') + `<circle cx="24" cy="42" r="9" fill="${c}" ${S}/><circle cx="76" cy="42" r="9" fill="${c}" ${S}/>`;
-    case 'bun': return `<circle cx="50" cy="17" r="10" fill="${c}" ${S}/>`;
+    case 'afro': return `<circle cx="50" cy="35" r="22.5" fill="${c}" stroke="${sh}" stroke-width="1.4"/><circle cx="43" cy="24" r="6" fill="${light(c, 0.12)}" opacity=".35"/>`;
+    case 'long': return `<path d="M31 40 C29 21 40 14 50 14 C60 14 71 21 69 40 L72 86 C62 92 38 92 28 86 Z" fill="${c}" stroke="${sh}" stroke-width="1.4"/><path d="M36 50 L33 84 M64 50 L67 84" stroke="${sh}" stroke-width="1.2" opacity=".6"/>`;
+    case 'braids': return [30, 35, 65, 70].map((x) => `<path d="M${x} 38 C${x - 1} 55 ${x + 1} 70 ${x} 88" stroke="${c}" stroke-width="5" stroke-linecap="round" fill="none"/><path d="M${x} 42 L${x} 86" stroke="${sh}" stroke-width="1" stroke-dasharray="2 3"/>`).join('');
+    case 'curly': return [33, 41, 50, 59, 67].map((x, i) => `<circle cx="${x}" cy="${i % 2 ? 19 : 23}" r="8.5" fill="${c}" stroke="${sh}" stroke-width="1.2"/>`).join('') + `<circle cx="31" cy="36" r="7" fill="${c}"/><circle cx="69" cy="36" r="7" fill="${c}"/>`;
+    case 'bun': return `<circle cx="50" cy="15.5" r="7.5" fill="${c}" stroke="${sh}" stroke-width="1.4"/>`;
     default: return '';
   }
 }
 
 function hairFront(style, c, accent) {
+  const sh = dark(c, 0.3);
+  const hi = light(c, 0.2);
   switch (style) {
-    case 'bald': return `<path d="M28 50 C27 44 29 40 31 38" fill="none" stroke="${c}" stroke-width="4" stroke-linecap="round"/><path d="M72 50 C73 44 71 40 69 38" fill="none" stroke="${c}" stroke-width="4" stroke-linecap="round"/>`;
-    case 'wrap': return `<path d="M23 48 C19 22 38 12 50 12 C64 12 83 18 77 48 C70 37 60 34 50 34 C41 34 30 37 23 48 Z" fill="${accent}" ${S}/><path d="M34 22 C44 26 58 26 68 20" fill="none" stroke="${O}" stroke-width="2"/><circle cx="72" cy="17" r="8" fill="${accent}" ${S}/>`;
+    case 'bald': return `<path d="M34.5 44 C34 39 35 35.5 36.5 33.5 M65.5 44 C66 39 65 35.5 63.5 33.5" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"/><path d="M42 24 Q50 21 58 24" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2" stroke-linecap="round"/>`;
+    case 'wrap': return `<path d="M31 40 C27 17 40 9 50 9 C62 9 75 15 69 40 C63 31 57 28.5 50 28.5 C43 28.5 36 31 31 40 Z" fill="${accent}" stroke="${dark(accent, 0.35)}" stroke-width="1.4"/><path d="M37 18 C45 22 57 22 65 16 M34 27 C44 31 58 30 67 25" fill="none" stroke="${dark(accent, 0.3)}" stroke-width="1.2"/><path d="M62 10 C70 4 76 10 72 16 C68 13 65 13 62 10 Z" fill="${accent}" stroke="${dark(accent, 0.35)}" stroke-width="1.2"/>`;
     case 'hijab': return '';
-    case 'afro': return `<path d="M28 44 C30 32 40 27 50 27 C60 27 70 32 72 44 C64 38 58 37 50 37 C42 37 35 39 28 44 Z" fill="${c}"/>`;
-    case 'curly': return `<path d="M27 46 C29 32 40 28 50 28 C61 28 71 32 73 46 C66 40 58 38 50 38 C42 38 34 40 27 46 Z" fill="${c}" ${S}/>`;
-    case 'long': return `<path d="M27 48 C27 28 40 22 50 22 C60 22 73 28 73 48 C66 38 57 33 47 33 C40 36 32 41 27 48 Z" fill="${c}" ${S}/>`;
-    default: return `<path d="M27 47 C27 28 39 22 50 22 C62 22 74 28 73 47 C67 38 58 34 50 34 C42 34 33 38 27 47 Z" fill="${c}" ${S}/>`;
+    case 'afro': return `<path d="M32 39 C33 28 41 23.5 50 23.5 C59 23.5 67 28 68 39 C62 33 57 31.5 50 31.5 C43 31.5 37 33 32 39 Z" fill="${c}"/>`;
+    case 'curly': return `<path d="M32 40 C32 27 41 22.5 50 22.5 C59 22.5 68 27 68 40 C63 34 57 32 50 32 C43 32 37 34 32 40 Z" fill="${c}" stroke="${sh}" stroke-width="1.2"/>${[38, 46, 54, 62].map((x) => `<circle cx="${x}" cy="30" r="3" fill="${hi}" opacity=".35"/>`).join('')}`;
+    case 'long': return `<path d="M32 42 C31 26 40 18.5 50 18.5 C60 18.5 69 26 68 42 C64 33 57 28.5 48 28.5 C42 31 36 36 32 42 Z" fill="${c}" stroke="${sh}" stroke-width="1.2"/><path d="M44 21 C50 20 58 22 63 28" fill="none" stroke="${hi}" stroke-width="1.6" opacity=".5"/>`;
+    case 'braids': return `<path d="M32.5 40 C31 25 40 18.5 50 18.5 C60 18.5 69 25 67.5 40 C64 32 58 29 50 29 C42 29 36 32 32.5 40 Z" fill="${c}" stroke="${sh}" stroke-width="1.2"/>${[38, 44, 50, 56, 62].map((x) => `<path d="M${x} 20 L${x + (x - 50) * 0.3} 30" stroke="${sh}" stroke-width="1.1"/>`).join('')}`;
+    case 'bun': return `<path d="M32.5 40 C31 25 40 18.5 50 18.5 C60 18.5 69 25 67.5 40 C64 30 58 26.5 50 26.5 C42 26.5 36 30 32.5 40 Z" fill="${c}" stroke="${sh}" stroke-width="1.2"/><path d="M40 22 Q50 18 60 22" fill="none" stroke="${hi}" stroke-width="1.4" opacity=".5"/>`;
+    default: return `<path d="M32.5 40 C31 25 40 17.5 50 17.5 C61 17.5 69 25 67.5 40 C65.5 33 60 28.5 50 28.5 C42 28.5 35 32 32.5 40 Z" fill="${c}" stroke="${sh}" stroke-width="1.2"/><path d="M43 19.5 C47 24 49 26 53 28" fill="none" stroke="${sh}" stroke-width="1.1"/><path d="M52 20 C57 21 62 24 64 29" fill="none" stroke="${hi}" stroke-width="1.4" opacity=".45"/>`;
   }
 }
 
-function face(expr, eye = O) {
-  const eyes = {
-    happy: `<circle cx="41" cy="52" r="2.8" fill="${eye}"/><circle cx="59" cy="52" r="2.8" fill="${eye}"/>`,
-    neutral: `<circle cx="41" cy="52" r="2.6" fill="${eye}"/><circle cx="59" cy="52" r="2.6" fill="${eye}"/>`,
-    tired: `<path d="M37 53 L45 53 M55 53 L63 53" stroke="${eye}" stroke-width="2.6" stroke-linecap="round"/><path d="M38 57 Q41 59 44 57 M56 57 Q59 59 62 57" fill="none" stroke="#8a5a6a" stroke-width="1.6"/>`,
-    shocked: `<circle cx="41" cy="51" r="4.2" fill="#fff" stroke="${eye}" stroke-width="2"/><circle cx="59" cy="51" r="4.2" fill="#fff" stroke="${eye}" stroke-width="2"/><circle cx="41" cy="51" r="1.8" fill="${eye}"/><circle cx="59" cy="51" r="1.8" fill="${eye}"/>`,
-    cheer: `<path d="M37 53 Q41 47 45 53 M55 53 Q59 47 63 53" fill="none" stroke="${eye}" stroke-width="2.6" stroke-linecap="round"/>`,
-    sly: `<path d="M37 52 L45 51 M55 51 L63 52" stroke="${eye}" stroke-width="2.6" stroke-linecap="round"/>`,
-  }[expr] || '';
+// Subtle expressions: the eyes, brows and mouth move a little, never a cartoon grin.
+function faceParts(expr, skin, hc, age, child) {
+  const line = dark(skin, 0.55);
+  const brow = dark(hc, 0.1);
+  const lip = mix(skin, '#a4404f', 0.42);
+  const ey = 42;
+  const eye = (x) => {
+    if (expr === 'cheer') return `<path d="M${x - 4} ${ey + 0.5} Q${x} ${ey - 2.8} ${x + 4} ${ey + 0.5}" fill="none" stroke="${line}" stroke-width="1.5" stroke-linecap="round"/>`;
+    const open = expr === 'shocked' ? 3.6 : expr === 'tired' ? 1.6 : expr === 'sly' ? 1.8 : 2.7;
+    const iris = child ? 2.4 : 2.1;
+    return `<path d="M${x - 4.2} ${ey} Q${x} ${ey - open - 0.4} ${x + 4.2} ${ey} Q${x} ${ey + 2.3} ${x - 4.2} ${ey} Z" fill="#fbf8f5" stroke="${line}" stroke-width="0.9"/>
+      <circle cx="${x}" cy="${ey + 0.1}" r="${iris}" fill="#3a2418"/><circle cx="${x}" cy="${ey + 0.1}" r="1" fill="#0d0806"/><circle cx="${x + 0.8}" cy="${ey - 0.8}" r="0.6" fill="#fff"/>
+      <path d="M${x - 4.4} ${ey - 0.2} Q${x} ${ey - open - 0.9} ${x + 4.4} ${ey - 0.2}" fill="none" stroke="${line}" stroke-width="1.4" stroke-linecap="round"/>
+      ${expr === 'tired' ? `<path d="M${x - 4.4} ${ey - 0.4} Q${x} ${ey - 2.2} ${x + 4.4} ${ey - 0.4} L${x + 4.4} ${ey - 3} L${x - 4.4} ${ey - 3} Z" fill="${skin}"/><path d="M${x - 3.5} ${ey + 3} Q${x} ${ey + 4.6} ${x + 3.5} ${ey + 3}" fill="none" stroke="${dark(skin, 0.3)}" stroke-width="0.9"/>` : ''}`;
+  };
+  const brows = {
+    neutral: ['M38.5 36.5 Q43 35 47.5 36.2', 'M52.5 36.2 Q57 35 61.5 36.5'],
+    happy: ['M38.5 36.2 Q43 34.2 47.5 35.8', 'M52.5 35.8 Q57 34.2 61.5 36.2'],
+    cheer: ['M38.5 35.2 Q43 32.8 47.5 34.6', 'M52.5 34.6 Q57 32.8 61.5 35.2'],
+    tired: ['M38.5 37 Q43 36.2 47.5 35', 'M52.5 35 Q57 36.2 61.5 37'],
+    worried: ['M38.5 37 Q43 36 47.5 34.2', 'M52.5 34.2 Q57 36 61.5 37'],
+    shocked: ['M38.5 33.8 Q43 31.5 47.5 33.2', 'M52.5 33.2 Q57 31.5 61.5 33.8'],
+    sly: ['M38.5 36.8 Q43 35.8 47.5 36.4', 'M52.5 35 Q57 33 61.5 34.2'],
+  }[expr] || ['M38.5 36.5 Q43 35 47.5 36.2', 'M52.5 36.2 Q57 35 61.5 36.5'];
   const mouth = {
-    happy: `<path d="M42 62 Q50 69 58 62" fill="none" stroke="${O}" stroke-width="2.6" stroke-linecap="round"/>`,
-    neutral: `<path d="M44 64 L56 64" stroke="${O}" stroke-width="2.6" stroke-linecap="round"/>`,
-    tired: `<path d="M43 66 Q50 62 57 66" fill="none" stroke="${O}" stroke-width="2.6" stroke-linecap="round"/>`,
-    shocked: `<ellipse cx="50" cy="65" rx="4.5" ry="5.5" fill="#6b1f2b" stroke="${O}" stroke-width="2"/>`,
-    cheer: `<path d="M40 60 Q50 75 60 60 Z" fill="#6b1f2b" stroke="${O}" stroke-width="2.4" stroke-linejoin="round"/><path d="M43 61 L57 61" stroke="#fff" stroke-width="2"/>`,
-    sly: `<path d="M43 64 Q52 67 59 60" fill="none" stroke="${O}" stroke-width="2.6" stroke-linecap="round"/>`,
+    happy: `<path d="M44.5 55 Q50 58.6 55.5 55" fill="none" stroke="${dark(lip, 0.35)}" stroke-width="1.4" stroke-linecap="round"/><path d="M45.5 56 Q50 59.5 54.5 56 Q50 58 45.5 56 Z" fill="${lip}"/>`,
+    cheer: `<path d="M44 54.5 Q50 61 56 54.5 Q50 56.5 44 54.5 Z" fill="#fff" stroke="${dark(lip, 0.35)}" stroke-width="1.2" stroke-linejoin="round"/><path d="M45 56.5 Q50 60.5 55 56.5" fill="none" stroke="${lip}" stroke-width="1.4"/>`,
+    neutral: `<path d="M45.5 55.8 Q50 56.6 54.5 55.8" fill="none" stroke="${dark(lip, 0.35)}" stroke-width="1.3" stroke-linecap="round"/><path d="M46.5 56.4 Q50 58 53.5 56.4" fill="none" stroke="${lip}" stroke-width="1.3"/>`,
+    tired: `<path d="M45.5 56.8 Q50 55.4 54.5 56.8" fill="none" stroke="${dark(lip, 0.35)}" stroke-width="1.3" stroke-linecap="round"/>`,
+    worried: `<path d="M45 57 Q47.5 55.6 50 56.4 Q52.5 57.2 55 55.8" fill="none" stroke="${dark(lip, 0.35)}" stroke-width="1.3" stroke-linecap="round"/>`,
+    shocked: `<ellipse cx="50" cy="57" rx="2.6" ry="3.2" fill="#5a1f28" stroke="${dark(lip, 0.3)}" stroke-width="1"/>`,
+    sly: `<path d="M45 56.4 Q51 57.6 55.5 54" fill="none" stroke="${dark(lip, 0.35)}" stroke-width="1.4" stroke-linecap="round"/>`,
   }[expr] || '';
-  const blush = expr === 'happy' || expr === 'cheer' ? '<circle cx="35" cy="60" r="3.5" fill="#ff7a8a" opacity=".35"/><circle cx="65" cy="60" r="3.5" fill="#ff7a8a" opacity=".35"/>' : '';
-  return eyes + mouth + blush;
+  const blush = (expr === 'happy' || expr === 'cheer') ? `<ellipse cx="39.5" cy="49" rx="3.4" ry="2" fill="#e0667a" opacity=".18"/><ellipse cx="60.5" cy="49" rx="3.4" ry="2" fill="#e0667a" opacity=".18"/>` : '';
+  const nose = `<path d="M50.5 43.5 C50 47 48.3 49.2 48.4 50.6 C49.4 51.6 51.2 51.6 52.4 50.8" fill="none" stroke="${dark(skin, 0.38)}" stroke-width="1.1" stroke-linecap="round"/><ellipse cx="51.5" cy="49.2" rx="1.6" ry="0.9" fill="${light(skin, 0.25)}" opacity=".5"/>`;
+  const lines = age >= 50 ? `<g stroke="${dark(skin, 0.4)}" stroke-width="0.8" fill="none" opacity="${Math.min(0.7, 0.35 + (age - 50) / 40)}"><path d="M42 28.5 Q50 27 58 28.5 M43.5 31 Q50 30 56.5 31"/><path d="M33.8 41.5 L36 42.8 M33.8 44 L36 44 M66.2 41.5 L64 42.8 M66.2 44 L64 44"/><path d="M45 50.5 Q43.5 53.5 44.2 56 M55 50.5 Q56.5 53.5 55.8 56"/></g>` : '';
+  return `${lines}<path d="${brows[0]}" fill="none" stroke="${brow}" stroke-width="1.9" stroke-linecap="round"/><path d="${brows[1]}" fill="none" stroke="${brow}" stroke-width="1.9" stroke-linecap="round"/>${eye(43)}${eye(57)}${nose}${blush}${mouth}`;
+}
+
+// Garments. Every top is drawn inside the torso outline, so builds just work.
+function garment(o, W, cid) {
+  const c = o.outfit;
+  const a = o.accent;
+  const style = o.style ?? 1;
+  const wear = o.wear && o.wear !== 'none' ? o.wear : null;
+  const gold = '#d9a93a';
+  const out = [];
+  const neckL = 50 - 7.5;
+  const neckR = 50 + 7.5;
+  const rich = style >= 3;
+  if (wear === 'agbada' || wear === 'kaftan') {
+    out.push(`<path d="M${50 - W - 6} 121 C${50 - W - 4} 96 ${50 - W + 4} 78 ${neckL} 72 L${neckR} 72 C${50 + W - 4} 78 ${50 + W + 4} 96 ${50 + W + 6} 121 Z" fill="${c}"/>`);
+    out.push(`<path d="M${neckL} 72 Q50 ${wear === 'agbada' ? 96 : 86} ${neckR} 72" fill="none" stroke="${rich ? gold : light(c, 0.45)}" stroke-width="${rich ? 3.2 : 2.2}"/>`);
+    out.push(`<path d="M50 ${wear === 'agbada' ? 96 : 86} L50 121" stroke="${rich ? gold : light(c, 0.35)}" stroke-width="${rich ? 2.4 : 1.4}" stroke-dasharray="${rich ? '0' : '3 3'}"/>`);
+    if (wear === 'agbada') out.push(`<path d="M${50 - W - 5} 108 Q${50 - 22} 100 ${50 - 14} 121 M${50 + W + 5} 108 Q${50 + 22} 100 ${50 + 14} 121" fill="none" stroke="${dark(c, 0.25)}" stroke-width="1.4"/>`);
+    return out.join('');
+  }
+  out.push(`<rect x="0" y="60" width="100" height="61" fill="${wear === 'suit' || (!wear && style >= 3) ? '#f4f2f8' : c}" clip-path="url(#${cid})"/>`);
+  if (wear === 'ankara') {
+    out.push(`<g clip-path="url(#${cid})">${Array.from({ length: 24 }, (_, i) => `<circle cx="${8 + (i % 6) * 17 + (Math.floor(i / 6) % 2) * 8}" cy="${80 + Math.floor(i / 6) * 12}" r="4.5" fill="none" stroke="${a}" stroke-width="2.2"/>`).join('')}</g>`);
+    out.push(`<path d="M${neckL} 72 Q50 80 ${neckR} 72" fill="none" stroke="${dark(c, 0.3)}" stroke-width="1.6"/>`);
+  } else if (wear === 'sari') {
+    out.push(`<path d="M${neckR - 2} 71 L${50 + W} 90 L${50 + W} 121 L${50 + 4} 121 Z" fill="${a}" clip-path="url(#${cid})"/><path d="M${neckR - 2} 71 L${50 + 4} 121" stroke="${rich ? gold : light(a, 0.4)}" stroke-width="${rich ? 2.6 : 1.6}"/>`);
+    out.push(`<path d="M${neckL} 72 Q50 79 ${neckR} 72" fill="none" stroke="${dark(c, 0.3)}" stroke-width="1.4"/>`);
+  } else if (wear === 'kurta') {
+    out.push(`<path d="M${neckL} 72 Q50 77 ${neckR} 72" fill="none" stroke="${dark(c, 0.3)}" stroke-width="1.6"/><path d="M50 75 L50 96" stroke="${dark(c, 0.3)}" stroke-width="1.4"/>${[80, 86, 92].map((y) => `<circle cx="51.8" cy="${y}" r="1" fill="${rich ? gold : dark(c, 0.4)}"/>`).join('')}`);
+  } else if (wear === 'suit' || (!wear && style >= 3)) {
+    const jacket = wear === 'suit' ? '#2c3348' : style === 4 ? dark(a, 0.25) : dark(c, 0.45);
+    out.push(`<path d="M${50 - W - 1} 121 L${50 - W - 1} 86 C${50 - W + 4} 76 ${neckL - 2} 73 ${neckL} 72 L50 100 L${neckR} 72 C${neckR + 2} 73 ${50 + W - 4} 76 ${50 + W + 1} 86 L${50 + W + 1} 121 Z" fill="${jacket}" clip-path="url(#${cid})"/>`);
+    out.push(`<path d="M${neckL} 72 L${neckL + 1} 84 L50 100 M${neckR} 72 L${neckR - 1} 84 L50 100" fill="none" stroke="${dark(jacket, 0.4)}" stroke-width="1.4"/>`);
+    if (o.sex !== 'f') out.push(`<path d="M50 74 L47.5 78 L50 98 L52.5 78 Z" fill="${style === 4 ? gold : a}" stroke="${dark(a, 0.4)}" stroke-width="0.8"/>`);
+    else out.push(`<path d="M44 74 Q50 84 56 74" fill="none" stroke="${gold}" stroke-width="1.4"/><circle cx="50" cy="83" r="1.8" fill="${gold}"/>`);
+    if (style === 4) out.push(`<path d="M${50 + W - 12} 92 l6 -2 l1 4 l-6 1 Z" fill="${gold}"/>`);
+  } else if (style === 0) {
+    out.push(`<path d="M${neckL - 1} 71.5 Q50 80 ${neckR + 1} 71.5" fill="none" stroke="${dark(c, 0.3)}" stroke-width="1.8"/>`);
+  } else {
+    // Shirt, or smart casual: a collared shirt under a V-neck.
+    if (style === 2) out.push(`<path d="M${50 - W} 121 L${50 - W} 88 C${50 - W + 6} 78 ${neckL} 73 ${neckL} 72 L50 94 L${neckR} 72 C${neckR} 73 ${50 + W - 6} 78 ${50 + W} 88 L${50 + W} 121 Z" fill="${a}" clip-path="url(#${cid})"/><path d="M${neckL} 72 L50 94 L${neckR} 72" fill="none" stroke="${dark(a, 0.35)}" stroke-width="1.3"/>`);
+    out.push(`<path d="M${neckL - 1} 70.5 L${neckL + 2} 78 L50 73.5 L${neckR - 2} 78 L${neckR + 1} 70.5" fill="${light(c, 0.55)}" stroke="${dark(c, 0.35)}" stroke-width="1.1" stroke-linejoin="round"/>`);
+    if (style === 1) out.push(`<path d="M50 75 L50 121" stroke="${dark(c, 0.25)}" stroke-width="1"/>${[82, 92, 102].map((y) => `<circle cx="51.6" cy="${y}" r="0.9" fill="${dark(c, 0.4)}"/>`).join('')}`);
+  }
+  return out.join('');
 }
 
 const ACC = {
-  mortarboard: () => `<path d="M24 26 L50 15 L76 26 L50 37 Z" fill="#231a3f" ${S}/><rect x="37" y="27" width="26" height="9" fill="#231a3f"/><path d="M72 27 L74 40" stroke="${P_.gold}" stroke-width="3" stroke-linecap="round"/><circle cx="74" cy="42" r="3" fill="${P_.gold}"/>`,
-  sailorcap: () => `<path d="M28 34 C28 22 72 22 72 34 Z" fill="${P_.white}" ${S}/><rect x="27" y="31" width="46" height="8" rx="2" fill="${P_.navy}" ${S}/><rect x="45" y="24" width="10" height="7" rx="2" fill="${P_.gold}"/>`,
-  strawhat: () => `<ellipse cx="50" cy="33" rx="37" ry="8" fill="#e8c46a" ${S}/><path d="M32 33 C32 16 68 16 68 33 Z" fill="#e8c46a" ${S}/><path d="M33 29 L67 29" stroke="${P_.red}" stroke-width="4"/>`,
-  cap: (a) => `<path d="M27 36 C27 20 73 20 73 36 Z" fill="${a}" ${S}/><path d="M50 36 L82 38 L80 42 L50 40 Z" fill="${a}" ${S}/>`,
-  raincap: () => `<path d="M22 42 C22 18 78 18 78 42 L84 46 L16 46 Z" fill="${P_.gold}" ${S}/>`,
-  sunglasses: () => `<rect x="31" y="46" width="16" height="11" rx="4" fill="${O}"/><rect x="53" y="46" width="16" height="11" rx="4" fill="${O}"/><path d="M47 50 L53 50" stroke="${O}" stroke-width="3"/><path d="M34 49 L39 49" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M56 49 L61 49" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`,
-  glasses: () => `<circle cx="41" cy="52" r="7" fill="none" stroke="${O}" stroke-width="2.4"/><circle cx="59" cy="52" r="7" fill="none" stroke="${O}" stroke-width="2.4"/><path d="M48 52 L52 52" stroke="${O}" stroke-width="2.4"/>`,
-  tie: (a) => `<path d="M50 86 L45 92 L50 116 L55 92 Z" fill="${a}" ${S}/>`,
-  collar: () => `<path d="M38 85 L50 96 L62 85" fill="${P_.white}" ${S}/>`,
-  lanyard: () => `<path d="M39 86 L50 104 L61 86" fill="none" stroke="${P_.red}" stroke-width="3"/><rect x="44" y="102" width="12" height="14" rx="2" fill="${P_.white}" ${S}/>`,
-  stethoscope: () => `<path d="M38 86 C38 104 62 104 62 86" fill="none" stroke="#4a5a8a" stroke-width="3.5"/><circle cx="50" cy="104" r="4" fill="#c9d4f0" ${s2}/>`,
-  chain: () => `<path d="M36 88 Q50 104 64 88" fill="none" stroke="${P_.gold}" stroke-width="4" stroke-dasharray="3 2"/><circle cx="50" cy="100" r="5" fill="${P_.gold}" ${s2}/>`,
-  earrings: () => `<circle cx="28" cy="61" r="3" fill="${P_.gold}" ${s2}/><circle cx="72" cy="61" r="3" fill="${P_.gold}" ${s2}/>`,
-  beard: (a, hc) => `<path d="M30 56 C31 76 42 80 50 80 C58 80 69 76 70 56 C64 66 58 67 50 67 C42 67 36 66 30 56 Z" fill="${hc}" ${S}/><path d="M44 63 Q50 60 56 63" fill="none" stroke="${O}" stroke-width="2"/>`,
-  shawl: (a) => `<path d="M18 120 C20 96 32 86 50 88 C68 86 80 96 82 120" fill="${a}" ${S}/>`,
-  coat: () => `<path d="M40 86 L50 112 L60 86" fill="none" stroke="${O}" stroke-width="2.4"/>`,
-  watch: () => `<rect x="70" y="104" width="10" height="9" rx="2" fill="${P_.gold}" ${s2}/>`,
-  hoe: () => `<path d="M86 60 L78 120" stroke="${P_.brown}" stroke-width="4" stroke-linecap="round"/><path d="M80 58 L94 62 L92 68 Z" fill="#9aa4b8" ${s2}/>`,
-  phones: () => `<rect x="10" y="94" width="12" height="20" rx="3" fill="#2b2b3f" ${s2}/><rect x="78" y="94" width="12" height="20" rx="3" fill="#2b2b3f" ${s2}/><rect x="12.5" y="97" width="7" height="12" fill="${P_.sky}"/><rect x="80.5" y="97" width="7" height="12" fill="${P_.mint}"/>`,
-  diploma: () => `<rect x="72" y="98" width="22" height="9" rx="4" fill="${P_.white}" ${s2}/><path d="M83 98 L83 107" stroke="${P_.red}" stroke-width="3"/>`,
-  coinbag: () => `<path d="M76 96 C68 100 68 118 82 118 C96 118 96 100 88 96 Z" fill="#c9a36a" ${s2}/><path d="M77 96 L87 96" stroke="${O}" stroke-width="3"/><circle cx="82" cy="108" r="4" fill="${P_.gold}" ${s2}/>`,
-  phonehype: () => `<rect x="74" y="88" width="16" height="28" rx="3" fill="#2b2b3f" ${s2}/><rect x="76.5" y="91" width="11" height="20" fill="${P_.mint}"/><path d="M77 108 L80 102 L83 104 L87 94" fill="none" stroke="${O}" stroke-width="1.8"/>`,
-  hijab: (a) => `<path d="M22 60 C18 24 36 14 50 14 C64 14 82 24 78 60 C78 80 70 92 50 94 C30 92 22 80 22 60 Z" fill="${a}" ${S}/>`,
-  wave: (a, hc, skin) => `<path d="M80 90 L92 66" stroke="${skin}" stroke-width="9" stroke-linecap="round"/><path d="M80 90 L92 66" fill="none" stroke="${O}" stroke-width="2" stroke-linecap="round" opacity=".0"/><circle cx="93" cy="62" r="6" fill="${skin}" ${s2}/>`,
+  mortarboard: () => `<path d="M28 23 L50 13 L72 23 L50 32 Z" fill="#231a3f" stroke="#0e0a1c" stroke-width="1.2"/><rect x="39" y="23.5" width="22" height="7" fill="#231a3f"/><path d="M68 24 L70 35" stroke="${P_.gold}" stroke-width="1.6"/><circle cx="70" cy="36.5" r="2" fill="${P_.gold}"/>`,
+  sailorcap: () => `<path d="M32 30 C32 20 68 20 68 30 Z" fill="${P_.white}" stroke="#555" stroke-width="1.2"/><rect x="31" y="28" width="38" height="6" rx="2" fill="${P_.navy}"/><rect x="46" y="22" width="8" height="5" rx="1.5" fill="${P_.gold}"/>`,
+  strawhat: () => `<ellipse cx="50" cy="29" rx="32" ry="6.5" fill="#e3bf66" stroke="#9c7a2a" stroke-width="1.2"/><path d="M35 29 C35 13 65 13 65 29 Z" fill="#e8c46a" stroke="#9c7a2a" stroke-width="1.2"/><path d="M36 26 L64 26" stroke="${P_.red}" stroke-width="3"/>`,
+  cap: (a) => `<path d="M32 31 C32 17 68 17 68 31 Z" fill="${a}" stroke="${dark(a, 0.4)}" stroke-width="1.2"/><path d="M50 31 L78 33 L76 36 L50 34.5 Z" fill="${dark(a, 0.15)}" stroke="${dark(a, 0.4)}" stroke-width="1.1"/>`,
+  raincap: () => `<path d="M28 37 C28 15 72 15 72 37 L78 40 L22 40 Z" fill="${P_.gold}" stroke="#9c7a2a" stroke-width="1.2"/>`,
+  sunglasses: () => `<rect x="37" y="38.5" width="12" height="7.5" rx="3" fill="#15121f"/><rect x="51" y="38.5" width="12" height="7.5" rx="3" fill="#15121f"/><path d="M49 41 L51 41 M37 40 L33.5 39 M63 40 L66.5 39" stroke="#15121f" stroke-width="1.6"/><path d="M39.5 40.5 L43 40.5" stroke="#fff" stroke-width="1" opacity=".7"/>`,
+  glasses: () => `<rect x="37.5" y="38.5" width="11" height="7.5" rx="3" fill="#fff" fill-opacity=".12" stroke="#2a2233" stroke-width="1.2"/><rect x="51.5" y="38.5" width="11" height="7.5" rx="3" fill="#fff" fill-opacity=".12" stroke="#2a2233" stroke-width="1.2"/><path d="M48.5 41.5 L51.5 41.5 M37.5 40.5 L33.5 39.5 M62.5 40.5 L66.5 39.5" stroke="#2a2233" stroke-width="1.1"/>`,
+  tie: (a) => `<path d="M50 74 L47.5 78 L50 100 L52.5 78 Z" fill="${a}" stroke="${dark(a, 0.4)}" stroke-width="0.8"/>`,
+  collar: () => `<path d="M42 70.5 L45 78 L50 73.5 L55 78 L58 70.5" fill="${P_.white}" stroke="#77738a" stroke-width="1" stroke-linejoin="round"/>`,
+  lanyard: () => `<path d="M43 72 L50 92 L57 72" fill="none" stroke="${P_.red}" stroke-width="1.8"/><rect x="45" y="91" width="10" height="12" rx="1.5" fill="${P_.white}" stroke="#77738a" stroke-width="1"/><rect x="47" y="94" width="6" height="2" fill="${P_.sky}"/>`,
+  stethoscope: () => `<path d="M42 72 C41 92 59 92 58 72" fill="none" stroke="#4a5a8a" stroke-width="2"/><circle cx="50" cy="93" r="3" fill="#c9d4f0" stroke="#4a5a8a" stroke-width="1.2"/>`,
+  chain: () => `<path d="M40 73 Q50 88 60 73" fill="none" stroke="${P_.gold}" stroke-width="2.4" stroke-dasharray="2.4 1.4"/><circle cx="50" cy="85" r="3.5" fill="${P_.gold}" stroke="#9c7a2a" stroke-width="1"/>`,
+  earrings: () => `<circle cx="33.6" cy="50.5" r="1.8" fill="${P_.gold}"/><circle cx="66.4" cy="50.5" r="1.8" fill="${P_.gold}"/>`,
+  beard: (a, hc) => `<path d="M34.5 45 C35 58 43 64.5 50 64.5 C57 64.5 65 58 65.5 45 C62 53 57 55 50 55 C43 55 38 53 34.5 45 Z" fill="${hc}" stroke="${dark(hc, 0.3)}" stroke-width="1"/><path d="M44 54 Q50 52 56 54" fill="none" stroke="${dark(hc, 0.3)}" stroke-width="1.6"/>`,
+  shawl: (a) => `<path d="M16 121 C18 94 30 80 50 82 C70 80 82 94 84 121" fill="${a}" stroke="${dark(a, 0.35)}" stroke-width="1.2"/><path d="M26 104 C36 96 64 96 74 104" fill="none" stroke="${light(a, 0.35)}" stroke-width="1.4"/>`,
+  coat: () => `<path d="M42 72 L50 104 L58 72" fill="none" stroke="#77738a" stroke-width="1.4"/>`,
+  watch: () => `<rect x="74" y="108" width="8" height="7" rx="1.5" fill="${P_.gold}" stroke="#9c7a2a" stroke-width="1"/>`,
+  hoe: () => `<path d="M88 64 L80 121" stroke="${P_.brown}" stroke-width="3" stroke-linecap="round"/><path d="M82 62 L95 66 L93 71 Z" fill="#9aa4b8" stroke="#555" stroke-width="1"/>`,
+  phones: () => `<rect x="8" y="96" width="10" height="18" rx="2.5" fill="#2b2b3f"/><rect x="82" y="96" width="10" height="18" rx="2.5" fill="#2b2b3f"/><rect x="10" y="99" width="6" height="11" fill="${P_.sky}"/><rect x="84" y="99" width="6" height="11" fill="${P_.mint}"/>`,
+  diploma: () => `<rect x="74" y="100" width="20" height="8" rx="4" fill="${P_.white}" stroke="#77738a" stroke-width="1"/><path d="M84 100 L84 108" stroke="${P_.red}" stroke-width="2.4"/>`,
+  coinbag: () => `<path d="M77 98 C70 102 70 118 82 118 C94 118 94 102 87 98 Z" fill="#c9a36a" stroke="#7a5a2a" stroke-width="1.2"/><path d="M78 98 L86 98" stroke="#7a5a2a" stroke-width="2"/><circle cx="82" cy="109" r="3.5" fill="${P_.gold}"/>`,
+  phonehype: () => `<rect x="76" y="90" width="14" height="25" rx="2.5" fill="#2b2b3f"/><rect x="78" y="93" width="10" height="18" fill="${P_.mint}"/><path d="M79 108 L81.5 103 L84 104.5 L87 96" fill="none" stroke="#15121f" stroke-width="1.4"/>`,
+  hijab: (a) => `<path d="M27 50 C24 20 38 12 50 12 C62 12 76 20 73 50 C73 70 66 80 50 82 C34 80 27 70 27 50 Z" fill="${a}" stroke="${dark(a, 0.35)}" stroke-width="1.3"/><path d="M33 30 C40 26 60 26 67 30" fill="none" stroke="${light(a, 0.3)}" stroke-width="1.2"/>`,
+  wave: (a, hc, skin) => `<path d="M76 92 L88 66" stroke="${skin}" stroke-width="7" stroke-linecap="round"/><ellipse cx="89" cy="62" rx="4.5" ry="5.5" fill="${skin}" stroke="${dark(skin, 0.4)}" stroke-width="1"/>`,
 };
 
-// o: { skin, hair, hairColor, outfit, accent, expr, age, acc: [], label }
+// o: { skin, hair, hairColor, outfit, accent, expr, age, acc: [], build, style, wear, sex, label }
 export function person(o, opts = {}) {
   const skin = o.skin || SKINS[2];
-  const age = o.age || 25;
-  const hc = age >= 50 ? '#cfcbdc' : o.hairColor || HAIR_COLORS[0];
+  const age = o.age ?? 25;
+  const child = age < 13;
+  const hc = greyed(o.hairColor || HAIR_COLORS[0], age);
   const outfit = o.outfit || P_.mint;
   const accent = o.accent || P_.orange;
-  const acc = o.acc || [];
+  const acc = (o.acc || []).slice();
   const has = (k) => acc.includes(k);
+  if (age >= 55 && !has('glasses') && !has('sunglasses') && !child) acc.push('glasses');
   const hair = has('hijab') ? 'hijab' : o.hair || 'short';
+  const W = { slim: 29, average: 33, heavy: 38 }[o.build || 'average'] * (child ? 0.8 : 1);
+  const cid = nextId();
+  const skinSh = dark(skin, 0.16);
+  const skinHi = light(skin, 0.16);
+  const outline = dark(skin, 0.45);
+  const jaw = o.build === 'heavy' ? 'M33.5 40 C33.5 27 41 21 50 21 C59 21 66.5 27 66.5 40 C66.5 52 63 59 57.5 62.5 C54 64.8 46 64.8 42.5 62.5 C37 59 33.5 52 33.5 40 Z'
+    : child ? 'M32.5 40 C32.5 26 40.5 20 50 20 C59.5 20 67.5 26 67.5 40 C67.5 51 62.5 60 56 62 C53 63.2 47 63.2 44 62 C37.5 60 32.5 51 32.5 40 Z'
+      : 'M33.5 40 C33.5 27 41 21 50 21 C59 21 66.5 27 66.5 40 C66.5 50 63 58 57 62 C54 64.5 46 64.5 43 62 C37 58 33.5 50 33.5 40 Z';
+  const torso = `M${50 - W} 121 C${50 - W} 94 ${50 - W + 5} 78 ${50 - 11} 72 L${50 + 11} 72 C${50 + W - 5} 78 ${50 + W} 94 ${50 + W} 121 Z`;
   const back = [];
-  const front = [];
   if (has('hijab')) back.push(ACC.hijab(accent));
-  if (has('shawl') || has('wave')) { /* drawn with body */ }
-  const lines = age >= 50 ? `<path d="M33 48 L30 46 M67 48 L70 46" stroke="${O}" stroke-width="1.4" opacity=".6"/><path d="M42 40 L58 40" stroke="${O}" stroke-width="1.2" opacity=".35"/>` : '';
+  const front = [];
   for (const k of acc) {
-    if (['hijab', 'shawl', 'wave'].includes(k)) continue;
-    front.push(ACC[k] ? ACC[k](accent, hc, skin) : '');
+    if (['hijab', 'shawl', 'wave', 'glasses', 'sunglasses', 'beard', 'earrings'].includes(k)) continue;
+    if (ACC[k]) front.push(ACC[k](accent, hc, skin));
   }
-  const body = `
-    <path d="M16 121 C16 96 30 85 50 85 C70 85 84 96 84 121 Z" fill="${outfit}" ${S}/>
-    ${has('shawl') ? ACC.shawl(accent) : ''}
-    ${has('wave') ? ACC.wave(accent, hc, skin) : ''}
-    <path d="M43 70 L43 90 L50 95 L57 90 L57 70 Z" fill="${skin}"/><path d="M43 70 L43 88 M57 70 L57 88" stroke="${O}" stroke-width="3" stroke-linecap="round"/><path d="M43 88 L50 94 L57 88" fill="none" stroke="${O}" stroke-width="2.4" stroke-linejoin="round"/>`;
-  const head = `
-    <circle cx="27" cy="54" r="6" fill="${skin}" ${S}/><circle cx="73" cy="54" r="6" fill="${skin}" ${S}/>
-    <ellipse cx="50" cy="51" rx="23" ry="25" fill="${skin}" ${S}/>`;
-  const inner = `${back.join('')}${hairBack(hair, hc)}${body}${head}${lines}${hairFront(hair, hc, accent)}${face(o.expr || 'happy')}${front.join('')}`;
-  return svg('0 0 100 121', inner, { size: opts.size, cls: `person ${opts.cls || ''}`, label: opts.label ?? o.label ?? '' });
+  const faceAcc = ['beard', 'earrings', 'glasses', 'sunglasses'].filter(has).map((k) => ACC[k](accent, hc, skin)).join('');
+  const inner = `
+    <defs><clipPath id="${cid}"><path d="${torso}"/></clipPath></defs>
+    ${back.join('')}${hairBack(hair, hc)}
+    <path d="${torso}" fill="${outfit}" stroke="${dark(outfit, 0.45)}" stroke-width="1.4"/>
+    ${garment({ ...o, outfit, accent }, W, cid)}
+    <path d="${torso}" fill="none" stroke="${dark(outfit, 0.45)}" stroke-width="1.4"/>
+    <path d="M${50 - W + 3} 121 C${50 - W + 3} 100 ${50 - W + 8} 84 ${50 - 13} 78" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="3"/>
+    ${has('shawl') ? ACC.shawl(accent) : ''}${has('wave') ? ACC.wave(accent, hc, skin) : ''}
+    <path d="M43.5 56 L44 73 C46 76 54 76 56 73 L56.5 56 Z" fill="${skin}"/>
+    <path d="M44 61 C47 66 53 66 56 61 L56.3 68 C53 70 47 70 43.8 68 Z" fill="${skinSh}" opacity=".85"/>
+    <path d="M43.6 58 L44 73 M56.4 58 L56 73" stroke="${outline}" stroke-width="1.1" fill="none"/>
+    <ellipse cx="33.8" cy="44" rx="3" ry="5.4" fill="${skin}" stroke="${outline}" stroke-width="1.1"/><path d="M34.2 41.5 Q32.6 44 34.4 46.5" fill="none" stroke="${skinSh}" stroke-width="1"/>
+    <ellipse cx="66.2" cy="44" rx="3" ry="5.4" fill="${skin}" stroke="${outline}" stroke-width="1.1"/><path d="M65.8 41.5 Q67.4 44 65.6 46.5" fill="none" stroke="${skinSh}" stroke-width="1"/>
+    <path d="${jaw}" fill="${skin}" stroke="${outline}" stroke-width="1.3"/>
+    <path d="M58 23.5 C65 28.5 67 39 65.2 49.5 C63.5 56.5 59 60.5 54.5 62.8 C60 55 62 44 58 23.5 Z" fill="${skinSh}" opacity=".55"/>
+    <ellipse cx="46" cy="29.5" rx="7" ry="3.6" fill="${skinHi}" opacity=".45"/><ellipse cx="40.5" cy="47.5" rx="3" ry="2.2" fill="${skinHi}" opacity=".35"/>
+    ${faceParts(o.expr || 'happy', skin, hc, age, child)}
+    ${hairFront(hair, hc, accent)}${faceAcc}${front.join('')}`;
+  // Small face chips zoom in on the head and shoulders.
+  const vb = opts.crop || (opts.size && opts.size <= 64 ? '16 8 68 68' : '0 0 100 121');
+  return svg(vb, inner, { size: opts.size, cls: `person ${opts.cls || ''}`, label: opts.label ?? o.label ?? '' });
+}
+
+// A whole person, about 6.5 heads tall for adults and 4–5 for children, for
+// scenes: you, your partner and your children in front of your home.
+export function figure(o) {
+  const skin = o.skin || SKINS[2];
+  const age = o.age ?? 25;
+  const kid = age < 16;
+  const H = kid ? 34 + Math.min(16, age) * 2.2 : 72 * (o.tall ? 1.05 : 1) * (o.sex === 'f' ? 0.95 : 1);
+  const heads = kid ? 4 + Math.min(age, 15) / 6 : 6.6;
+  const hh = H / heads;
+  const W = ({ slim: 0.8, average: 1, heavy: 1.28 }[o.build || 'average']) * hh * (kid ? 0.66 : 0.78);
+  const cx = 20;
+  const top = 80 - H;
+  const hc = greyed(o.hairColor || HAIR_COLORS[0], age);
+  const c = o.outfit || P_.mint;
+  const a = o.accent || P_.orange;
+  const style = o.style ?? 1;
+  const wear = o.wear && o.wear !== 'none' ? o.wear : null;
+  const line = dark(skin, 0.5);
+  const headR = hh * 0.46;
+  const hy = top + headR;
+  const neckY = top + hh * 0.95;
+  const shoulderY = neckY + hh * 0.18;
+  const waistY = top + hh * 3.1;
+  const hipY = top + hh * 3.5;
+  const footY = 80;
+  const long = wear === 'agbada' || wear === 'kaftan' || wear === 'sari' || (o.sex === 'f' && (wear === 'ankara' || style === 2));
+  const topCol = wear === 'suit' || (!wear && style >= 3) ? (wear === 'suit' ? '#2c3348' : style === 4 ? dark(a, 0.2) : dark(c, 0.4)) : c;
+  const legCol = wear === 'suit' || (!wear && style >= 3) ? '#2c3348' : style === 0 ? '#4a5a7a' : style === 1 ? '#3d4660' : '#2a2e3f';
+  const parts = [];
+  // Legs and shoes.
+  if (!long) {
+    parts.push(`<path d="M${cx - W * 0.42} ${hipY - 2} L${cx - W * 0.36} ${footY - 2} M${cx + W * 0.42} ${hipY - 2} L${cx + W * 0.36} ${footY - 2}" stroke="${legCol}" stroke-width="${W * 0.55}" stroke-linecap="round"/>`);
+  } else {
+    parts.push(`<path d="M${cx - W * 0.62} ${shoulderY + 4} L${cx - W * 0.9} ${footY - 3} L${cx + W * 0.9} ${footY - 3} L${cx + W * 0.62} ${shoulderY + 4} Z" fill="${wear === 'sari' ? a : c}" stroke="${dark(c, 0.4)}" stroke-width="0.8"/>`);
+  }
+  parts.push(`<ellipse cx="${cx - W * 0.38}" cy="${footY - 1.2}" rx="${W * 0.36}" ry="1.6" fill="${style >= 3 ? '#1d1a24' : '#5a3a2a'}"/><ellipse cx="${cx + W * 0.38}" cy="${footY - 1.2}" rx="${W * 0.36}" ry="1.6" fill="${style >= 3 ? '#1d1a24' : '#5a3a2a'}"/>`);
+  // Body.
+  parts.push(`<path d="M${cx - W * 0.6} ${shoulderY} Q${cx - W * 0.66} ${waistY} ${cx - W * 0.52} ${hipY + (long ? 0 : 2)} L${cx + W * 0.52} ${hipY + (long ? 0 : 2)} Q${cx + W * 0.66} ${waistY} ${cx + W * 0.6} ${shoulderY} Q${cx} ${shoulderY - 2} ${cx - W * 0.6} ${shoulderY} Z" fill="${topCol}" stroke="${dark(topCol, 0.45)}" stroke-width="0.8"/>`);
+  if (wear === 'ankara') parts.push(Array.from({ length: 6 }, (_, i) => `<circle cx="${cx - W * 0.35 + (i % 2) * W * 0.6}" cy="${shoulderY + 5 + Math.floor(i / 2) * hh * 0.7}" r="${W * 0.14}" fill="none" stroke="${a}" stroke-width="1.1"/>`).join(''));
+  if (wear === 'sari') parts.push(`<path d="M${cx + W * 0.2} ${shoulderY} L${cx - W * 0.5} ${hipY}" stroke="${a}" stroke-width="${W * 0.35}"/>`);
+  if (wear === 'suit' || (!wear && style >= 3)) parts.push(`<path d="M${cx - 2} ${shoulderY + 0.5} L${cx} ${shoulderY + hh * 0.9} L${cx + 2} ${shoulderY + 0.5} Z" fill="#f4f2f8"/>${o.sex !== 'f' ? `<path d="M${cx} ${shoulderY + 1} L${cx} ${shoulderY + hh * 0.8}" stroke="${style === 4 ? '#d9a93a' : a}" stroke-width="1.4"/>` : ''}`);
+  if (!wear && style === 1) parts.push(`<path d="M${cx - 2.5} ${shoulderY} L${cx} ${shoulderY + 3} L${cx + 2.5} ${shoulderY}" fill="${light(c, 0.55)}"/>`);
+  if (!wear && style === 2 && o.sex !== 'f') parts.push(`<path d="M${cx - W * 0.6} ${shoulderY} L${cx} ${shoulderY + hh * 0.9} L${cx + W * 0.6} ${shoulderY}" fill="none" stroke="${a}" stroke-width="2"/>`);
+  if (wear === 'agbada' || wear === 'kaftan') parts.push(`<path d="M${cx - 3} ${shoulderY} Q${cx} ${shoulderY + hh * 0.7} ${cx + 3} ${shoulderY}" fill="none" stroke="${style >= 3 ? '#d9a93a' : light(c, 0.45)}" stroke-width="1.4"/>`);
+  // Arms and hands.
+  const armW = W * 0.3;
+  const sleeve = wear === 'agbada' ? c : topCol;
+  parts.push(`<path d="M${cx - W * 0.62} ${shoulderY + 2} Q${cx - W * 0.85} ${waistY - 2} ${cx - W * 0.74} ${hipY - 1}" stroke="${sleeve}" stroke-width="${wear === 'agbada' ? armW * 2.2 : armW}" stroke-linecap="round" fill="none"/><path d="M${cx + W * 0.62} ${shoulderY + 2} Q${cx + W * 0.85} ${waistY - 2} ${cx + W * 0.74} ${hipY - 1}" stroke="${sleeve}" stroke-width="${wear === 'agbada' ? armW * 2.2 : armW}" stroke-linecap="round" fill="none"/>`);
+  parts.push(`<circle cx="${cx - W * 0.74}" cy="${hipY + 0.6}" r="${armW * 0.55}" fill="${skin}"/><circle cx="${cx + W * 0.74}" cy="${hipY + 0.6}" r="${armW * 0.55}" fill="${skin}"/>`);
+  if (style === 4 && !kid) parts.push(`<rect x="${cx + W * 0.66}" y="${hipY - 3}" width="${armW * 0.9}" height="1.8" fill="#d9a93a"/>`);
+  // Neck and head.
+  parts.push(`<rect x="${cx - headR * 0.32}" y="${hy + headR * 0.7}" width="${headR * 0.64}" height="${shoulderY - hy - headR * 0.5}" fill="${dark(skin, 0.1)}"/>`);
+  const hb = { afro: `<circle cx="${cx}" cy="${hy - headR * 0.2}" r="${headR * 1.35}" fill="${hc}"/>`, long: `<path d="M${cx - headR * 0.98} ${hy} Q${cx - headR * 1.05} ${hy - headR * 1.3} ${cx} ${hy - headR * 1.2} Q${cx + headR * 1.05} ${hy - headR * 1.3} ${cx + headR * 0.98} ${hy} L${cx + headR * 1.02} ${hy + headR * 1.7} L${cx + headR * 0.55} ${hy + headR * 1.7} L${cx + headR * 0.6} ${hy} L${cx - headR * 0.6} ${hy} L${cx - headR * 0.55} ${hy + headR * 1.7} L${cx - headR * 1.02} ${hy + headR * 1.7} Z" fill="${hc}"/>`, braids: `<path d="M${cx - headR * 0.95} ${hy} L${cx - headR} ${hy + headR * 2.4} M${cx + headR * 0.95} ${hy} L${cx + headR} ${hy + headR * 2.4}" stroke="${hc}" stroke-width="${headR * 0.5}" stroke-linecap="round"/>`, bun: `<circle cx="${cx}" cy="${hy - headR * 1.1}" r="${headR * 0.45}" fill="${hc}"/>`, curly: `<circle cx="${cx}" cy="${hy - headR * 0.3}" r="${headR * 1.2}" fill="${hc}"/>` }[o.hair] || '';
+  parts.push(hb);
+  if (o.hijab) parts.push(`<path d="M${cx - headR * 1.25} ${hy + headR * 0.3} Q${cx - headR * 1.3} ${hy - headR * 1.4} ${cx} ${hy - headR * 1.35} Q${cx + headR * 1.3} ${hy - headR * 1.4} ${cx + headR * 1.25} ${hy + headR * 0.3} Q${cx + headR} ${shoulderY + 3} ${cx} ${shoulderY + 4} Q${cx - headR} ${shoulderY + 3} ${cx - headR * 1.25} ${hy + headR * 0.3} Z" fill="${a}"/>`);
+  parts.push(`<ellipse cx="${cx}" cy="${hy}" rx="${headR * 0.88}" ry="${headR}" fill="${skin}" stroke="${line}" stroke-width="0.6"/><path d="M${cx + headR * 0.3} ${hy - headR * 0.9} Q${cx + headR * 1.05} ${hy} ${cx + headR * 0.2} ${hy + headR * 0.95}" fill="${dark(skin, 0.15)}" opacity=".5"/>`);
+  if (!o.hijab) {
+    const hf = o.hair === 'bald' ? '' : o.hair === 'wrap' ? `<path d="M${cx - headR * 1.02} ${hy - headR * 0.1} Q${cx - headR * 1.1} ${hy - headR * 1.8} ${cx + headR * 0.3} ${hy - headR * 1.6} Q${cx + headR * 1.2} ${hy - headR * 1.2} ${cx + headR * 0.95} ${hy - headR * 0.1} Q${cx} ${hy - headR * 0.6} ${cx - headR * 1.02} ${hy - headR * 0.1} Z" fill="${a}"/>`
+      : `<path d="M${cx - headR * 0.92} ${hy - headR * 0.05} Q${cx - headR} ${hy - headR * 1.15} ${cx} ${hy - headR * 1.08} Q${cx + headR} ${hy - headR * 1.15} ${cx + headR * 0.92} ${hy - headR * 0.05} Q${cx + headR * 0.4} ${hy - headR * 0.6} ${cx - headR * 0.92} ${hy - headR * 0.05} Z" fill="${hc}"/>`;
+    parts.push(hf);
+  }
+  const ey = hy + headR * 0.05;
+  const smile = o.expr === 'tired' || o.expr === 'shocked' ? `M${cx - headR * 0.3} ${hy + headR * 0.55} Q${cx} ${hy + headR * 0.42} ${cx + headR * 0.3} ${hy + headR * 0.55}` : `M${cx - headR * 0.32} ${hy + headR * 0.45} Q${cx} ${hy + headR * 0.68} ${cx + headR * 0.32} ${hy + headR * 0.45}`;
+  parts.push(`<circle cx="${cx - headR * 0.34}" cy="${ey}" r="${headR * 0.1}" fill="#2a1a12"/><circle cx="${cx + headR * 0.34}" cy="${ey}" r="${headR * 0.1}" fill="#2a1a12"/><path d="${smile}" fill="none" stroke="${dark(skin, 0.5)}" stroke-width="0.7" stroke-linecap="round"/>`);
+  if (age >= 55) parts.push(`<path d="M${cx - headR * 0.6} ${ey} h${headR * 0.5} M${cx + headR * 0.1} ${ey} h${headR * 0.5}" stroke="#2a2233" stroke-width="0.6"/>`);
+  return parts.join('');
+}
+
+// Wraps a figure in its own SVG (for UI chips and the share card).
+export function figureSvg(o, { size = 80, label = '' } = {}) {
+  return svg('0 0 40 82', figure(o), { size, cls: 'figure', label });
 }
 
 // ------------------------------------------------------------------ the cast
@@ -170,16 +357,40 @@ export const CHAR_ACC = {
   me: (age) => (age < 30 ? [] : ['collar']),
 };
 
-export function avatar(look, char, { age = 22, expr = 'happy', size = null, label = 'You' } = {}) {
+export function avatar(look, char, { age = 22, expr = 'happy', size = null, label = 'You', style = null } = {}) {
   const l = look || {};
-  const acc = (CHAR_ACC[char] || CHAR_ACC.graduate)(age).slice();
-  if (age >= 60 && !acc.includes('glasses') && !acc.includes('sunglasses')) acc.push('glasses');
+  let acc = (CHAR_ACC[char] || CHAR_ACC.graduate)(age).slice();
+  const st = style ?? 1;
+  const wear = l.wear && l.wear !== 'none' ? l.wear : null;
+  if (st >= 2 || wear) acc = acc.filter((a) => a !== 'collar');
+  if (l.hijab) acc.push('hijab');
   const hair = l.hair || 'short';
-  if (hair === 'wrap' && acc.some((a) => ['mortarboard', 'strawhat', 'cap', 'sailorcap'].includes(a))) acc.splice(acc.findIndex((a) => ['mortarboard', 'strawhat', 'cap', 'sailorcap'].includes(a)), 1);
+  if ((hair === 'wrap' || l.hijab) && acc.some((a) => ['mortarboard', 'strawhat', 'cap', 'sailorcap'].includes(a))) acc = acc.filter((a) => !['mortarboard', 'strawhat', 'cap', 'sailorcap'].includes(a));
+  if (l.beard && l.sex !== 'f') acc.push('beard');
   return person({
     skin: SKINS[l.skin ?? 2], hair, hairColor: HAIR_COLORS[l.hairColor ?? 0],
     outfit: OUTFITS[l.outfit ?? 0], accent: OUTFITS[((l.outfit ?? 0) + 2) % OUTFITS.length], expr, age, acc,
+    build: l.build || 'average', style: st, wear, sex: l.sex,
   }, { size, label });
+}
+
+// Anyone else in your life (partner, children, the Circle) from a stored look.
+export function lookPerson(look, { age = 30, expr = 'happy', size = null, label = '', style = 1, sex = null } = {}) {
+  const l = look || {};
+  return person({
+    skin: SKINS[l.skin ?? 2], hair: l.hair || 'short', hairColor: HAIR_COLORS[l.hairColor ?? 0],
+    outfit: OUTFITS[l.outfit ?? 0], accent: OUTFITS[((l.outfit ?? 0) + 2) % OUTFITS.length], expr, age,
+    acc: [...(l.acc || []), ...(l.beard && age >= 18 ? ['beard'] : [])], build: l.build || 'average', style, wear: l.wear || null, sex: sex || l.sex,
+  }, { size, label });
+}
+
+export function lookFigure(look, { age = 30, expr = 'happy', style = 1, sex = null } = {}) {
+  const l = look || {};
+  return figure({
+    skin: SKINS[l.skin ?? 2], hair: l.hair || 'short', hairColor: HAIR_COLORS[l.hairColor ?? 0],
+    outfit: OUTFITS[l.outfit ?? 0], accent: OUTFITS[((l.outfit ?? 0) + 2) % OUTFITS.length], expr, age,
+    build: l.build || 'average', style, wear: l.wear && l.wear !== 'none' ? l.wear : null, sex: sex || l.sex, hijab: !!l.hijab,
+  });
 }
 
 // ------------------------------------------------------------------ icons (48 × 48)
@@ -215,6 +426,16 @@ const I = {
   car: `<path d="M5 34 L7 24 L14 16 L32 16 L40 24 L44 26 L44 34 Z" fill="${P_.sky}" ${s2}/><rect x="16" y="19" width="14" height="6" fill="${P_.white}" ${s2}/><circle cx="14" cy="36" r="5" fill="#2b2b3f" ${s2}/><circle cx="36" cy="36" r="5" fill="#2b2b3f" ${s2}/><path d="M42 16 C40 12 44 10 42 6 M46 18 C44 14 47 12 46 8" fill="none" stroke="${P_.grey}" stroke-width="2.4" stroke-linecap="round"/>`,
   clinic: `<rect x="8" y="14" width="32" height="28" fill="${P_.white}" ${s2}/><rect x="20" y="30" width="8" height="12" fill="${P_.sky}" ${s2}/><path d="M21 17 h6 v5 h5 v6 h-5 v5 h-6 v-5 h-5 v-6 h5 Z" fill="${P_.red}" ${s2} transform="translate(0 -6) scale(1 0.9)"/>`,
   phone: `<rect x="14" y="4" width="20" height="40" rx="4" fill="#2b2b3f" ${s2}/><rect x="17" y="9" width="14" height="28" fill="${P_.cream}"/><path d="M19 13 h10 v6 h-7 l-3 3 Z" fill="${P_.mint}"/><path d="M29 24 h-10 v6 h7 l3 3 Z" fill="${P_.sky}"/>`,
+  heart: `<path d="M24 41 C10 31 5 24 5 17 C5 10 10 6 16 6 C20 6 23 9 24 12 C25 9 28 6 32 6 C38 6 43 10 43 17 C43 24 38 31 24 41 Z" fill="${P_.pink}" ${s2}/><path d="M12 14 C13 11 15 10 17 10" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".7"/>`,
+  people: `<circle cx="16" cy="16" r="6" fill="${P_.orange}" ${s2}/><path d="M5 40 C5 30 10 25 16 25 C22 25 27 30 27 40 Z" fill="${P_.orange}" ${s2}/><circle cx="32" cy="14" r="6.5" fill="${P_.sky}" ${s2}/><path d="M20 41 C20 30 25 24 32 24 C39 24 44 30 44 41 Z" fill="${P_.sky}" ${s2}/>`,
+  school: `<path d="M4 20 L24 8 L44 20 Z" fill="${P_.red}" ${s2}/><rect x="8" y="20" width="32" height="22" fill="${P_.cream}" ${s2}/><rect x="20" y="30" width="8" height="12" fill="#7a4a2a" ${s2}/><rect x="11" y="24" width="6" height="6" fill="#8fb7d9" ${s2}/><rect x="31" y="24" width="6" height="6" fill="#8fb7d9" ${s2}/><circle cx="24" cy="16" r="2.6" fill="${P_.gold}" ${s2}/>`,
+  shield: `<path d="M24 5 L40 11 L40 23 C40 33 32 40 24 44 C16 40 8 33 8 23 L8 11 Z" fill="${P_.sky}" ${s2}/><path d="M16 24 L22 30 L33 18" fill="none" stroke="${O}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`,
+  bell: `<path d="M12 34 C14 30 13 20 16 15 C18 11 21 10 24 10 C27 10 30 11 32 15 C35 20 34 30 36 34 Z" fill="${P_.gold}" ${s2}/><path d="M9 34 L39 34" ${S}/><circle cx="24" cy="39" r="3.4" fill="${P_.gold}" ${s2}/><circle cx="24" cy="7" r="2.4" fill="${P_.gold}" ${s2}/>`,
+  key: `<circle cx="16" cy="24" r="9" fill="${P_.gold}" ${s2}/><circle cx="16" cy="24" r="3.4" fill="${P_.cream}" ${s2}/><path d="M25 24 L43 24 L43 30 M37 24 L37 29" fill="none" ${S}/>`,
+  flame: `<path d="M24 44 C13 44 9 36 10 29 C11 22 17 19 17 11 C23 14 26 19 25 25 C28 23 29 19 29 16 C35 21 39 27 38 33 C37 40 31 44 24 44 Z" fill="${P_.orange}" ${s2}/><path d="M24 42 C19 42 17 38 18 34 C19 31 22 30 22 26 C26 29 28 32 28 35 C28 39 27 42 24 42 Z" fill="${P_.gold}"/>`,
+  flag: `<path d="M12 44 L12 5" ${S}/><path d="M12 7 L38 10 L32 17 L38 24 L12 22 Z" fill="${P_.red}" ${s2}/>`,
+  family: `<circle cx="13" cy="13" r="5" fill="${P_.sky}" ${s2}/><path d="M5 38 C5 27 8 22 13 22 C18 22 21 27 21 38 Z" fill="${P_.sky}" ${s2}/><circle cx="35" cy="13" r="5" fill="${P_.pink}" ${s2}/><path d="M27 38 C27 27 30 22 35 22 C40 22 43 27 43 38 Z" fill="${P_.pink}" ${s2}/><circle cx="24" cy="27" r="3.6" fill="${P_.gold}" ${s2}/><path d="M18.5 42 C18.5 35 21 33 24 33 C27 33 29.5 35 29.5 42 Z" fill="${P_.gold}" ${s2}/>`,
+  cctv: `<rect x="8" y="14" width="26" height="12" rx="3" fill="#e8e8f0" ${s2}/><circle cx="12" cy="20" r="2.4" fill="${P_.red}"/><path d="M34 20 L40 20 L40 38" fill="none" ${S}/>`,
   plot: `<path d="M4 40 L44 40" ${S}/><path d="M6 40 C10 34 16 36 20 32 C26 30 30 34 36 32 C40 32 42 36 44 40 Z" fill="${P_.green}" ${s2}/><path d="M30 12 L30 34" ${S}/><rect x="18" y="8" width="24" height="12" rx="2" fill="${P_.gold}" ${s2}/><path d="M22 14h16" stroke="${O}" stroke-width="2"/>`,
   counter: `<rect x="4" y="26" width="40" height="16" fill="#8a5a3a" ${s2}/><path d="M4 26 L44 26" stroke="${O}" stroke-width="3"/><rect x="8" y="10" width="32" height="14" rx="2" fill="${P_.sky}" opacity=".6" ${s2}/><circle cx="34" cy="22" r="4" fill="${P_.gold}" ${s2}/>`,
   coffee: `<rect x="6" y="20" width="14" height="16" rx="3" fill="${P_.white}" ${s2}/><path d="M20 24 C25 24 25 32 20 32" fill="none" ${s2}/><rect x="26" y="20" width="14" height="16" rx="3" fill="${P_.orange}" ${s2}/><path d="M10 14 C8 10 12 8 10 4 M34 14 C32 10 36 8 34 4" fill="none" stroke="${P_.grey}" stroke-width="2" stroke-linecap="round"/><path d="M4 38 L44 38" ${S}/>`,
@@ -276,6 +497,8 @@ export const PLAIN = {
   prop: { label: 'Houses', icon: 'house', cap: 'Pays rent every year', town: 'house', townName: 'Estate agent' },
   crypto: { label: 'Crypto', icon: 'rocket', cap: 'Can fly or crash', town: 'rocket', townName: 'Neon kiosk' },
   biz: { label: 'Your business', icon: 'shop', cap: 'Pays profit if you feed it', town: 'shop', townName: 'Your shop' },
+  land: { label: 'Land', icon: 'plot', cap: 'Plots across your country', town: 'plot', townName: 'Land office' },
+  car: { label: 'Car', icon: 'car', cap: 'Loses value every year', town: 'car', townName: 'Car lot' },
   fx: { label: 'Foreign money', icon: 'swap', cap: 'Rises when your money falls', town: 'swap', townName: 'Money changer' },
 };
 
@@ -375,46 +598,84 @@ function weatherLayer(mood, w) {
   }
 }
 
-function dwelling(stage, life, g) {
-  const lit = ['#fff4b0', '#bfe9a0', '#ffd08a', '#ffb0e6', '#ffe066'][life];
-  switch (stage) {
-    case 0: return `<rect x="70" y="${g - 54}" width="74" height="54" fill="#b89a7a" ${S}/><rect x="66" y="${g - 60}" width="82" height="8" fill="#8a6a4a" ${S}/><rect x="82" y="${g - 42}" width="22" height="18" fill="${lit}" ${s2}/><path d="M93 ${g - 42} L93 ${g - 24} M82 ${g - 33} L104 ${g - 33}" stroke="${O}" stroke-width="2"/><rect x="116" y="${g - 36}" width="16" height="36" fill="#6a4a3a" ${s2}/><path d="M186 ${g} L186 ${g - 50}" ${S}/><rect x="172" y="${g - 62}" width="28" height="14" rx="3" fill="${P_.sky}" ${s2}/><text x="186" y="${g - 51}" font-size="9" font-weight="800" text-anchor="middle" fill="${O}">BUS</text>`;
-    case 1: return `<rect x="66" y="${g - 104}" width="88" height="104" fill="#c9a6d6" ${S}/>${[0, 1, 2].map((r) => [0, 1, 2].map((c) => `<rect x="${76 + c * 26}" y="${g - 94 + r * 30}" width="16" height="18" fill="${r === 1 && c === 1 ? lit : '#8fb7d9'}" ${s2}/>`).join('')).join('')}<rect x="100" y="${g - 22}" width="20" height="22" fill="#6a4a3a" ${s2}/>`;
-    case 2: return `<path d="M52 ${g - 56} L112 ${g - 100} L172 ${g - 56} Z" fill="${P_.red}" ${S}/><rect x="60" y="${g - 58}" width="104" height="58" fill="${P_.cream}" ${S}/><rect x="72" y="${g - 46}" width="24" height="20" fill="${lit}" ${s2}/><rect x="128" y="${g - 46}" width="24" height="20" fill="#8fb7d9" ${s2}/><rect x="102" y="${g - 36}" width="20" height="36" fill="#7a4a2a" ${s2}/>${[40, 48, 176, 184].map((x) => `<path d="M${x} ${g} L${x} ${g - 16}" stroke="${O}" stroke-width="2.4"/>`).join('')}<path d="M36 ${g - 10} L52 ${g - 10} M172 ${g - 10} L190 ${g - 10}" stroke="${O}" stroke-width="2.4"/><circle cx="44" cy="${g - 20}" r="4" fill="${P_.pink}" ${s2}/><circle cx="182" cy="${g - 20}" r="4" fill="${P_.gold}" ${s2}/>`;
-    case 3: return `<path d="M40 ${g - 62} L106 ${g - 110} L172 ${g - 62} Z" fill="#5a4a8a" ${S}/><rect x="48" y="${g - 64}" width="116" height="64" fill="${P_.white}" ${S}/><rect x="164" y="${g - 40}" width="40" height="40" fill="${P_.cream}" ${S}/><rect x="170" y="${g - 30}" width="28" height="30" fill="#9aa4b8" ${s2}/>${[0, 1, 2].map((c) => `<rect x="${60 + c * 34}" y="${g - 52}" width="22" height="20" fill="${c === 1 ? lit : '#8fb7d9'}" ${s2}/>`).join('')}<rect x="96" y="${g - 28}" width="20" height="28" fill="#7a4a2a" ${s2}/><circle cx="106" cy="${g - 86}" r="6" fill="#fff4b0" ${s2}/>`;
-    default: return `<rect x="0" y="${g - 20}" width="360" height="20" fill="#5cc8ff" opacity=".7"/><path d="M60 ${g} L60 ${g - 70}" stroke="${P_.brown}" stroke-width="7" stroke-linecap="round"/>${[-60, -20, 20, 60].map((a) => `<path d="M60 ${g - 70} q${a / 2} -18 ${a} -4" fill="none" stroke="${P_.green}" stroke-width="9" stroke-linecap="round"/>`).join('')}<path d="M110 ${g - 60} L150 ${g - 72} L190 ${g - 60} Z" fill="${P_.red}" ${s2}/><path d="M150 ${g - 72} L150 ${g}" stroke="${O}" stroke-width="3"/><path d="M120 ${g - 6} L136 ${g - 24} L176 ${g - 24} L168 ${g - 6} Z" fill="${P_.sky}" ${s2}/>`;
+// run-like input: { home, district, car, family: [{ look, age, sex, style, expr }], mood,
+// rental, biz, farmer, sea, beach, guard, cctv, worn }. Older callers may pass
+// { stage, life } instead of a home.
+const LEGACY_HOME = ['room', 'studio', 'flat2', 'house', 'mansion'];
+
+function building(id, g, lit) {
+  const win = (x, y, w = 12, h = 12, on = false) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="${on ? lit : '#8fb7d9'}" ${s2}/>`;
+  switch (id) {
+    case 'room': return `<rect x="54" y="${g - 44}" width="150" height="44" fill="#c8a987" ${S}/><path d="M48 ${g - 44} L210 ${g - 44} L204 ${g - 56} L54 ${g - 56} Z" fill="#8f8f9f" ${s2}/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="${62 + i * 24}" y="${g - 30}" width="12" height="30" fill="${i === 2 ? '#6a4a3a' : '#7a5a44'}" ${s2}/>`).join('')}<path d="M60 ${g - 40} L200 ${g - 40}" stroke="${O}" stroke-width="1"/>${[70, 94, 118, 142].map((x, i) => `<rect x="${x}" y="${g - 39}" width="8" height="10" fill="${[P_.pink, P_.sky, P_.gold, P_.mint][i]}"/>`).join('')}`;
+    case 'studio': return `<rect x="68" y="${g - 74}" width="104" height="74" fill="#d9c3a5" ${S}/><rect x="64" y="${g - 80}" width="112" height="8" fill="#9a7a5a" ${S}/>${[0, 1].map((r) => [0, 1, 2].map((c) => win(78 + c * 30, g - 66 + r * 30, 16, 16, r === 1 && c === 0)).join('')).join('')}<rect x="146" y="${g - 30}" width="16" height="30" fill="#6a4a3a" ${s2}/>`;
+    case 'flat2': return `<rect x="62" y="${g - 118}" width="112" height="118" fill="#c9b6dc" ${S}/>${[0, 1, 2, 3].map((r) => [0, 1, 2].map((c) => win(72 + c * 34, g - 110 + r * 26, 18, 15, r === 2 && c === 1)).join('') + `<path d="M66 ${g - 92 + r * 26} L170 ${g - 92 + r * 26}" stroke="${O}" stroke-width="1.6"/>`).join('')}<rect x="108" y="${g - 22}" width="20" height="22" fill="#6a4a3a" ${s2}/>`;
+    case 'house': return `<path d="M44 ${g - 78} L118 ${g - 124} L192 ${g - 78} Z" fill="${P_.red}" ${S}/><rect x="54" y="${g - 80}" width="128" height="80" fill="${P_.cream}" ${S}/>${win(66, g - 70, 24, 18)}${win(146, g - 70, 24, 18, true)}${win(66, g - 36, 24, 18, true)}${win(146, g - 36, 24, 18)}<rect x="106" y="${g - 38}" width="24" height="38" fill="#7a4a2a" ${s2}/><path d="M54 ${g - 44} L182 ${g - 44}" stroke="${O}" stroke-width="1.6"/>`;
+    case 'mansion': return `<path d="M30 ${g - 86} L118 ${g - 130} L206 ${g - 86} Z" fill="#5a4a8a" ${S}/><rect x="38" y="${g - 88}" width="160" height="88" fill="${P_.white}" ${S}/>${[52, 80, 156, 184].map((x) => `<rect x="${x - 4}" y="${g - 84}" width="8" height="84" fill="#ece8f4" ${s2}/>`).join('')}${win(96, g - 78, 18, 20, true)}${win(122, g - 78, 18, 20)}${win(60, g - 40, 14, 18)}${win(162, g - 40, 14, 18, true)}<rect x="104" y="${g - 44}" width="28" height="44" fill="#5a3a1a" ${s2}/><circle cx="118" cy="${g - 102}" r="7" fill="${P_.gold}" ${s2}/>`;
+    default: return '';
   }
 }
 
-// run-like input: { stage 0–4, life 0–4, mood, look, char, age, expr, prop, biz, farmer, kids, car, sea }
-export function homeScene(o, { w = 360, h = 168, label = 'Your home' } = {}) {
+function backdrop(d, g, w) {
+  switch (d) {
+    case 'inner': return `<g opacity=".55">${[[0, 70], [30, 96], [214, 88], [250, 110], [300, 76], [330, 100]].map(([x, h]) => `<rect x="${x}" y="${g - h}" width="30" height="${h}" fill="#7a7494"/>`).join('')}</g><path d="M0 ${g - 96} Q90 ${g - 84} 180 ${g - 96} T360 ${g - 96}" fill="none" stroke="${O}" stroke-width="1" opacity=".5"/>`;
+    case 'suburb': return `<g opacity=".5">${[[214, 40], [290, 34]].map(([x, h]) => `<path d="M${x} ${g - h} L${x + 26} ${g - h - 18} L${x + 52} ${g - h} Z" fill="#b5617a"/><rect x="${x + 4}" y="${g - h}" width="44" height="${h}" fill="#e8dccc"/>`).join('')}</g>`;
+    case 'gated': return `<rect x="0" y="${g - 18}" width="${w}" height="18" fill="#d8cbb4" ${s2}/>${[0, 40, 80, 120, 160, 200, 240, 280, 320].map((x) => `<rect x="${x}" y="${g - 22}" width="6" height="22" fill="#b8a888" ${s2}/>`).join('')}`;
+    case 'upscale': return [16, 206, 330].map((x) => `<rect x="${x + 8}" y="${g - 40}" width="6" height="40" fill="${P_.brown}"/><circle cx="${x + 11}" cy="${g - 52}" r="18" fill="#3f9d5a" ${s2}/>`).join('');
+    case 'waterfront': return `<rect x="0" y="${g - 14}" width="${w}" height="14" fill="#3a8fd0" opacity=".6"/><path d="M280 ${g - 16} L320 ${g - 16} L314 ${g - 8} L286 ${g - 8} Z" fill="${P_.white}" ${s2}/><path d="M300 ${g - 16} L300 ${g - 44} L318 ${g - 20} Z" fill="${P_.white}" ${s2}/>`;
+    default: return '';
+  }
+}
+
+export function carArt(id, x, y) {
+  if (!id || id === 'none') return '';
+  const body = { used: '#b8584a', saloon: '#3a6fd0', suv: '#2b2b3f', luxury: '#f3f0f8' }[id] || '#3a6fd0';
+  const trim = id === 'luxury' ? P_.gold : '#cfe4f5';
+  if (id === 'suv') return `<g transform="translate(${x} ${y})"><rect x="0" y="6" width="62" height="20" rx="4" fill="${body}" ${s2}/><path d="M6 6 L12 -8 L50 -8 L56 6 Z" fill="${body}" ${s2}/><rect x="15" y="-5" width="14" height="10" fill="${trim}"/><rect x="33" y="-5" width="14" height="10" fill="${trim}"/><circle cx="14" cy="26" r="7" fill="#1d1a24" ${s2}/><circle cx="48" cy="26" r="7" fill="#1d1a24" ${s2}/></g>`;
+  const len = id === 'luxury' ? 70 : id === 'used' ? 50 : 60;
+  return `<g transform="translate(${x} ${y + 4})"><path d="M0 ${id === 'used' ? 8 : 10} Q2 4 ${len * 0.2} 2 L${len * 0.3} -8 L${len * 0.72} -8 L${len * 0.86} 2 Q${len} 4 ${len} 12 L${len} 20 L0 20 Z" fill="${body}" ${s2}/><path d="M${len * 0.33} -5 L${len * 0.5} -5 L${len * 0.5} 2 L${len * 0.27} 2 Z M${len * 0.54} -5 L${len * 0.7} -5 L${len * 0.8} 2 L${len * 0.54} 2 Z" fill="${trim}"/>${id === 'luxury' ? `<path d="M2 12 L${len - 2} 12" stroke="${P_.gold}" stroke-width="1.6"/>` : ''}<circle cx="${len * 0.2}" cy="20" r="6.5" fill="#1d1a24" ${s2}/><circle cx="${len * 0.8}" cy="20" r="6.5" fill="#1d1a24" ${s2}/></g>`;
+}
+
+export function homeScene(o, { w = 360, h = 180, label = 'Your home' } = {}) {
   const W = WEATHER[o.mood] || WEATHER.steady;
-  const g = h - 26;
-  const beach = o.stage >= 4;
+  const g = h - 24;
+  const beach = !!o.beach || (o.home == null && o.stage >= 4);
+  const home = o.home || LEGACY_HOME[Math.max(0, Math.min(4, o.stage ?? 1))] || 'studio';
   const ground = beach ? '#f0d38a' : '#5fbf6f';
+  const lit = '#fff4b0';
   const parts = [];
   parts.push(`<defs><linearGradient id="sky-${o.mood}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${W.sky[0]}"/><stop offset="1" stop-color="${W.sky[1]}"/></linearGradient></defs>`);
   parts.push(`<rect width="${w}" height="${h}" fill="url(#sky-${o.mood})"/>`);
   parts.push(weatherLayer(o.mood, w));
-  parts.push(`<rect y="${g}" width="${w}" height="${h - g}" fill="${ground}"/><path d="M0 ${g} L${w} ${g}" stroke="${O}" stroke-width="3"/>`);
-  if (!beach) parts.push(`<rect y="${g + 12}" width="${w}" height="8" fill="#5a5470" opacity=".5"/>`);
-  parts.push(`<g class="bldg">${dwelling(o.stage, o.life || 0, g)}</g>`);
-  // What you own, on the right-hand side of the street.
-  let rx = 214;
-  if (o.prop) {
-    parts.push(`<g class="bldg"><rect x="${rx}" y="${g - 70}" width="52" height="70" fill="${P_.orange}" ${S}/>${[0, 1].map((r) => `<rect x="${rx + 8}" y="${g - 60 + r * 24}" width="14" height="14" fill="#8fb7d9" ${s2}/><rect x="${rx + 30}" y="${g - 60 + r * 24}" width="14" height="14" fill="#8fb7d9" ${s2}/>`).join('')}<rect x="${rx - 4}" y="${g - 86}" width="60" height="14" rx="2" fill="${P_.white}" ${s2}/><text x="${rx + 26}" y="${g - 75.5}" font-size="9" font-weight="800" text-anchor="middle" fill="${O}">FOR RENT</text><circle cx="${rx + 62}" cy="${g - 30}" r="5" fill="${P_.gold}" ${s2}/><circle cx="${rx + 70}" cy="${g - 18}" r="5" fill="${P_.gold}" ${s2}/></g>`);
-    rx += 78;
+  if (beach) {
+    parts.push(`<rect y="${g - 30}" width="${w}" height="30" fill="#3a9fe0" opacity=".75"/><rect y="${g}" width="${w}" height="${h - g}" fill="${ground}"/><path d="M300 ${g} L300 ${g - 74}" stroke="${P_.brown}" stroke-width="7" stroke-linecap="round"/>${[-60, -20, 20, 60].map((a) => `<path d="M300 ${g - 74} q${a / 2} -18 ${a} -4" fill="none" stroke="${P_.green}" stroke-width="9" stroke-linecap="round"/>`).join('')}<path d="M190 ${g - 50} L230 ${g - 62} L270 ${g - 50} Z" fill="${P_.red}" ${s2}/><path d="M230 ${g - 62} L230 ${g}" stroke="${O}" stroke-width="3"/>`);
+  } else {
+    parts.push(backdrop(o.district, g, w));
+    parts.push(`<rect y="${g}" width="${w}" height="${h - g}" fill="${ground}"/><path d="M0 ${g} L${w} ${g}" stroke="${O}" stroke-width="3"/><rect y="${g + 10}" width="${w}" height="7" fill="#5a5470" opacity=".5"/>`);
+    parts.push(`<g class="bldg">${building(home, g, lit)}</g>`);
+    if (o.worn) parts.push(`<path d="M80 ${g - 20} l6 -8 l-3 -6 l5 -7 M150 ${g - 30} l-4 -6 l4 -5" fill="none" stroke="${O}" stroke-width="1.4" opacity=".7"/>`);
+    if (o.cctv) parts.push(`<g transform="translate(${home === 'mansion' ? 190 : 170} ${g - (home === 'flat2' ? 110 : 64)})"><rect x="0" y="0" width="12" height="6" rx="2" fill="#e8e8f0" ${s2}/><circle cx="2" cy="3" r="1.4" fill="${P_.red}"/></g>`);
+    if (o.district === 'gated') parts.push(`<g transform="translate(206 ${g - 38})"><rect x="0" y="0" width="22" height="38" fill="${P_.cream}" ${s2}/><path d="M-2 0 L24 0 L20 -8 L2 -8 Z" fill="${P_.red}" ${s2}/><rect x="5" y="8" width="12" height="10" fill="#8fb7d9" ${s2}/></g>`);
+    // Rental property and business, small on the far right.
+    let rx = 300;
+    if (o.rental) { parts.push(`<g class="bldg"><rect x="${rx}" y="${g - 50}" width="46" height="50" fill="${P_.orange}" ${S}/>${[0, 1].map((r) => `<rect x="${rx + 7}" y="${g - 42 + r * 20}" width="12" height="11" fill="#8fb7d9" ${s2}/><rect x="${rx + 27}" y="${g - 42 + r * 20}" width="12" height="11" fill="#8fb7d9" ${s2}/>`).join('')}<rect x="${rx - 3}" y="${g - 64}" width="52" height="12" rx="2" fill="${P_.white}" ${s2}/><text x="${rx + 23}" y="${g - 55}" font-size="8" font-weight="800" text-anchor="middle" fill="${O}">FOR RENT</text></g>`); rx -= 0; }
+    if (o.biz && !o.rental) {
+      if (o.farmer) parts.push(`<g class="bldg">${[0, 1, 2].map((i) => `<path d="M${rx} ${g - 6 - i * 10} L${rx + 50} ${g - 6 - i * 10}" stroke="${P_.green}" stroke-width="6" stroke-linecap="round"/>`).join('')}</g>`);
+      else parts.push(`<g class="bldg"><rect x="${rx}" y="${g - 40}" width="50" height="40" fill="${P_.cream}" ${S}/><path d="M${rx - 4} ${g - 50} L${rx + 54} ${g - 50} L${rx + 54} ${g - 38} L${rx - 4} ${g - 38} Z" fill="${P_.red}" ${s2}/><rect x="${rx + 30}" y="${g - 28}" width="12" height="28" fill="#7a4a2a" ${s2}/></g>`);
+    }
+    parts.push(carArt(o.car, 214, g - 26));
+    if (o.guard) parts.push(`<svg x="236" y="${g - 70}" width="34" height="70" viewBox="0 0 40 82">${figure({ skin: SKINS[4], hair: 'short', outfit: '#2d3f7a', accent: '#2d3f7a', style: 1, age: 40, sex: 'm' })}</svg>`);
   }
-  if (o.biz && rx < w - 40) {
-    if (o.farmer) parts.push(`<g class="bldg">${[0, 1, 2].map((i) => `<path d="M${rx} ${g - 6 - i * 10} L${rx + 56} ${g - 6 - i * 10}" stroke="${P_.green}" stroke-width="6" stroke-linecap="round"/>`).join('')}</g>`);
-    else parts.push(`<g class="bldg"><rect x="${rx}" y="${g - 44}" width="56" height="44" fill="${P_.cream}" ${S}/><path d="M${rx - 4} ${g - 54} L${rx + 60} ${g - 54} L${rx + 60} ${g - 42} L${rx - 4} ${g - 42} Z" fill="${P_.red}" ${s2}/>${[1, 2, 3, 4].map((i) => `<path d="M${rx - 4 + i * 13} ${g - 54} L${rx - 4 + i * 13} ${g - 42}" stroke="${P_.white}" stroke-width="4"/>`).join('')}<rect x="${rx + 8}" y="${g - 34}" width="20" height="16" fill="${P_.sky}" ${s2}/><rect x="${rx + 34}" y="${g - 30}" width="14" height="30" fill="#7a4a2a" ${s2}/></g>`);
-  }
-  if (o.car && !beach) parts.push(`<g transform="translate(150 ${g - 26}) scale(0.9)">${I.car.replace(/<path d="M42 16[^>]*\/>/, '').replace(/<path d="M46 18[^>]*\/>/, '')}</g>`);
-  if (o.kids && !beach) parts.push(`<g transform="translate(20 ${g - 20})"><circle cx="6" cy="14" r="6" fill="none" stroke="${O}" stroke-width="2.4"/><circle cx="24" cy="14" r="6" fill="none" stroke="${O}" stroke-width="2.4"/><path d="M6 14 L14 4 L24 14 M12 4 L18 4" fill="none" stroke="${P_.red}" stroke-width="2.6"/></g>`);
   if (o.sea) parts.push(`<rect x="0" y="0" width="${w}" height="${h}" fill="#2a4a7a" opacity=".45"/><g transform="translate(${w - 120} ${g - 40})"><path d="M0 30 L90 30 L78 44 L12 44 Z" fill="${P_.white}" ${S}/><rect x="30" y="10" width="30" height="20" fill="${P_.red}" ${s2}/><path d="M44 10 L44 -6" ${S}/></g>`);
-  // You, in front of your home.
-  const av = avatar(o.look, o.char, { age: o.age, expr: o.expr || 'happy', label: '' });
-  parts.push(`<svg x="${beach ? 196 : 8}" y="${g - 74}" width="62" height="75" viewBox="0 0 100 121">${av.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '')}</svg>`);
+  // You and your family, standing in front.
+  const fam = o.family || (o.look ? [{ look: o.look, age: o.age, expr: o.expr, style: o.style ?? Math.max(0, Math.min(4, o.life ?? 1)) }] : []);
+  let fx = beach ? 110 : 4;
+  for (const p of fam) {
+    const kid = (p.age ?? 30) < 16;
+    const fw = kid ? 30 : 36;
+    const fh = (fw * 82) / 40;
+    parts.push(`<svg x="${fx}" y="${g - fh + 2}" width="${fw}" height="${fh}" viewBox="0 0 40 82">${lookFigure(p.look, { age: p.age, expr: p.expr, style: p.style ?? 1, sex: p.sex })}</svg>`);
+    fx += kid ? 20 : 26;
+  }
   parts.push(`<rect width="${w}" height="${h}" fill="none" stroke="${O}" stroke-width="3" rx="0"/>`);
   return svg(`0 0 ${w} ${h}`, parts.join(''), { cls: `scene mood-${o.mood}`, label });
 }
@@ -461,6 +722,43 @@ export function worldMap(regions, selected) {
     return `<g class="pin" data-act="region" data-id="${id}" role="button" tabindex="0" aria-label="${r.name}"><circle cx="${x}" cy="${y}" r="${on ? 11 : 8}" fill="${on ? P_.gold : P_.red}" ${s2}/><circle cx="${x}" cy="${y}" r="3" fill="${O}"/></g>`;
   }).join('');
   return svg('0 0 360 170', `<rect width="360" height="170" rx="12" fill="#3a8fd0"/>${land}${pins}`, { cls: 'worldmap', label: 'World map. Tap your home region.' });
+}
+
+// ------------------------------------------------------------------ your country, as six land zones
+
+const ZONE_SPOTS = { farm: [180, 50], capital: [222, 118], corridor: [104, 104], mega: [82, 190], industry: [284, 170], coast: [214, 212] };
+const ZONE_COL = { capital: P_.violet, mega: P_.orange, industry: '#8a8fa8', corridor: P_.gold, farm: P_.green, coast: P_.sky };
+const ZONE_ICON = { capital: 'bank', mega: 'companies', industry: 'factory', corridor: 'arrowup', farm: 'field', coast: 'umbrella' };
+
+// zones: [{ id, name, plots, news, locked }]. A schematic map, not to scale.
+export function countryMap(zones, { country = '', w = 360, h = 270 } = {}) {
+  const land = 'M60 40 C110 14 200 10 262 28 C318 44 344 92 330 142 C340 190 320 244 262 252 C206 262 168 238 122 250 C70 262 30 236 26 196 C22 160 40 136 34 104 C28 70 34 54 60 40 Z';
+  const parts = [`<rect width="${w}" height="${h}" rx="12" fill="#3a8fd0"/>`, `<path d="${land}" fill="#79c47f" ${s2}/>`,
+    `<path d="M104 104 L222 118 L82 190 M222 118 L284 170 M222 118 L180 50" fill="none" stroke="#e8dcc0" stroke-width="4" stroke-dasharray="2 5" stroke-linecap="round"/>`];
+  for (const z of zones) {
+    const [x, y] = ZONE_SPOTS[z.id];
+    const col = ZONE_COL[z.id];
+    parts.push(`<g class="zone-pin ${z.locked ? 'locked' : ''}" data-act="zone" data-id="${z.id}" role="button" tabindex="0" aria-label="${(z.name || '').replace(/"/g, '')}${z.plots ? `, you own ${z.plots}` : ''}">
+      ${z.news ? `<circle class="zone-news" cx="${x}" cy="${y}" r="31" fill="none" stroke="${P_.gold}" stroke-width="3" stroke-dasharray="6 4"/>` : ''}
+      <circle cx="${x}" cy="${y}" r="24" fill="${col}" ${s2}/>
+      <svg x="${x - 15}" y="${y - 15}" width="30" height="30" viewBox="0 0 48 48">${I[ZONE_ICON[z.id]] || I.plot}</svg>
+      ${z.plots ? `<g transform="translate(${x + 12} ${y - 30})"><path d="M0 22 L0 0" stroke="${O}" stroke-width="2"/><path d="M0 1 L14 3 L10 7 L14 11 L0 10 Z" fill="${P_.red}" ${s2}/><text x="7" y="-2" font-size="10" font-weight="800" text-anchor="middle" fill="#fff" stroke="${O}" stroke-width="2.5" paint-order="stroke">${z.plots}</text></g>` : ''}
+      <text x="${x}" y="${y + 38}" font-family="Figtree, system-ui, sans-serif" font-size="10.5" font-weight="800" text-anchor="middle" fill="#fff" stroke="${O}" stroke-width="3" paint-order="stroke">${(z.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').slice(0, 26)}</text></g>`);
+  }
+  parts.push(`<text x="14" y="${h - 12}" font-family="Figtree, system-ui, sans-serif" font-size="11" font-weight="800" fill="#fff" stroke="${O}" stroke-width="3" paint-order="stroke">${country.replace(/</g, '&lt;')} · map not to scale</text>`);
+  return svg(`0 0 ${w} ${h}`, parts.join(''), { cls: 'countrymap', label: `${country}: six land zones. Tap one to see plots for sale.` });
+}
+
+// Small pictures for the Trophy Wall. Missing ones are drawn as silhouettes.
+export function homePic(id, size = 56, got = true) {
+  const g = 150;
+  const inner = building(id, g, '#fff4b0');
+  const body = inner;
+  return svg('24 14 196 140', got ? body : `<g opacity=".9" filter="url(#sil)">${body}</g><defs><filter id="sil"><feColorMatrix type="matrix" values="0 0 0 0 0.25  0 0 0 0 0.22  0 0 0 0 0.38  0 0 0 1 0"/></filter></defs>`, { size, cls: `trophy ${got ? '' : 'missing'}`, label: '' });
+}
+export function carPic(id, size = 56, got = true) {
+  const body = carArt(id, 4, 18);
+  return svg('0 0 80 50', got ? body : `<g filter="url(#silc)">${body}</g><defs><filter id="silc"><feColorMatrix type="matrix" values="0 0 0 0 0.25  0 0 0 0 0.22  0 0 0 0 0.38  0 0 0 1 0"/></filter></defs>`, { size, cls: `trophy ${got ? '' : 'missing'}`, label: '' });
 }
 
 // ------------------------------------------------------------------ small helpers used across screens

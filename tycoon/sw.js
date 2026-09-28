@@ -5,7 +5,7 @@
 // network first, so a new version shows up the next time it is opened; if the
 // network is slow or gone it falls back to the saved copy within a few seconds.
 
-const CACHE = 'tycoon-rush-v5';
+const CACHE = 'tycoon-rush-v6';
 
 // How long to wait for the network before using the saved copy.
 const NETWORK_WAIT_MS = 3000;
@@ -68,4 +68,23 @@ self.addEventListener('fetch', (event) => {
       return saved;
     }
   })());
+});
+
+// 16+ reminders (opt-in). The game keeps a one-line teaser in a small cache;
+// periodic background sync, where the browser supports it, shows it at most
+// about once a day.
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag !== 'tr-remind') return;
+  event.waitUntil((async () => {
+    const c = await caches.open('tr-state');
+    const r = await c.match('./state/teaser.json');
+    const t = r ? await r.json() : null;
+    if (!t || Date.now() - t.at < 18 * 60 * 60 * 1000) return;
+    await self.registration.showNotification('Tycoon Rush', { body: t.text, icon: './icon.svg', tag: 'tr-remind' });
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({ type: 'window' }).then((list) => (list.length ? list[0].focus() : self.clients.openWindow('./'))));
 });

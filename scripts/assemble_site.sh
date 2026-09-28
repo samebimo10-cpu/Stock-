@@ -54,6 +54,7 @@ if [ -d "$root/tycoon" ]; then
   cp "$root/tycoon/index.html" "$root/tycoon/sw.js" "$root/tycoon/manifest.webmanifest" "$root/tycoon/icon.svg" "$out/tycoon/"
   cp -R "$root/tycoon/js" "$out/tycoon/js"
   cp -R "$root/tycoon/fonts" "$out/tycoon/fonts"
+  if [ -d "$root/tycoon/news" ]; then cp -R "$root/tycoon/news" "$out/tycoon/news"; fi
   echo "Game       -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
 fi
 

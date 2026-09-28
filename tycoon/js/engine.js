@@ -340,7 +340,7 @@ export function newRun(opts) {
   // A real-life start: the player's own age, money and goals, in their own
   // currency (actual amounts, so no scaling).
   const me = !era && opts.me ? opts.me : null;
-  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : ch && ch.startAge ? ch.startAge : mode.startAge;
+  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : opts.startAge ? clamp(Math.round(opts.startAge), 16, 50) : ch && ch.startAge ? ch.startAge : mode.startAge;
   const ypt = mode.ypt;
   const deadline = mode.years ? startAge + mode.years : Math.max(asc >= 12 ? 56 : 60, me ? startAge + 8 : 0);
   const turns = era ? era.states.length : Math.max(3, Math.round((deadline - startAge) / ypt));
@@ -356,7 +356,7 @@ export function newRun(opts) {
     life: ch && ch.lockLife != null ? ch.lockLife : c.life,
     startLife: ch && ch.lockLife != null ? ch.lockLife : c.life,
     joy: c.joy != null ? c.joy : 60,
-    cash: c.cash * scale * (asc >= 4 ? 0.5 : 1) * (ch && ch.cashMult ? ch.cashMult : 1) + (opts.inherit || 0),
+    cash: c.cash * scale * (asc >= 4 ? 0.5 : 1) * (ch && ch.cashMult ? ch.cashMult : 1) * (1 + clamp(opts.cashBoost || 0, 0, 0.3)) + (opts.inherit || 0),
     h: {
       save: 0, index: 0, stocks: COMPANIES.map(() => 0), crypto: (c.crypto || 0) * scale, fx: 0,
       prop: { v: 0, debt: 0, bought: -1 },
@@ -806,8 +806,9 @@ function pickName(run, r, sex, avoid = []) {
 }
 const usedNames = (run) => [...run.circle.map((c) => c.name), ...(run.partner ? [run.partner.name] : []), ...run.kids.map((k) => k.name)];
 
-function randomLook(r, age) {
-  return { skin: Math.floor(r() * 6), hair: r.pick(['short', 'afro', 'long', 'bun', 'braids', 'curly', 'wrap', 'bald']), hairColor: Math.floor(r() * 4), outfit: Math.floor(r() * 6), build: r.pick(['slim', 'average', 'heavy']), age };
+function randomLook(r, age, sex = null) {
+  const hairs = sex === 'm' ? ['short', 'afro', 'curly', 'bald', 'short'] : sex === 'f' ? ['long', 'bun', 'braids', 'curly', 'wrap', 'afro'] : ['short', 'afro', 'long', 'bun', 'braids', 'curly', 'wrap', 'bald'];
+  return { sex, skin: Math.floor(r() * 6), hair: r.pick(hairs), beard: sex === 'm' && r() < 0.25, hairColor: Math.floor(r() * 4), outfit: Math.floor(r() * 6), build: r.pick(['slim', 'average', 'heavy']), age };
 }
 
 function makeCircle(run) {
@@ -819,7 +820,7 @@ function makeCircle(run) {
     const sex = sx || (r() < 0.5 ? 'm' : 'f');
     const name = pickName(run, r, sex, out.map((c) => c.name));
     const type = r.weighted({ genuine: 0.35, taker: 0.25, schemer: 0.15, helper: 0.25 });
-    out.push({ id: `c${i}`, rel, name, sex, type, ageGap: older, look: randomLook(r, run.startAge + older), given: 0, returned: 0, asks: 0, clues: [], known: false });
+    out.push({ id: `c${i}`, rel, name, sex, type, ageGap: older, look: randomLook(r, run.startAge + older, sex), given: 0, returned: 0, asks: 0, clues: [], known: false });
   });
   return out;
 }
@@ -827,7 +828,7 @@ function makeCircle(run) {
 function addInLaw(run, P, r) {
   const sex = r() < 0.5 ? 'm' : 'f';
   const type = P.type === 'taker' ? 'taker' : r.weighted({ genuine: 0.4, taker: 0.3, schemer: 0.1, helper: 0.2 });
-  run.circle.push({ id: `c${run.circle.length}`, rel: sex === 'm' ? 'Brother-in-law' : 'Sister-in-law', name: pickName(run, r, sex, usedNames(run)), sex, type, ageGap: 2, inlaw: true, look: randomLook(r, run.age + 2), given: 0, returned: 0, asks: 0, clues: [], known: false });
+  run.circle.push({ id: `c${run.circle.length}`, rel: sex === 'm' ? 'Brother-in-law' : 'Sister-in-law', name: pickName(run, r, sex, usedNames(run)), sex, type, ageGap: 2, inlaw: true, look: randomLook(r, run.age + 2, sex), given: 0, returned: 0, asks: 0, clues: [], known: false });
 }
 
 // Three people you might marry. Each card shows one clue, right about 70% of the time.
@@ -839,7 +840,7 @@ function partnerCandidates(run) {
     const type = r.weighted({ saver: 0.22, balanced: 0.26, spender: 0.22, builder: 0.16, taker: 0.14 });
     const honest = r() < 0.7;
     const clueType = honest ? type : r.pick(PARTNER_TYPES.filter((t) => t !== type));
-    out.push({ name: pickName(run, r, sex, [...usedNames(run), ...out.map((c) => c.name)]), sex, type, clue: PARTNERS[clueType].clue, look: randomLook(r, run.age + Math.floor(r() * 5) - 2) });
+    out.push({ name: pickName(run, r, sex, [...usedNames(run), ...out.map((c) => c.name)]), sex, type, clue: PARTNERS[clueType].clue, look: randomLook(r, run.age + Math.floor(r() * 5) - 2, sex) });
   }
   return out;
 }
@@ -856,7 +857,7 @@ function newKid(run, nanny) {
   const r = rngFor(run.seed, 'kid', run.turn);
   const sex = r() < 0.5 ? 'm' : 'f';
   const P = run.partner;
-  const look = randomLook(r, 0);
+  const look = randomLook(r, 0, sex);
   if (P && P.look) look.skin = Math.round(((P.look.skin ?? 2) + (run.lookSkin ?? (P.look.skin ?? 2))) / 2);
   run.kids.push({ name: pickName(run, r, sex, usedNames(run)), sex, born: run.age, school: 'public', uni: null, outcome: null, upSum: 0, schoolYrs: 0, look });
   run.nanny = nanny;
@@ -1540,6 +1541,7 @@ function drawEvent(run) {
   if (run.forceEvent) {
     const f = evById(run.forceEvent);
     run.forceEvent = null;
+    run.teaser = null;
     if (f && (!f.cond || f.cond(run))) return f.id;
   }
   const recent = run.seenEv.slice(-5);
@@ -2224,7 +2226,7 @@ export function lifeScore(run, reason) {
   const st = run.stats || { joySum: 0, years: 0, trustSum: 0, trustYears: 0, givingSum: 0 };
   const years = Math.max(1, st.years);
   const ratio = clamp(passive(run).total / bowl(run), 0, 1);
-  const freedom = reason === 'free' ? clamp(2 - Math.max(0, run.age - 38) * 0.06, 0.9, 2) : reason === 'bankrupt' ? 0 : 0.9 * ratio;
+  const freedom = reason === 'free' ? clamp(2 - Math.max(0, run.age - 38) * 0.06, 0.9, 2) : reason === 'bankrupt' ? 0 : MODES[run.mode] && MODES[run.mode].years ? 2 * clamp(ratio / 0.3, 0, 1) : 0.9 * ratio;
   const avgJoy = st.years ? st.joySum / years : run.joy;
   const joy = clamp((avgJoy - 30) / 50, 0, 1);
   const trustAvg = st.trustYears ? st.trustSum / st.trustYears : null;
