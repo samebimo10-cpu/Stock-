@@ -10,7 +10,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Tycoon Rush">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
 /* Fonts ship with the game (SIL Open Font License, see fonts/OFL.txt), so it
    looks right offline from the very first visit. */
@@ -564,6 +566,9 @@ svg.art { display: block; flex: none; }
 .fb-face.on { border-color: var(--gold); background: #33265f; }
 .fb-face small { font-weight: 800; color: var(--muted); }
 .fb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.install-steps { margin: 14px 0; padding-left: 22px; display: grid; gap: 10px; font-size: 16px; line-height: 1.4; }
+.ios-share { display: inline-block; padding: 0 6px; border: 2px solid currentColor; border-radius: 6px; font-size: 13px; }
+[data-install] .btn + .btn, [data-install] .install-steps + .btn { margin-top: 10px; }
 .fb-tag { min-height: 40px; padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font-weight: 700; font-size: 14px; }
 .fb-tag.on { background: var(--violet); color: #1b1336; border-color: var(--violet); }
 .fb-text { width: 100%; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); padding: 10px 12px; font-size: 16px; resize: vertical; }
