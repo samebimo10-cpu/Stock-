@@ -53,6 +53,10 @@ export const PRINCIPLES = {
   x_bets: { book: 'prob', title: 'Decisions are not outcomes', idea: 'A good decision can turn out badly and a bad one well. Judge a choice by what you knew when you made it. (Thinking in Bets)', game: 'The review compares your forecast to the careful answer, not just to what happened.' },
   x_ev: { book: 'prob', title: 'Expected value', idea: 'Weigh every outcome by its chance and add them up. Take bets whose average beats their cost.', game: 'Tap "Show the maths" on risky choices to see the expected value.' },
   x_kelly: { book: 'prob', title: 'Size your bets (Kelly)', idea: 'Even a bet in your favour can ruin you if it is too big. The Kelly rule gives the share of wealth that grows fastest; many experts bet half of it.', game: 'The maths panel shows the Kelly share next to what the choice asks you to risk.' },
+  x_clues: { book: 'prob', title: 'Read people like evidence', idea: 'A first impression is a clue, not a verdict. Ask questions, watch what people do over time, and update your view.', game: 'Partner cards and Circle requests show clues that are only right some of the time. Asking questions reveals more.' },
+  b_lend: { book: 'babylon', title: 'Lend only what you can lose', idea: '"Better a little caution than a great regret." Before you lend, ask whether the borrower can repay, and never lend what you cannot afford to lose.', game: 'The Circle asks for money. Genuine needs often pay back; takers and schemers never do.' },
+  p_reasonable: { book: 'housel', title: 'Reasonable beats rational', idea: 'A plan you can live with for decades beats a perfect plan you abandon. Squeezing every coin can cost your health and your family.', game: 'Frugal living speeds up saving, but two years of it in a row brings burnout, strains your partner and pushes your children into weaker schools.' },
+  p_sequence: { book: 'housel', title: 'The final stretch', idea: 'A crash just before you stop working hurts far more than the same crash at 25. Near your goal, keep a few years of costs somewhere safe.', game: 'Once you are three quarters of the way to freedom, late crashes are the biggest danger. Savings are not hit by them.' },
   x_overconf: { book: 'prob', title: 'Overconfidence', idea: 'Most people are too sure of themselves. Things they call 90% certain happen far less often. (Kahneman)', game: 'Forecasts of 10% or 90% that miss cost you a lot on the Brier score.' },
 };
 
@@ -88,6 +92,14 @@ export const MOMENTS = {
   base_intro: { p: 'x_base', text: 'Before reading headlines, ask how often each mood happens. That is the base rate, shown in the lens.' },
   bayes_intro: { p: 'x_bayes', text: 'Headlines moved the odds. A mood headline is right 80% of the time, so the lens multiplies each base rate by how well it fits the headlines.' },
   plan_started: { p: 'h_plan', text: 'Your plan now runs by itself every year. Good plans work because they don\'t depend on your mood.' },
+  final_stretch: { p: 'p_sequence', text: 'You are three quarters of the way to freedom. This is when a crash hurts most. Consider keeping two years of costs in savings.' },
+  seq_hit: { p: 'p_sequence', text: 'A late crash hit just as you neared the finish. Money in savings was untouched; money in the market fell hard.' },
+  frugal_cost: { p: 'p_reasonable', text: 'Two years of frugal living took its toll. Saving hard is good; squeezing every coin costs your health and your family.' },
+  car_dep: { p: 'r_doodads', text: 'Your car lost {x} of value this year. A car is a doodad: it costs money to own and is worth less every year.' },
+  partner_reveal: { p: 'x_clues', text: 'After living together, you know your partner well: a {x}. First impressions were a clue, not the whole story.' },
+  kid_outcome: { p: 'b_future', text: '{x} is 22 now. {y}' },
+  title_problem: { p: 'b_guard', text: 'Your land had a paperwork problem. A survey and registry search before buying would have shown it.' },
+  circle_repaid: { p: 'b_lend', text: '{x} paid you back. Genuine people usually do, which is why reading people matters.' },
   all_cures: { p: 'b_future', text: 'All seven cures are lit at once. Arkad would call your purse fat. (+10 joy)' },
 };
 
