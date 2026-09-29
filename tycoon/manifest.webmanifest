@@ -2,7 +2,7 @@
   "id": "./",
   "name": "Tycoon Rush",
   "short_name": "Tycoon Rush",
-  "description": "A roguelite investing game: build a fortune from nothing to financial freedom in ten minutes.",
+  "description": "You have one life. Make your money work before your time runs out. Produced by Ebims.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
