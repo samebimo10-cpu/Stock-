@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import * as A from '../js/art.js';
 import { EVENTS, CARDS, ASSETS, CURRENCIES, REGIONS, CHARACTERS, STATE_INFO } from '../js/content.js';
 import * as E from '../js/engine.js';
+import { decide } from './helpers.mjs';
 
 const isSvg = (s) => typeof s === 'string' && s.startsWith('<svg') && s.endsWith('</svg>');
 
@@ -59,13 +60,11 @@ test('a run in every currency finishes with finite numbers', () => {
   for (const currency of Object.keys(CURRENCIES)) {
     const run = E.newRun({ mode: 'classic', char: 'graduate', currency, seed: `c-${currency}` });
     let res = null;
+    decide(run);
     while (!res) {
       if (E.canAct(run)) E.setHolding(run, 'index', run.h.index + Math.max(0, run.cash) * 0.8);
-      E.live(run);
-      let i = 0;
-      while (run.phase === 'event' && E.chooseEvent(run, i) === null) i += 1;
-      E.makeOffer(run, E.unlockedCards(0));
-      res = E.pickCard(run, null);
+      res = E.live(run).result || null;
+      if (!res) decide(run);
     }
     assert.ok(Number.isFinite(res.score) && Number.isFinite(res.nw), currency);
   }

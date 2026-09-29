@@ -328,6 +328,23 @@ export function buildReport(run, { name = '', date = new Date(), modeName = '', 
     pdf.y = y0 - 24;
   }
 
+  // The life story: the moments that shaped this run, and what might have been.
+  const S = res && res.story;
+  if (S && S.memories.length) {
+    pdf.heading('Your life story');
+    if (res.freeAge) pdf.para(`Financially free at ${res.freeAge}.`, { size: 10, bold: true });
+    if (S.success) pdf.para(`Biggest success: ${S.success.title} (age ${S.success.age}).`, { size: 10 });
+    if (S.mistake) pdf.para(`Biggest mistake: ${S.mistake.title} (age ${S.mistake.age}).`, { size: 10 });
+    if (S.decision) pdf.para(`Best decision: ${S.decision.title} (age ${S.decision.age}).`, { size: 10 });
+    pdf.para(`${S.businesses} businesses started, ${S.properties} properties, ${S.people} people helped, ${S.goals} goals reached.`, { size: 10, gap: 6 });
+    const key = S.memories.filter((m) => !m.tags.includes('card')).slice(-14);
+    for (const m of key) pdf.para(`Age ${m.age}  -  ${m.title}${m.impact ? ` (${m.impact > 0 ? '+' : '-'}${M(Math.abs(m.impact))})` : ''}`, { size: 9, gap: 1 });
+    if (S.whatIf.length) {
+      pdf.para('What if?', { size: 10, bold: true, gap: 2 });
+      for (const w of S.whatIf) pdf.para(`${w.text}: about ${M(w.v)} more.`, { size: 9, gap: 2 });
+    }
+  }
+
   // Report card.
   pdf.heading('Your report card');
   for (const a of J.areas) {

@@ -1,3 +1,5 @@
+import { STRATEGY_BOOK, STRATEGY_PRINCIPLES } from './story.js';
+
 // The learning layer: the books behind the game, their principles, the moments
 // in play that teach each one, the mentor quizzes, and the investment plans.
 //
@@ -11,6 +13,7 @@ export const BOOKS = {
   graham: { title: 'The Intelligent Investor', author: 'Benjamin Graham', year: 1949, color: '#5cc8ff', blurb: 'Mr. Market, margin of safety, and the calm, rules-based defensive investor.' },
   hill: { title: 'Think and Grow Rich', author: 'Napoleon Hill', year: 1937, color: '#ff9f43', blurb: 'A definite aim, an organised plan, specialised knowledge and persistence.' },
   housel: { title: 'The Psychology of Money', author: 'Morgan Housel', year: 2020, color: '#ff7ad9', blurb: 'Behaviour beats brilliance: time, room for error, and knowing when you have enough.' },
+  ...STRATEGY_BOOK,
   prob: { title: 'Thinking in probabilities', author: 'Bayes, Kelly, Tetlock (Superforecasting), Duke (Thinking in Bets), Kahneman', year: null, color: '#b69cff', blurb: 'Base rates, updating on evidence, calibration, expected value and bet sizing.' },
 };
 
@@ -47,6 +50,7 @@ export const PRINCIPLES = {
   p_enough: { book: 'housel', title: 'Enough', idea: 'If expectations rise with results, you never feel rich. Knowing what is enough is a skill.', game: 'Every lifestyle step moves the finish line further away.' },
   p_tails: { book: 'housel', title: 'Tails drive everything', idea: 'A few rare outcomes deliver most of the results. You can be wrong often and still win if the wins are big.', game: 'Startups mostly fail, but one hit can pay 12×. Size those bets so the misses don\'t hurt.' },
 
+  ...STRATEGY_PRINCIPLES,
   x_base: { book: 'prob', title: 'Start with the base rate', idea: 'Before looking at the details, ask how often this kind of thing happens in general. Then adjust. (Superforecasting)', game: 'The lens shows how often each market mood followed the last one.' },
   x_bayes: { book: 'prob', title: 'Update on evidence', idea: 'New evidence should move your odds in proportion to how reliable it is. Weak evidence moves you a little, strong evidence a lot. (Bayes)', game: 'Each mood headline is right 80% of the time. The lens multiplies the base rate by that evidence.' },
   x_calib: { book: 'prob', title: 'Calibration', idea: 'When you say 70%, it should happen about 7 times in 10. The Brier score measures this: 0 is perfect, 0.25 is a coin flip. (Superforecasting)', game: 'Every forecast you make is scored. Your results show your calibration.' },

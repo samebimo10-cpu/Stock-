@@ -2,26 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../js/engine.js';
+import { play, decide } from './helpers.mjs';
 import * as A from '../js/art.js';
 import { buildReport } from '../js/report.js';
 import { HOMES, CARS, WORLD_RULES, COUNTRIES, CURRENCIES, ZONE_ORDER } from '../js/content.js';
 
-function play(opts, bot = () => {}, pick = 0) {
-  const run = E.newRun(opts);
-  let res = null;
-  let guard = 0;
-  while (!res && guard++ < 60) {
-    if (run.quiz) E.answerQuiz(run, 0);
-    if (E.canAct(run)) bot(run);
-    if (run.learnMode && run.think) E.setForecast(run, 0.5);
-    E.live(run);
-    let ci = pick;
-    for (let g = 0; run.phase === 'event' && g < 20; g++) { const out = E.chooseEvent(run, ci); ci = out === E.AGAIN ? 0 : (ci + 1) % 6; }
-    E.makeOffer(run, E.unlockedCards(0));
-    res = E.pickCard(run, run.quiet ? null : run.offer[0]);
-  }
-  return { run, res };
-}
 
 test('every currency has a country with six land zones', () => {
   for (const c of Object.keys(CURRENCIES)) {
@@ -51,6 +36,7 @@ test('moving to a bigger home costs more; buying swaps rent for a mortgage', () 
 
 test('cars lose value every year and count in net worth', () => {
   const run = E.newRun({ mode: 'classic', char: 'heir', currency: 'USD', seed: 'l3' });
+  decide(run);
   assert.ok(E.buyCar(run, 'suv', false));
   const v0 = run.car.v;
   E.live(run);
@@ -59,6 +45,7 @@ test('cars lose value every year and count in net worth', () => {
 
 test('frugal living caps schools and brings burnout after two years', () => {
   const run = E.newRun({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'l4' });
+  decide(run);
   E.setLife(run, 0);
   assert.deepEqual(E.schoolsOpen(run), ['public', 'budget']);
   run.frugalYears = 2;
@@ -83,9 +70,10 @@ test('land: checking the papers shows the truth, and a plot can be bought and so
 test('the Circle: asking questions reveals a clue and the same request stays open', () => {
   for (let i = 0; i < 400; i++) {
     const run = E.newRun({ mode: 'classic', char: 'graduate', currency: 'USD', seed: `c${i}` });
+    decide(run);
     run.forceEvent = 'circle';
     E.live(run);
-    if (run.phase !== 'event' || run.pending.id !== 'circle') continue;
+    if (!run.pending || run.pending.id !== 'circle') continue;
     const v = E.eventView(run);
     const ask = v.choices.findIndex((c) => c.act === 'ask');
     assert.equal(E.chooseEvent(run, ask), E.AGAIN);
@@ -134,6 +122,7 @@ test('the Life Score stays between 0 and 5 in every kind of run', () => {
 
 test('an old saved game upgrades to the life layer without breaking', () => {
   const run = E.newRun({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'old' });
+  decide(run);
   // A version-1 run kept all living costs in baseCosts.
   run.baseCosts = 16800;
   const costs0 = 16800;

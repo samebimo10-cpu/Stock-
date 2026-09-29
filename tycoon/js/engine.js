@@ -11,6 +11,7 @@ import {
   CIRCLE_TYPES, CIRCLE_ASKS, NAMES, ZONE_TYPES, ZONE_ORDER, COUNTRIES, TITLES, ZONE_NEWS, GOLDEN,
 } from './content.js';
 import { PRINCIPLES, MOMENTS, PLANS, QUIZ } from './learn.js';
+import { STORY, CAST as STORY_CAST, GOALS, EARNED, chapterOf } from './story.js';
 
 // ---------------------------------------------------------------- randomness
 
@@ -340,7 +341,7 @@ export function newRun(opts) {
   // A real-life start: the player's own age, money and goals, in their own
   // currency (actual amounts, so no scaling).
   const me = !era && opts.me ? opts.me : null;
-  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : opts.startAge ? clamp(Math.round(opts.startAge), 16, 50) : ch && ch.startAge ? ch.startAge : mode.startAge;
+  const startAge = era ? era.startAge : me ? clamp(Math.round(me.age), 16, 75) : opts.startAge ? clamp(Math.round(opts.startAge), 16, 50) : ch && ch.startAge ? ch.startAge : c.startAge && mode.startAge === 22 ? c.startAge : mode.startAge;
   const ypt = mode.ypt;
   const deadline = mode.years ? startAge + mode.years : Math.max(asc >= 12 ? 56 : 60, me ? startAge + 8 : 0);
   const turns = era ? era.states.length : Math.max(3, Math.round((deadline - startAge) / ypt));
@@ -364,7 +365,7 @@ export function newRun(opts) {
       ponzi: null, angel: null, scam: 0,
     },
     cards: [], charges: {}, lev: 0,
-    flags: { weather: c.weather || 1, skillAge: startAge },
+    flags: { weather: c.weather || 1, skillAge: startAge, riskyJob: !!c.riskyJob },
     prices: 1, infl: profileOf(currency).infl, rate: 0,
     px: { save: [1], index: [1], stocks: [1], prop: [1], crypto: [1], biz: [1], fx: [1] },
     last: {},
@@ -397,6 +398,10 @@ export function newRun(opts) {
     stats: { joySum: 0, years: 0, trustSum: 0, trustYears: 0, givingSum: 0 },
     envelopes: !!opts.envelopes, weekend: !!opts.weekend, bonusWisdom: 0, gen: opts.gen || 1,
     forceEvent: null, teaser: null,
+    // The story layer: chapters, goals, memories and threads left open.
+    story: { chapter: chapterOf(startAge).id, goal: null, goalsDone: [], memories: [], threads: [], decisions: [], comp: null, debtPeak: 0, propsBought: 0, bizStarted: 0 },
+    beh: {}, side: false, freeAge: null,
+    stopAtFree: opts.stopAtFree ?? ['daily', 'duel', 'era', 'weekly', 'sprint'].includes(opts.mode),
   };
   run.car.v = CARS[run.car.id].price * run.salaryStart;
   run.market = genMarket({ seed, turns, ypt, currency, asc, era });
@@ -406,8 +411,14 @@ export function newRun(opts) {
   if (me) applyMe(run, me);
   initLife(run);
   run.circle = makeCircle(run);
+  run.circle.push(...makeCast(run));
+  run.story.goal = pickGoal(run, goalContext(run));
+  if (run.h.biz.c > 0) run.story.bizStarted = 1;
   run.hist.push(snapshot(run));
   if (run.aim) seeP(run, 'h_aim');
+  addMemory(run, { type: 'milestone', title: run.custom ? 'Where you started' : 'Your first job', text: `Age ${startAge}, earning ${fmt(run.salary / 12, currency)} a month.`, tags: ['start'] });
+  // The first decision comes before the first year, so play starts at once.
+  if (!era) { const ev = evById('first_step'); run.pending = { id: 'first_step', v: ev.setup(run, helpers(run, rngFor(seed, 'setup', 0)), {}) }; run.seenEv.push('first_step'); }
   return run;
 }
 
@@ -455,7 +466,8 @@ function initLife(run) {
 
 // Saved games from before the life layer carry on with sensible defaults.
 export function upgradeRun(run) {
-  if (!run || run.v >= 2) return run;
+  if (!run) return run;
+  if (run.v >= 2) return upgradeStory(run);
   const c = CHARACTERS[run.char] || CHARACTERS.graduate;
   run.v = 2;
   run.deadline = run.startAge + run.turns * run.ypt;
@@ -476,6 +488,19 @@ export function upgradeRun(run) {
   run.envelopes = false; run.bonusWisdom = 0; run.gen = 1; run.forceEvent = null; run.teaser = null;
   initLife(run);
   run.circle = makeCircle(run);
+  return upgradeStory(run);
+}
+
+// Saved games from before the story layer get an empty story to grow into.
+export function upgradeStory(run) {
+  if (!run || run.story) return run;
+  run.story = { chapter: chapterOf(run.age).id, goal: null, goalsDone: [], memories: [], threads: [], decisions: [], comp: null, debtPeak: 0, propsBought: 0, bizStarted: run.h.biz.c > 0 ? 1 : 0 };
+  run.beh = run.beh || {}; run.side = !!run.side; run.freeAge = run.freeAge || null;
+  run.stopAtFree = ['daily', 'duel', 'era', 'weekly', 'sprint'].includes(run.mode);
+  if (!run.circle.some((c) => c.cast)) run.circle.push(...makeCast(run));
+  run.story.goal = pickGoal(run, goalContext(run));
+  if (run.phase === 'event') run.phase = 'alloc';
+  if (run.phase === 'cards') { run.phase = 'alloc'; run.pending = null; if (!endTurn(run)) dealNext(run); }
   return run;
 }
 
@@ -527,7 +552,7 @@ export function netWorth(run) {
 // living costs); only the rest of your property is let out.
 export const rentable = (run) => Math.max(0, run.h.prop.v - (run.h.prop.home || 0));
 export const rentYield = (run) => profileOf(run.currency).rent * (has(run, 'landlord') ? 1.25 : 1) * (rule(run, 'rentControl') ? 0.8 : 1);
-export const mortRate = (run) => run.rate + 0.03 + (rule(run, 'tightMoney') ? 0.02 : 0) - (rule(run, 'cheapMort') ? 0.02 : 0);
+export const mortRate = (run) => (run.mortFix && run.turn < run.mortFix.until ? run.mortFix.rate : run.rate + 0.03 + (rule(run, 'tightMoney') ? 0.02 : 0) - (rule(run, 'cheapMort') ? 0.02 : 0));
 export const debtRate = (run) => run.rate + 0.15 + (rule(run, 'tightMoney') ? 0.02 : 0);
 export const bizManaged = (run) => run.h.biz.managed || has(run, 'manager_pro');
 
@@ -539,8 +564,8 @@ export function bizProfit(run, mood) {
   if (has(run, 'franchise')) p *= 1.3;
   if (has(run, 'golden_goose')) p *= 2;
   if (rule(run, 'bizHoliday')) p *= 1.2;
-  if (run.h.biz.managed && !has(run, 'manager_pro')) p *= 0.75;
-  return p;
+  if (run.h.biz.managed && !has(run, 'manager_pro')) p *= run.h.biz.share ? 0.65 : 0.75;
+  return p * bizBoost(run);
 }
 
 // Passive income a year: 4% of investments, rent, and a managed business,
@@ -868,6 +893,379 @@ const trust = (run, d) => { if (run.partner) run.partner.trust = clamp(run.partn
 const rep = (run, d) => { run.rep = clamp(run.rep + d, 0, 100); };
 
 export const circleOpen = (run) => run.circle.some((c) => c.asks > 0) || run.rep !== 50 || run.giving > 0;
+
+// ---------------------------------------------------------------- the story layer
+//
+// Persistent people, memories, goals, chapters and earned cards sit on top of
+// the simulation. The story references the simulation state; it never copies
+// money around on its own.
+
+export const person = (run, role) => run.circle.find((c) => c.role === role) || null;
+
+function makeCast(run) {
+  const r = rngFor(run.seed, 'cast', 'init');
+  const used = run.circle.map((c) => c.name);
+  return Object.keys(STORY_CAST).map((role) => {
+    const sex = r() < 0.5 ? 'm' : 'f';
+    const older = { mentor: 30, boss: 12, banker: 8, agent: 6, rival: 4, parent: 27, cautious: 1, ambitious: 0 }[role] || 0;
+    const name = pickName(run, r, sex, used);
+    used.push(name);
+    return {
+      id: `k_${role}`, role, cast: true, rel: STORY_CAST[role].rel, name, sex, ageGap: older,
+      type: role === 'parent' ? r.weighted({ genuine: 0.65, taker: 0.35 }) : role === 'rival' ? 'schemer' : 'helper',
+      look: randomLook(r, run.startAge + older, sex), given: 0, returned: 0, asks: 0, clues: [], known: role !== 'parent',
+      trust: 50, closeness: role === 'parent' ? 70 : 40, conflict: 0, support: 0, history: [],
+      skill: 0.2 + 0.7 * r(), style: r.pick(['tft', 'generous', 'grim', 'aggressive']),
+    };
+  });
+}
+
+function addMemory(run, m) {
+  if (!run.story) return;
+  run.story.memories.push({ age: run.age, type: m.type, title: m.title, text: m.text || '', impact: Math.round(m.impact || 0), tags: m.tags || [] });
+  if (run.story.memories.length > 120) run.story.memories.shift();
+}
+
+const niceNum = (n) => { if (n <= 0) return 0; const p = Math.pow(10, Math.floor(Math.log10(n)) - 1); return Math.round(n / p) * p; };
+
+export function goalContext(run) {
+  const P_ = passive(run);
+  const debt = run.h.prop.debt + run.car.loan + Math.max(0, -run.cash);
+  if (run.story) run.story.debtPeak = Math.max(run.story.debtPeak || 0, debt);
+  return {
+    money: (n) => fmt(n, run.currency), nice: niceNum, unit: unit(run), costs: costs(run), save: run.h.save,
+    invested: run.h.index + stocksTotal(run) + run.h.crypto + run.h.fx, nw: netWorth(run), ownHome: !!run.home.own,
+    homeDeposit: homePrice(run, 'flat2', run.home.district) * (1 - ltv(run)), biz: run.h.biz.c, cash: Math.max(0, run.cash),
+    passive: P_.total, bowl: bowl(run), kidsInSchool: run.kids.filter((k) => { const a = run.age - k.born; return a >= 3 && a < 18; }).length,
+    fees: run.kids.reduce((s, k) => s + SCHOOLS[k.school].fee * run.salaryStart * (run.feeIdx || 1), 0) || 0.1 * unit(run),
+    debt, debtPeak: (run.story && run.story.debtPeak) || debt, aim: run.aim,
+  };
+}
+
+function pickGoal(run, x) {
+  const ch = chapterOf(run.age).id;
+  const done = run.story.goalsDone;
+  const g = GOALS.find((q) => q.id !== 'freedom' && q.chapters.includes(ch) && !done.includes(q.id) && (!q.need || q.need(x)) && !q.done(x));
+  return g ? g.id : 'freedom';
+}
+
+export function goalView(run) {
+  if (!run.story || !run.story.goal) return null;
+  const g = GOALS.find((q) => q.id === run.story.goal);
+  if (!g) return null;
+  const x = goalContext(run);
+  return { id: g.id, title: g.title(x), prog: clamp(g.prog(x), 0, 1), tags: g.tags };
+}
+
+// Once a year: behaviour counters, earned cards, goals and chapters.
+function storyYear(run, res, ctx) {
+  const S = run.story;
+  const b = run.beh;
+  const y = run.ypt;
+  const add = (k, on) => { if (on) b[k] = (b[k] || 0) + y; };
+  add('pyfYears', run.plan.pyf >= 0.1 && (ctx.pyf || 0) > 0);
+  add('efundYears', run.h.save >= costs(run));
+  add('leanYears', run.life >= 1 && costs(run) <= 0.6 * run.salary);
+  add('indexYears', run.h.index > 0);
+  add('managedYears', run.h.biz.c > 0 && bizManaged(run));
+  add('rentYears', rentable(run) > 0);
+  add('sideYears', !!run.side);
+  b.bigBiz = b.bigBiz || run.h.biz.c >= 3 * run.salary;
+  b.companies = Math.max(b.companies || 0, run.h.stocks.filter((x) => x > 0).length);
+  b.halfFree = b.halfFree || res.passive >= 0.5 * res.bowl;
+  if (run.joy < 30) b.low = true;
+  if (b.low && run.joy > 65) b.comeback = true;
+  if (res.fc && Math.abs(res.fc.p - res.fc.ideal) <= 0.1) b.goodCalls = (b.goodCalls || 0) + 1;
+  b.held = (run.flags.held || 0) + (b.heldEv || 0);
+  b.goals = S.goalsDone.length;
+  res.cardsEarned = [];
+  for (const e of EARNED) {
+    if (has(run, e.card) || !e.test(b)) continue;
+    const card = cardById(e.card);
+    if (!card) continue;
+    run.cards.push(e.card);
+    if (card.take) card.take(run, helpers(run, rngFor(run.seed, 'take', run.turn)));
+    res.cardsEarned.push({ id: e.card, name: card.name, why: e.why, text: card.text });
+    addMemory(run, { type: 'milestone', title: `You became: ${card.name}`, text: e.why, tags: ['card'] });
+  }
+  const x = goalContext(run);
+  if (S.goal) {
+    const g = GOALS.find((q) => q.id === S.goal);
+    if (g && g.done(x) && g.id !== 'freedom') {
+      S.goalsDone.push(g.id);
+      res.goalDone = { id: g.id, title: g.title(x), reward: g.reward };
+      run.joy = clamp(run.joy + 5, 0, 100);
+      run.bonusWisdom = (run.bonusWisdom || 0) + 5;
+      addMemory(run, { type: 'milestone', title: g.title(x), text: g.reward, tags: ['goal'] });
+      S.goal = null;
+    }
+  }
+  if (!S.goal || S.goal === 'freedom') S.goal = pickGoal(run, x);
+  const ch = chapterOf(run.age).id;
+  if (ch !== S.chapter) { S.chapter = ch; res.chapter = ch; }
+}
+
+// The story director: one event a year, chosen from what is going on in your
+// life, the economy, your goal and the threads left open by earlier choices.
+function drawNext(run) {
+  const S = run.story;
+  const last = run.market[run.turn - 1];
+  const r = rngFor(run.seed, 'ev', run.turn);
+  const recent = (id) => run.seenEv.slice(-6).includes(id);
+  if (last && last.devJump && profileOf(run.currency).fx) return { id: 'deval' };
+  if (run.partner && run.partner.zero >= 2) return { id: 'separation' };
+  if (run.frugalYears >= 2) { run.frugalYears = 0; run.flags.frugalBurn = true; return { id: 'burnout' }; }
+  if (run.joy < 20 && r() < 0.65) return { id: 'burnout' };
+  const due = S.threads.findIndex((t) => t.due <= run.age);
+  if (due >= 0) {
+    const t = S.threads.splice(due, 1)[0];
+    const ev = evById(t.id);
+    if (ev && (!ev.cond || ev.cond(run))) return { id: t.id, v: t.v };
+  }
+  if (run.forceEvent) {
+    const f = evById(run.forceEvent);
+    run.forceEvent = null;
+    run.teaser = null;
+    if (f && (!f.cond || f.cond(run))) return { id: f.id };
+  }
+  // The economy reaches into your life.
+  const riskyNow = run.h.index + stocksTotal(run) + run.h.crypto;
+  if (last && !run.eraId) {
+    if (last.state === 'crash' && riskyNow > 0.15 * Math.max(1, netWorth(run)) && !recent('crash_advice') && r() < 0.85) return { id: 'crash_advice' };
+    if (last.dRate > 0.008 && run.h.prop.debt > 0 && !(run.mortFix && run.turn < run.mortFix.until) && r() < 0.7) return { id: 'rate_hike' };
+    if ((run.market[run.turn] || last).val > 1.2 && ['boom', 'over'].includes(last.state) && !recent('boom_fomo') && r() < 0.35) return { id: 'boom_fomo' };
+    if (last.infl > profileOf(run.currency).infl + 0.04 && !recent('infl_squeeze') && r() < 0.35) return { id: 'infl_squeeze' };
+  }
+  if (run.h.biz.c > 0 && !recent('price_war') && ((!S.comp && r() < 0.2) || (S.comp && S.comp.next === 'D' && r() < 0.6))) return { id: 'price_war' };
+  // Otherwise a weighted pick, tilted by chapter and goal.
+  const ch = chapterOf(run.age).id;
+  const goal = S.goal && GOALS.find((q) => q.id === S.goal);
+  const pool = {};
+  for (const e of ALL_EVENTS) {
+    if (e.forced || e.thread || recent(e.id)) continue;
+    if (e.once && run.seenEv.includes(e.id)) continue;
+    if (e.chapter && !e.chapter.includes(ch)) continue;
+    if (e.cond && !e.cond(run)) continue;
+    let w = typeof e.w === 'function' ? e.w(run) : e.w;
+    if (e.id === 'promo' && has(run, 'networker')) w *= 2;
+    if (run.life === 0 && e.id === 'medical') w *= 1.8;
+    if (run.life === 0 && e.id === 'car') w *= 2;
+    if (e.id === 'medical' && rule(run, 'hospitalFees')) w *= 1.3;
+    if (e.id === 'circle' && rule(run, 'bigFamily')) w *= 2;
+    if (e.chapter) w *= 1.6;
+    if (goal && e.tags && e.tags.some((t) => goal.tags.includes(t))) w *= 2.2;
+    if (run.flags.retired && ['promo', 'layoff', 'gig', 'course', 'raise', 'bonus', 'pension'].includes(e.id)) w = 0;
+    if (w > 0) pool[e.id] = w;
+  }
+  return { id: r.weighted(pool) };
+}
+
+function dealNext(run, res) {
+  const nx = drawNext(run);
+  const ev = evById(nx.id);
+  const v0 = nx.v || {};
+  const h = helpers(run, rngFor(run.seed, 'setup', run.turn));
+  run.pending = { id: nx.id, v: ev.setup ? { ...v0, ...(ev.setup(run, h, v0) || {}) } : v0 };
+  run.seenEv.push(nx.id);
+  if (res) res.next = nx.id;
+}
+
+// Helpers the story events use; they call into the simulation.
+function storyHelpers(run, h) {
+  const P = (role) => person(run, role);
+  const lastState = () => (run.turn > 0 ? run.market[run.turn - 1].state : 'steady');
+  const x = {
+    name: (role) => (P(role) || {}).name || 'Someone',
+    rel: (role, patch) => {
+      const p = P(role);
+      if (!p) return { trust: 50, closeness: 40, conflict: 0, support: 0 };
+      if (patch) {
+        for (const [k, d] of Object.entries(patch)) p[k] = clamp((p[k] || 0) + d, 0, 100);
+        p.history = p.history || [];
+      }
+      return p;
+    },
+    skill: (role) => (P(role) || { skill: 0.5 }).skill,
+    // A costly signal: skilled people put their own money in more often. The
+    // clue is honest 70% of the time.
+    signal: (role) => { const good = x.skill(role) > 0.55; return h.r() < 0.7 ? good : !good; },
+    follow: (id, years, v = {}) => { run.story.threads.push({ id, due: run.age + Math.max(1, years), v }); },
+    memory: (type, title, text, impact, tags) => addMemory(run, { type, title, text, impact, tags }),
+    unit: () => unit(run),
+    costs: () => costs(run),
+    fee: () => run.salaryStart * (run.feeIdx || 1) * (rule(run, 'feeBoom') ? 1.5 : 1),
+    risky: () => run.h.index + stocksTotal(run) + run.h.crypto,
+    invest: (asset, amt) => {
+      const a = Math.max(0, Math.min(amt, Math.max(0, run.cash)));
+      run.cash -= a; run.h[asset] += a;
+      run.flow.buy[asset] = (run.flow.buy[asset] || 0) + a;
+      if (asset === 'index') learn(run, 'index');
+      return a;
+    },
+    sellRisky: (frac, to = 'cash') => {
+      let got = 0;
+      for (const a of ['index', 'crypto']) { const s = run.h[a] * frac; run.h[a] -= s; got += s * (1 - feeFor(run, a)); run.flow.sell[a] = (run.flow.sell[a] || 0) + s; }
+      run.h.stocks = run.h.stocks.map((v) => { const s = v * frac; got += s * (1 - feeFor(run, 'stocks')); run.flow.sell.stocks = (run.flow.sell.stocks || 0) + s; return v - s; });
+      if (to === 'save') run.h.save += got; else run.cash += got;
+      return got;
+    },
+    beh: (k) => { run.beh[k === 'held' ? 'heldEv' : k] = (run.beh[k === 'held' ? 'heldEv' : k] || 0) + 1; },
+    // Bargaining power: savings to fall back on, fresh skills, a good year and
+    // a boss who trusts you all raise your odds.
+    batna: () => {
+      const months = run.h.save / Math.max(1, costs(run) / 12);
+      const fresh = run.age - (run.flags.skillAge ?? run.startAge) <= 3;
+      const mood = { boom: 0.1, over: 0.05, steady: 0, recov: 0, crash: -0.15 }[lastState()];
+      const boss = P('boss');
+      return clamp(0.25 + Math.min(0.3, months * 0.025) + (fresh ? 0.12 : 0) + mood + ((boss ? boss.trust : 50) - 50) / 250, 0.05, 0.85);
+    },
+    mortRate: () => mortRate(run),
+    fixRate: () => { run.cash -= 0.01 * run.h.prop.debt; run.mortFix = { rate: mortRate(run), until: run.turn + Math.max(1, Math.round(5 / run.ypt)) }; },
+    repay: (amt) => { const a = Math.max(0, Math.min(amt, Math.max(0, run.cash), run.h.prop.debt)); run.cash -= a; run.h.prop.debt -= a; return a; },
+    side: (on) => { run.side = !!on; },
+    // A common-value auction: the rival bids around the true value, so you
+    // tend to win exactly when you have overestimated it.
+    auction: (v, k) => {
+      const bid = v.P * k;
+      if (bid <= v.V * v.rival) return 'Someone else bid more. The flat is gone.';
+      return `You won the bidding! ${x.buyRental(bid, v.V)}`;
+    },
+    buyRental: (price, value) => {
+      const dep = (1 - ltv(run)) * price;
+      run.cash -= dep;
+      run.h.prop.v += value * 0.97;
+      run.h.prop.debt += price - dep;
+      run.h.prop.bought = run.turn;
+      run.flow.buy.prop = (run.flow.buy.prop || 0) + dep;
+      run.story.propsBought = (run.story.propsBought || 0) + 1;
+      learn(run, 'mortgage');
+      const over = price > value * 1.02;
+      addMemory(run, { type: 'property', title: 'You bought a rental flat', text: `Paid ${fmt(price, run.currency)}; the survey later put it at ${fmt(value, run.currency)}.`, impact: value - price, tags: ['property', 'decision', over ? 'loss' : 'win'] });
+      return `Keys in hand for ${fmt(price, run.currency)}. The survey puts it at about ${fmt(value, run.currency)}${over ? ': you paid over the odds' : ': a fair deal'}.`;
+    },
+    // The price war is a repeated prisoner's dilemma. The rival plays a hidden
+    // strategy against your last move.
+    rivalMove: () => {
+      const rv = P('rival');
+      const c = run.story.comp || (run.story.comp = { style: rv ? rv.style : 'tft', you: null, everD: false, next: null });
+      if (c.next) return c.next;
+      return c.style === 'aggressive' || h.r() < 0.6 ? 'D' : 'C';
+    },
+    priceWar: (you, them) => {
+      const c = run.story.comp;
+      const k = { CC: 1, CD: 0.72, DC: 1.25, DD: 0.85 }[you + them];
+      run.h.biz.warK = k; run.h.biz.warT = run.turn;
+      c.you = you; c.everD = c.everD || you === 'D';
+      const rr = h.r();
+      c.next = c.style === 'tft' ? you : c.style === 'grim' ? (c.everD ? 'D' : 'C') : c.style === 'generous' ? (you === 'D' && rr > 0.4 ? 'D' : 'C') : (rr < 0.7 ? 'D' : you);
+      if (c.next === 'D') x.follow('price_war', 1, {});
+      x.rel('rival', { conflict: you === 'D' ? 10 : -5, trust: you === 'C' ? 6 : -6 });
+      const txt = { CC: 'Both of you hold prices. Business as usual, and good margins.', CD: 'You held steady while they cut. You lose customers this year.', DC: 'You undercut them and win a flood of customers this year.', DD: 'Both of you slash prices. Everyone is busy and nobody makes much.' }[you + them];
+      return `${txt} ${c.next === 'D' ? 'They look ready for another round.' : 'Things look calmer across the street.'}`;
+    },
+    // The principal-agent problem: a profit share lines the manager's interest up with yours.
+    hire: (kind) => {
+      const b = run.h.biz;
+      if (kind === 'salary') {
+        if (run.cash < managerCost(run)) return 'You can\'t afford their salary yet.';
+        run.cash -= managerCost(run); b.managed = true; b.share = false;
+      } else { b.managed = true; b.share = true; }
+      b.profit = bizProfit(run, 1);
+      learn(run, 'passive');
+      addMemory(run, { type: 'business', title: 'You hired a manager', text: kind === 'share' ? 'On a share of the profit.' : 'On a fixed salary.', tags: ['business', 'decision'] });
+      return kind === 'share' ? 'They take a share of the profit, and treat the place like their own.' : 'They start on Monday. The business runs without you now.';
+    },
+    sellBiz: (price) => { run.cash += price; run.flow.sell.biz = run.h.biz.c; run.h.biz = { c: 0, managed: false, profit: 0 }; learn(run, 'liquidity'); },
+    addBiz: (amt) => {
+      const a = Math.max(0, Math.min(amt, Math.max(0, run.cash)));
+      if (run.h.biz.c <= 0 && a > 0) run.story.bizStarted = (run.story.bizStarted || 0) + 1;
+      run.cash -= a; run.h.biz.c += a; run.h.biz.profit = bizProfit(run, 1);
+      return a;
+    },
+    bizOps: () => { run.h.biz.opsUntil = run.turn + Math.max(1, Math.round(3 / run.ypt)); },
+  };
+  return x;
+}
+
+// ---------------------------------------------------------------- work and business actions
+
+// Work: a course, a raise, a side hustle, or retiring once you are free.
+export function workAction(run, kind) {
+  if (!canAct(run)) return null;
+  const r = rngFor(run.seed, `work|${kind}`, run.turn);
+  const h = helpers(run, r);
+  if (kind === 'course') {
+    const cost = 0.3 * run.salary;
+    if (run.cash < cost || run.age - (run.flags.courseAge ?? -99) < 3) return null;
+    run.cash -= cost; run.salary *= 1.12; run.flags.skillAge = run.age; run.flags.courseAge = run.age;
+    seeP(run, 'b_earn');
+    addMemory(run, { type: 'career', title: 'You went back to school', text: `A course at ${run.age} lifted your pay 12%.`, impact: 0.12 * run.salary * 5, tags: ['career'] });
+    return { ok: true, text: 'Certified. Your pay rises 12%.' };
+  }
+  if (kind === 'raise') {
+    if (run.turn - (run.flags.raiseT ?? -9) < Math.max(1, Math.round(2 / run.ypt))) return null;
+    run.flags.raiseT = run.turn;
+    const p = h.batna();
+    seeP(run, 's_batna');
+    if (r() < p) { run.salary *= 1.1; h.rel('boss', { trust: 2 }); return { ok: true, win: true, text: 'Your boss agrees: +10%.', p }; }
+    h.rel('boss', { trust: -5, conflict: 5 });
+    if (r() < 0.3) h.follow('boss_tension', 1, {});
+    return { ok: true, win: false, text: '"Not this year." It stings.', p };
+  }
+  if (kind === 'side') { run.side = !run.side; return { ok: true, text: run.side ? 'Side hustle on: +15% income, a little less rest.' : 'Side hustle off. Your evenings are yours again.' }; }
+  if (kind === 'retire') {
+    if (!run.freeAge || run.flags.retired) return null;
+    run.flags.retired = true;
+    addMemory(run, { type: 'milestone', title: 'You stopped working', text: `Retired at ${run.age}. Your money pays for your life.`, tags: ['freedom'] });
+    return { ok: true, text: 'You hand in your notice. Your time is your own now.' };
+  }
+  return null;
+}
+
+export const bizView = (run) => {
+  const b = run.h.biz;
+  if (b.c <= 0) return null;
+  const margin = 0.25 * (b.price === 1 ? 1.25 : b.price === -1 ? 0.8 : 1);
+  const revenue = b.profit / margin;
+  return { capital: b.c, profit: b.profit, revenue, customers: Math.max(1, Math.round(revenue / (0.004 * unit(run)))), price: b.price || 0, staff: b.staff || 0, acted: b.acted === run.turn, managed: bizManaged(run), share: !!b.share, ops: (b.opsUntil || 0) > run.turn };
+};
+
+// One business move a year. Each nudges profit through bizBoost.
+export function bizAction(run, kind, dir = 0) {
+  const b = run.h.biz;
+  if (!canAct(run) || b.c <= 0 || b.acted === run.turn) return false;
+  const cost = { marketing: 0.08, hire: 0.1, ops: 0.06 }[kind];
+  if (cost && run.cash < cost * b.c) return false;
+  if (cost) run.cash -= cost * b.c;
+  if (kind === 'marketing') b.mkt = run.turn;
+  else if (kind === 'hire') { if ((b.staff || 0) >= 3) return false; b.staff = (b.staff || 0) + 1; }
+  else if (kind === 'ops') b.opsUntil = run.turn + Math.max(1, Math.round(3 / run.ypt));
+  else if (kind === 'price') b.price = clamp((b.price || 0) + dir, -1, 1);
+  else return false;
+  b.acted = run.turn;
+  b.profit = bizProfit(run, 1);
+  return true;
+}
+
+// Hidden price elasticity: raising prices works in good times, cutting them
+// in bad times. Staff help with diminishing returns.
+function bizBoost(run) {
+  const b = run.h.biz;
+  const state = run.market[Math.min(run.turn, run.market.length - 1)].state;
+  let k = 1;
+  if (b.mkt === run.turn) k *= 1.18;
+  k *= [1, 1.08, 1.14, 1.18][Math.min(3, b.staff || 0)];
+  if (b.price === 1) k *= 1.25 * (1 - ({ boom: 0.12, over: 0.1, crash: 0.35, recov: 0.25 }[state] ?? 0.2));
+  if (b.price === -1) k *= 0.8 * (1 + ({ crash: 0.45, recov: 0.35 }[state] ?? 0.2));
+  if (b.warT === run.turn && b.warK) k *= b.warK;
+  if (b.share) k *= 1.15;
+  return k;
+}
+
+// Finish the game on your own terms once you are free.
+export function endGame(run) {
+  return finish(run, run.freeAge ? 'free' : 'quit');
+}
 
 // ---------------------------------------------------------------- player actions
 
@@ -1396,7 +1794,7 @@ const LIFE_EVENTS = [
       let m = null;
       if (r() >= 0.22) {
         const w = {};
-        for (const c of run.circle) w[c.id] = { taker: 3, genuine: 1.2, schemer: 1.2, helper: 1 }[c.type];
+        for (const c of run.circle) if (!c.cast || c.role === 'parent') w[c.id] = { taker: 3, genuine: 1.2, schemer: 1.2, helper: 1 }[c.type];
         m = run.circle.find((c) => c.id === r.weighted(w));
       }
       const type = m ? m.type : 'fraudster';
@@ -1435,11 +1833,13 @@ const LIFE_EVENTS = [
   },
 ];
 
-export const ALL_EVENTS = [...EVENTS, ...LIFE_EVENTS];
+export const ALL_EVENTS = [...EVENTS, ...LIFE_EVENTS, ...STORY];
 export const evById = (id) => ALL_EVENTS.find((e) => e.id === id);
 const choicesOf = (ev, run, v) => (typeof ev.choices === 'function' ? ev.choices(run, v) : ev.choices);
 
 // ---------------------------------------------------------------- event helpers
+
+export const helpersFor = (run) => helpers(run, rngFor(run.seed, 'helpers', run.turn));
 
 function helpers(run, r) {
   const h = {
@@ -1497,7 +1897,7 @@ function helpers(run, r) {
       return '';
     },
   };
-  return h;
+  return Object.assign(h, storyHelpers(run, h));
 }
 
 export function eventView(run) {
@@ -1506,7 +1906,7 @@ export function eventView(run) {
   const h = helpers(run, () => 0.5);
   const v = run.pending.v;
   return {
-    id: ev.id, cat: ev.cat, title: ev.title, v,
+    id: ev.id, cat: ev.cat, title: typeof ev.title === 'function' ? ev.title(v, h, run) : ev.title, v, cast: ev.cast || null,
     text: ev.text(v, h, run),
     choices: choicesOf(ev, run, v).map((c) => ({
       label: typeof c.label === 'function' ? c.label(v, h) : c.label,
@@ -1567,7 +1967,7 @@ const RISKY = ['index', 'stocks', 'crypto'];
 
 // Two (or four) years pass. Returns what happened for the play-out screen.
 export function live(run) {
-  if (run.phase !== 'alloc') return null;
+  if (run.phase !== 'alloc' || run.pending) return null;
   const t = run.turn;
   const m = run.market[t];
   const y = run.ypt;
@@ -1596,9 +1996,11 @@ export function live(run) {
 
   // Salary and living costs over the period.
   const drift = Math.pow(1 + m.infl, (y - 1) / 2);
-  let pay = run.salary * y * drift;
+  let pay = run.flags.retired ? 0 : run.salary * y * drift;
   if (c.volatile) pay *= m.hustle;
   if (m.swan === 'pandemic' && !has(run, 'remote_job')) pay *= 0.7;
+  if (run.flags.riskyJob && m.state === 'crash' && rngFor(run.seed, 'riskyjob', t)() < 0.4) { pay *= 0.6; res.notes.push('Your fast-growing employer cut staff in the crash. You were out of work for months.'); }
+  if (run.side && !run.flags.retired) { const sd = 0.15 * run.salary * y * drift; pay += sd; res.sideIncome = sd; }
   const spend = costs(run) * y * drift;
   const partnerPay = P && !P.legacy ? P.pay * y * drift : 0;
   const kidHelp = run.kids.filter((kd) => kd.outcome === 'helping').length * 0.1 * S * y;
@@ -1671,6 +2073,7 @@ export function live(run) {
     run.car.v *= Math.pow(1 - CARS[run.car.id].dep, y);
     gains.car = run.car.v - c0;
     res.carDep = -gains.car;
+    run.story.carLoss = (run.story.carLoss || 0) + res.carDep;
   }
 
   // Land: zone prices move with the region's news; farms pay a harvest.
@@ -1709,11 +2112,15 @@ export function live(run) {
     const bonus = 0.12 * ((run.flow.buy.index || 0) + (run.flow.buy.stocks || 0));
     if (bonus > 0) { h.index += bonus; gains.index += bonus; res.notes.push(`Contrarian bonus: ${fmt(bonus, run.currency, true)} for buying after the crash.`); }
   }
-  if (prev === 'crash' && ((run.flow.buy.index || 0) + (run.flow.buy.stocks || 0)) > 0) learn(run, 'dip');
+  if (prev === 'crash' && ((run.flow.buy.index || 0) + (run.flow.buy.stocks || 0)) > 0) { learn(run, 'dip'); run.beh.dipBuys = (run.beh.dipBuys || 0) + 1; }
 
   // Rent, mortgage interest, business profit, debt interest.
   if (h.prop.v > 0) {
-    const rent = rentable(run) * rentYield(run) * y;
+    let rent = rentable(run) * rentYield(run) * y;
+    if (rentable(run) > 0 && (run.flags.vacancy || rngFor(run.seed, 'vacancy', t)() < (m.state === 'crash' ? 0.18 : 0.08) * k2)) {
+      rent *= 0.5; run.flags.vacancy = false;
+      res.notes.push('Your tenant moved out and the flat stood empty for months. Half a year of rent lost.');
+    }
     const mort = h.prop.debt * mortRate(run) * y;
     run.cash += rent - mort;
     res.flows.push({ label: 'Rent', v: rent });
@@ -1725,7 +2132,17 @@ export function live(run) {
     run.cash += prof * y;
     res.flows.push({ label: bizManaged(run) ? 'Business profit' : 'Business profit (your time)', v: prof * y });
     const before$ = h.biz.c;
-    h.biz.c *= Math.pow((1 - 0.07) * (1 + m.infl), y);
+    const wear = (h.biz.opsUntil || 0) > run.turn ? 0.04 : h.biz.share ? 0.05 : 0.07;
+    h.biz.c *= Math.pow((1 - wear) * (1 + m.infl), y);
+    // A bad year can break a business. Tight operations and a manager help.
+    if ((m.state === 'crash' || m.bizMult < 0.6) && rngFor(run.seed, 'bizfail', t)() < 0.16 * k2 * ((h.biz.opsUntil || 0) > run.turn ? 0.5 : 1) * (bizManaged(run) ? 0.8 : 1)) {
+      const lost = 0.6 * h.biz.c;
+      h.biz.c -= lost; h.biz.profit = bizProfit(run, 1);
+      res.bizHit = lost;
+      res.notes.push(`A terrible year for your business. It lost ${fmt(lost, run.currency)} of its value.`);
+      run.story.threads.push({ id: 'biz_fail', due: run.age + y, v: { lost } });
+      addMemory(run, { type: 'failure', title: 'Your business was hit hard', text: `It lost ${fmt(lost, run.currency)} at ${run.age}.`, impact: -lost, tags: ['business', 'loss'] });
+    }
     gains.biz = h.biz.c - before$;
     if (!bizManaged(run)) run.joy -= 3;
   }
@@ -2089,26 +2506,24 @@ export function live(run) {
     golden: res.golden ? res.golden.title : null, incident: res.incident || null,
   });
 
-  // One-year turns keep life at the same pace as two-year ones: an event and
-  // a card every other year, with a quiet year in between.
-  if (y === 1 && t % 2 === 1 && !m.devJump) {
-    run.pending = null;
-    run.quiet = true;
-    run.phase = 'cards';
-    res.quiet = true;
-    return res;
-  }
-  run.quiet = false;
-  const evId = drawEvent(run);
-  const ev = evById(evId);
-  run.pending = { id: evId, v: ev.setup ? ev.setup(run) : {} };
-  run.seenEv.push(evId);
-  run.phase = 'event';
+  // Memories the year made on its own.
+  if (m.state === 'crash' && prev !== 'crash' && before.index + before.stocks + before.crypto > 0) addMemory(run, { type: 'investment', title: m.swan ? `${(SWANS.find((x) => x.id === m.swan) || {}).name || 'A black swan'}` : 'A market crash', text: `Your investments moved ${fmt(res.rows.filter((q) => RISKY.includes(q.id)).reduce((s2, q) => s2 + q.gain, 0), run.currency, true)} that year.`, impact: Math.min(0, res.rows.filter((q) => RISKY.includes(q.id)).reduce((s2, q) => s2 + q.gain, 0)), tags: ['crash', 'market'] });
+  if (res.golden) addMemory(run, { type: 'success', title: res.golden.title, text: res.golden.text, impact: 0.3 * run.salary, tags: ['luck'] });
+  if (res.titleProblem) addMemory(run, { type: 'failure', title: 'A land deal went wrong', text: 'The paperwork was not what the seller said.', impact: -0.3 * run.salary, tags: ['land', 'loss'] });
+  if (res.kidOutcome) addMemory(run, { type: 'family', title: `${res.kidOutcome.name} grew up`, text: KID_OUTCOMES[res.kidOutcome.outcome], tags: ['family'] });
+  if (run.log.scam > scam0) addMemory(run, { type: 'failure', title: 'You lost money to a scam', text: 'It promised too much.', impact: -(run.log.scam - scam0) * run.salary, tags: ['scam', 'loss'] });
+
+  // The year is done: the story updates, the clock moves, and the next
+  // year's event is dealt so it greets the player at the start of the year.
+  storyYear(run, res, { pyf });
+  const done = endTurn(run, res);
+  if (done) { res.result = done; return res; }
+  dealNext(run, res);
   return res;
 }
 
 export function chooseEvent(run, i) {
-  if (run.phase !== 'event' || !run.pending) return null;
+  if (run.phase !== 'alloc' || !run.pending) return null;
   const ev = evById(run.pending.id);
   const choice = choicesOf(ev, run, run.pending.v)[i];
   if (!choice || (choice.need && !choice.need(run, run.pending.v))) return null;
@@ -2121,14 +2536,14 @@ export function chooseEvent(run, i) {
   run.eventLesson = lesson || null;
   if (lesson) seeP(run, lesson);
   if (choice.math) seeP(run, 'x_ev');
+  const view = typeof choice.label === 'function' ? choice.label(run.pending.v, h) : choice.label;
+  const title = ev.id === 'circle' ? `${run.pending.v.who} (${run.pending.v.rel.toLowerCase()}) asked for help` : typeof ev.title === 'function' ? ev.title(run.pending.v, h, run) : ev.title;
   const entry = run.journal && run.journal[run.journal.length - 1];
-  if (entry) {
-    const view = typeof choice.label === 'function' ? choice.label(run.pending.v, h) : choice.label;
-    const title = ev.id === 'circle' ? `${run.pending.v.who} (${run.pending.v.rel.toLowerCase()}) asked for help` : ev.title;
-    entry.event = { id: ev.id, title, choice: view, note: choice.note || '', outcome: text, lesson: lesson || null };
-  }
+  if (entry) entry.event = { id: ev.id, title, choice: view, note: choice.note || '', outcome: text, lesson: lesson || null };
+  run.story.decisions.push({ age: run.age, id: ev.id, title, choice: view, outcome: text });
+  if (run.story.decisions.length > 80) run.story.decisions.shift();
+  if (ev.cast) { const p = person(run, ev.cast); if (p) { p.history = [...(p.history || []), { age: run.age, text: `${title}: ${view}` }].slice(-12); } }
   run.pending = null;
-  run.phase = 'cards';
   return text;
 }
 
@@ -2160,20 +2575,18 @@ export function makeOffer(run, unlocked) {
 
 // Returns the outcome of the turn: null to keep playing, or the finished result.
 export function pickCard(run, id) {
-  if (run.phase !== 'cards') return null;
-  if (id && run.offer && run.offer.includes(id)) {
+  // Cards are earned by behaviour now (see EARNED in story.js). This keeps the
+  // old entry point working for offers from envelopes and saved games.
+  if (id && run.offer && run.offer.includes(id) && !has(run, id)) {
     const card = cardById(id);
-    if (!card.stack || !has(run, id)) run.cards.push(id);
+    run.cards.push(id);
     if (card.take) card.take(run, helpers(run, rngFor(run.seed, 'take', run.turn)));
-    if (card.trap) run.flags.scammed = true;
-    const entry = run.journal && run.journal[run.journal.length - 1];
-    if (entry) entry.card = { id, name: card.name, type: card.type, trap: !!card.trap };
   }
   run.offer = null;
-  return endTurn(run);
+  return run.phase === 'done' ? run.result : null;
 }
 
-function endTurn(run) {
+function endTurn(run, res = {}) {
   run.turn += 1;
   run.flow = { buy: {}, sell: {} };
   run.lifeStart = run.life;
@@ -2182,12 +2595,18 @@ function endTurn(run) {
   const nw = netWorth(run);
   run.negTurns = nw < 0 ? run.negTurns + 1 : 0;
   const e = era(run);
-  if (passive(run).total >= bowl(run)) return finish(run, 'free');
+  if (passive(run).total >= bowl(run)) {
+    if (!run.freeAge) {
+      run.freeAge = run.age;
+      res.freedom = true;
+      addMemory(run, { type: 'milestone', title: 'Financial freedom', text: `At ${run.age}, your money began paying for your whole life.`, impact: nw * 0.1, tags: ['freedom'] });
+    }
+    if (run.stopAtFree) return finish(run, 'free');
+  }
   // Broke for four years in a row (two 2-year turns) ends the run.
   if (run.negTurns * run.ypt >= 4) return finish(run, 'bankrupt');
-  if (run.turn >= run.turns) return finish(run, e ? (nw >= e.target * costs(run) ? 'target' : 'missed') : 'clock');
+  if (run.turn >= run.turns) return finish(run, e ? (nw >= e.target * costs(run) ? 'target' : 'missed') : run.freeAge ? 'free' : 'clock');
   run.phase = 'alloc';
-  if (run.learnMode && run.turn % 4 === 0) makeQuiz(run);
   return null;
 }
 
@@ -2226,7 +2645,7 @@ export function lifeScore(run, reason) {
   const st = run.stats || { joySum: 0, years: 0, trustSum: 0, trustYears: 0, givingSum: 0 };
   const years = Math.max(1, st.years);
   const ratio = clamp(passive(run).total / bowl(run), 0, 1);
-  const freedom = reason === 'free' ? clamp(2 - Math.max(0, run.age - 38) * 0.06, 0.9, 2) : reason === 'bankrupt' ? 0 : MODES[run.mode] && MODES[run.mode].years ? 2 * clamp(ratio / 0.3, 0, 1) : 0.9 * ratio;
+  const freedom = reason === 'free' ? clamp(2 - Math.max(0, (run.freeAge ?? run.age) - 38) * 0.06, 0.9, 2) : reason === 'bankrupt' ? 0 : MODES[run.mode] && MODES[run.mode].years ? 2 * clamp(ratio / 0.3, 0, 1) : 0.9 * ratio;
   const avgJoy = st.years ? st.joySum / years : run.joy;
   const joy = clamp((avgJoy - 30) / 50, 0, 1);
   const trustAvg = st.trustYears ? st.trustSum / st.trustYears : null;
@@ -2251,7 +2670,8 @@ export function finish(run, reason) {
   const ratio = clamp(p.total / bowl(run), 0, 1);
   const e = era(run);
   let score;
-  if (reason === 'free') score = 1000 + (60 - run.age) * 60 + Math.round(run.joy * 3);
+  const freeAt = run.freeAge ?? run.age;
+  if (reason === 'free') score = 1000 + (60 - freeAt) * 60 + Math.round(run.joy * 3);
   else if (reason === 'target') score = 1000 + Math.round(run.joy * 3) + Math.round(200 * Math.log2(Math.max(1, nw / (e.target * C))));
   else if (reason === 'missed') score = Math.round(700 * clamp(nw / (e.target * C), 0, 1)) + Math.round(run.joy * 2);
   else if (reason === 'clock') score = Math.round(700 * ratio) + Math.round(run.joy * 2);
@@ -2296,6 +2716,7 @@ export function finish(run, reason) {
     cureYears: run.cureYears.slice(), years: run.age - run.startAge,
     seenP: run.seenP.slice(), quizRight: run.quizRight, quizAsked: run.quizAsked.length,
     journal: (run.journal || []).slice(),
+    freeAge: run.freeAge, story: storySummary(run, annual),
     life, sprint: !!MODES[run.mode].years, rules: (run.rules || []).slice(), gen: run.gen || 1,
     bonusWisdom: run.bonusWisdom || 0, got: run.got, milestones: (run.milestones || []).slice(),
     kids: run.kids.map((k) => ({ name: k.name, age: run.age - k.born, outcome: k.outcome || null, sex: k.sex, look: k.look })),
@@ -2304,6 +2725,40 @@ export function finish(run, reason) {
   };
   run.phase = 'done';
   return run.result;
+}
+
+// The life story: numbers, the best and worst moments, a timeline, and a few
+// honest "what ifs" computed from what actually happened.
+function storySummary(run, annual) {
+  const S = run.story || { memories: [], decisions: [] };
+  const mem = S.memories;
+  const byImpact = mem.filter((m) => m.impact).slice().sort((a, b) => b.impact - a.impact);
+  const success = byImpact.find((m) => m.impact > 0 && !m.tags.includes('card'));
+  const mistake = byImpact.slice().reverse().find((m) => m.impact < 0);
+  const decision = byImpact.find((m) => m.tags.includes('decision') && m.impact > 0);
+  const g = Math.max(0.02, annual || 0.05);
+  const yearsLeft = Math.max(5, 60 - run.startAge);
+  const grow = (x, yrs) => x * (Math.pow(1 + g, yrs) - 1);
+  const L = run.log;
+  const inv = run.h.save + run.h.index + stocksTotal(run) + run.h.crypto + run.h.fx;
+  // A habit is worth a lot, but never more than a believable share of the life you actually built.
+  const cap = Math.max(netWorth(run) * 0.6, run.salary * 10);
+  const whatIf = [
+    ['early', 'If you had started investing four years earlier', inv > 0 ? inv * (Math.pow(1 + g, 4) - 1) : 0],
+    ['doodads', 'If you had skipped the car upgrades and lifestyle creep, and invested the difference', grow(((S.carLoss || 0) + L.creep * run.salary * 0.5) / 2, yearsLeft / 2)],
+    ['panic', 'If you had held on instead of selling in the crash', L.panic * run.salary],
+    ['diversify', 'If no single investment had held most of your money', L.conc * run.salary],
+    ['promo', 'If you had taken the promotion you turned down', (run.flags.declinedPromo || 0) * 0.35 * run.salary * 0.25 * Math.min(15, yearsLeft)],
+    ['scam', 'If you had walked away from the scams', L.scam * run.salary],
+    ['debt', 'If an emergency fund had kept you out of expensive debt', L.debt * run.salary],
+  ].map(([id, text, v]) => [id, text, Math.min(v, cap)]).filter((w) => w[2] > 0.05 * run.salary).sort((a, b) => b[2] - a[2]).slice(0, 3).map(([id, text, v]) => ({ id, text, v: Math.round(v) }));
+  const people = run.circle.filter((c) => c.given > 0).length + (run.giving > 0 ? 1 : 0);
+  return {
+    memories: mem.slice(), decisions: (S.decisions || []).slice(),
+    success, mistake, decision, whatIf,
+    businesses: S.bizStarted || 0, properties: (S.propsBought || 0) + (run.home.own ? 1 : 0) + run.land.length,
+    people, goals: (S.goalsDone || []).length, chapter: S.chapter,
+  };
 }
 
 function yrs(x) {

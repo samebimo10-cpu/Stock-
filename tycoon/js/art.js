@@ -355,6 +355,9 @@ export const CHAR_ACC = {
   hustler: () => ['cap', 'phones'],
   sailor: () => ['sailorcap', 'collar'],
   me: (age) => (age < 30 ? [] : ['collar']),
+  programmer: () => ['glasses', 'lanyard'],
+  skilled: () => ['cap'],
+  starter: () => [],
 };
 
 export function avatar(look, char, { age = 22, expr = 'happy', size = null, label = 'You', style = null } = {}) {
@@ -759,6 +762,42 @@ export function homePic(id, size = 56, got = true) {
 export function carPic(id, size = 56, got = true) {
   const body = carArt(id, 4, 18);
   return svg('0 0 80 50', got ? body : `<g filter="url(#silc)">${body}</g><defs><filter id="silc"><feColorMatrix type="matrix" values="0 0 0 0 0.25  0 0 0 0 0.22  0 0 0 0 0.38  0 0 0 1 0"/></filter></defs>`, { size, cls: `trophy ${got ? '' : 'missing'}`, label: '' });
+}
+
+// ------------------------------------------------------------------ the money tree
+//
+// The centre of the game's picture: it sprouts with your first saving, grows
+// with every investment, and bears fruit as passive income fills your costs.
+// Debt or a crash make it droop; freedom turns the fruit gold.
+export function moneyTree(o = {}, size = 120) {
+  const prog = Math.max(0, Math.min(1.2, o.prog || 0));
+  const stage = prog >= 1 ? 5 : prog >= 0.5 ? 4 : prog >= 0.2 ? 3 : o.invested ? 2 : prog > 0.01 ? 1 : 0;
+  const sick = !!(o.debt || o.crash);
+  const leaf = sick ? '#9aa35a' : '#3fae5a';
+  const leaf2 = sick ? '#b8b06a' : '#5fcf6f';
+  const parts = [`<ellipse cx="60" cy="108" rx="${34 + stage * 3}" ry="8" fill="#6a4a2a" opacity=".55"/>`];
+  if (stage === 0) {
+    parts.push(`<path d="M60 106 L60 96" stroke="#5a8a3a" stroke-width="3" stroke-linecap="round"/><ellipse cx="55" cy="95" rx="5" ry="3" fill="${leaf2}" transform="rotate(-25 55 95)"/><ellipse cx="65" cy="94" rx="5" ry="3" fill="${leaf2}" transform="rotate(25 65 94)"/>`);
+  } else {
+    const h = [0, 22, 34, 46, 56, 62][stage];
+    const w = [0, 3, 5, 8, 10, 12][stage];
+    parts.push(`<path d="M${60 - w / 2} 107 C${60 - w / 2} ${107 - h * 0.6} ${60 - w / 3} ${107 - h} 60 ${107 - h} C${60 + w / 3} ${107 - h} ${60 + w / 2} ${107 - h * 0.6} ${60 + w / 2} 107 Z" fill="#8a5a32" stroke="${O}" stroke-width="2"/>`);
+    if (stage >= 3) parts.push(`<path d="M60 ${107 - h * 0.55} L${44 - stage} ${107 - h * 0.85} M60 ${107 - h * 0.65} L${76 + stage} ${107 - h * 0.9}" stroke="#8a5a32" stroke-width="${stage}" stroke-linecap="round"/>`);
+    const cy = 107 - h - 6;
+    const blobs = { 1: [[60, cy + 6, 10]], 2: [[54, cy + 4, 13], [67, cy + 2, 12]], 3: [[46, cy + 6, 16], [60, cy - 4, 19], [75, cy + 6, 15]], 4: [[40, cy + 10, 18], [58, cy - 6, 23], [78, cy + 8, 19], [60, cy + 14, 16]], 5: [[36, cy + 12, 20], [56, cy - 8, 26], [80, cy + 8, 22], [60, cy + 16, 19], [46, cy - 2, 16]] }[stage];
+    blobs.forEach(([x, y, r], i) => parts.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="${i % 2 ? leaf2 : leaf}" stroke="${O}" stroke-width="2"/>`));
+    if (!sick) blobs.slice(0, 2).forEach(([x, y, r]) => parts.push(`<circle cx="${x - r * 0.35}" cy="${y - r * 0.35}" r="${r * 0.28}" fill="#fff" opacity=".18"/>`));
+    const n = Math.round(Math.min(1, prog) * 10);
+    const spots = [[50, cy + 10], [66, cy - 2], [40, cy + 14], [74, cy + 12], [58, cy + 16], [46, cy - 4], [82, cy + 4], [34, cy + 6], [62, cy - 14], [70, cy + 20]];
+    for (let i = 0; i < n && i < spots.length && stage >= 2; i++) {
+      const [x, y] = spots[i];
+      parts.push(`<circle cx="${x}" cy="${y}" r="4" fill="${o.free || prog >= 1 ? P_.gold : P_.red}" stroke="${O}" stroke-width="1.5"/><path d="M${x} ${y - 4} l1.5 -2.5" stroke="#3a6a2a" stroke-width="1.4"/>`);
+    }
+    if (sick) parts.push(`<ellipse cx="38" cy="104" rx="4" ry="2" fill="#b8b06a"/><ellipse cx="82" cy="105" rx="4" ry="2" fill="#b8b06a" transform="rotate(20 82 105)"/>`);
+  }
+  if (o.prop) parts.push(`<g transform="translate(88 88)"><path d="M0 8 L9 0 L18 8 L18 20 L0 20 Z" fill="${P_.orange}" stroke="${O}" stroke-width="1.6"/><rect x="7" y="12" width="5" height="8" fill="#7a4a2a"/></g>`);
+  if (o.biz) parts.push(`<g transform="translate(12 90)"><rect x="0" y="4" width="18" height="14" fill="${P_.cream}" stroke="${O}" stroke-width="1.6"/><rect x="-1" y="0" width="20" height="5" fill="${P_.red}" stroke="${O}" stroke-width="1.4"/></g>`);
+  return svg('0 0 120 120', parts.join(''), { size, cls: `moneytree stage-${stage}`, label: `Your money tree: ${Math.round(Math.min(1, prog) * 100)}% of your costs paid by your money` });
 }
 
 // ------------------------------------------------------------------ small helpers used across screens

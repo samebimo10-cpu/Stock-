@@ -15,7 +15,7 @@ const unlocked = E.unlockedCards(0).filter((id) => !['ponzi', 'mlm', 'leverage']
 // for a player who reads the clues well).
 function chooseRandom(run) {
   const r = E.rngFor(run.seed, 'bot', run.turn);
-  for (let tries = 0; tries < 8 && run.phase === 'event'; tries++) {
+  for (let tries = 0; tries < 8 && run.pending; tries++) {
     const v = E.eventView(run);
     const ok = v.choices.map((c, i) => (c.ok && c.act !== 'ask' ? i : -1)).filter((i) => i >= 0);
     const out = E.chooseEvent(run, ok[Math.floor(r() * ok.length)]);
@@ -23,7 +23,7 @@ function chooseRandom(run) {
   }
 }
 function chooseWise(run) {
-  for (let tries = 0; tries < 8 && run.phase === 'event'; tries++) {
+  for (let tries = 0; tries < 8 && run.pending; tries++) {
     const v = E.eventView(run);
     let i = 0;
     if (v.id === 'circle') {
@@ -33,9 +33,16 @@ function chooseWise(run) {
     } else if (v.id === 'wedding') {
       const good = v.v.cands.findIndex((c) => ['saver', 'balanced', 'builder'].includes(c.type));
       i = good >= 0 ? good : v.choices.length - 1;
+    } else if (v.id === 'crash_advice') {
+      i = v.choices.findIndex((c) => c.ok && /Buy more|Hold/.test(c.label));
+    } else if (v.id === 'boom_fomo') {
+      i = 1;
+    } else if (v.id === 'infl_squeeze') {
+      i = 2;
     } else {
       i = v.choices.findIndex((c) => c.ok);
     }
+    if (i < 0) i = v.choices.findIndex((c) => c.ok);
     if (E.chooseEvent(run, i) === E.AGAIN) continue;
   }
 }
@@ -81,6 +88,30 @@ const bots = {
     },
     events: chooseWise,
   },
+  entrepreneur: {
+    play: (run) => {
+      E.setLife(run, 1);
+      if (run.h.biz.c <= 0 && run.cash > 0.4 * run.salary) E.investBiz(run, 0.6 * run.cash);
+      else if (run.h.biz.c > 0) { E.bizAction(run, run.turn % 3 === 0 ? 'ops' : 'marketing'); if (run.cash > run.salary) E.investBiz(run, 0.3 * run.cash); }
+      invest(run, 0.3 * E.costs(run));
+    },
+    events: chooseWise,
+  },
+  property: {
+    play: (run) => {
+      E.setLife(run, 1);
+      if (run.cash > 0.5 * run.salary) E.buyProperty(run, 0.6 * run.cash, true);
+      invest(run, 0.3 * E.costs(run));
+    },
+    events: chooseWise,
+  },
+  leverage: {
+    play: (run) => {
+      if (run.cash > 0.3 * run.salary) E.buyProperty(run, 0.9 * run.cash, true);
+      E.setHolding(run, 'crypto', run.h.crypto + Math.max(0, run.cash) * 0.5);
+    },
+    events: chooseRandom,
+  },
   crypto: { play: (run) => { E.setHolding(run, 'crypto', run.h.crypto + Math.max(0, run.cash)); }, events: chooseRandom },
 };
 
@@ -89,15 +120,17 @@ for (const currency of ['NGN', 'USD']) {
     const out = { free: 0, clock: 0, bankrupt: 0 };
     const ages = []; let score = 0; let nan = 0; let wins = 0; const starsAll = [];
     for (let i = 0; i < N; i++) {
-      const run = E.newRun({ mode: 'classic', char: 'graduate', currency, seed: `sim${i}` });
+      const run = E.newRun({ mode: 'classic', char: 'graduate', currency, seed: `sim${i}`, stopAtFree: true });
       let res = null;
-      while (!res) {
+      bot.events(run);
+      for (let g = 0; g < 80 && !res; g++) {
         if (E.canAct(run)) bot.play(run);
-        E.live(run);
-        if (run.phase === 'event') bot.events(run);
-        E.makeOffer(run, unlocked);
-        res = E.pickCard(run, run.offer[0]);
+        const y = E.live(run);
+        if (!y) { bot.events(run); if (run.pending) E.chooseEvent(run, E.eventView(run).choices.findIndex((c) => c.ok && c.act !== 'ask')); continue; }
+        res = y.result || null;
+        if (!res) bot.events(run);
       }
+      if (!res) res = E.finish(run, 'clock');
       if (!Number.isFinite(res.nw)) nan++;
       out[res.reason]++; score += res.score; if (res.reason === 'free') ages.push(res.age);
       starsAll.push(res.life.stars);
