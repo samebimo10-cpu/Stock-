@@ -4,7 +4,8 @@ import * as E from '../js/engine.js';
 // Answer the pending message: try choices in order, skipping any that need
 // cash you don't have, and re-read the event after "Ask questions".
 export function decide(run, start = 0) {
-  let ci = start;
+  // start can be a function of the run, to answer some messages differently.
+  let ci = typeof start === 'function' ? start(run) : start;
   for (let g = 0; run.pending && g < 24; g++) {
     const out = E.chooseEvent(run, ci);
     ci = out === E.AGAIN ? 0 : (ci + 1) % 8;

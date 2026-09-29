@@ -1036,6 +1036,9 @@ function drawNext(run) {
     if ((run.market[run.turn] || last).val > 1.2 && ['boom', 'over'].includes(last.state) && !recent('boom_fomo') && r() < 0.35) return { id: 'boom_fomo' };
     if (last.infl > profileOf(run.currency).infl + 0.04 && !recent('infl_squeeze') && r() < 0.35) return { id: 'infl_squeeze' };
   }
+  // Money habits come as messages, so answering messages alone is a real way to play.
+  if (!run.plan.pyf && !run.flags.retired && run.turn >= 1 && run.age < 50 && !recent('pay_first') && r() < 0.7) return { id: 'pay_first' };
+  if (run.turn >= 2 && run.cash > Math.max(0.6 * costs(run), 0.3 * Math.max(1, netWorth(run))) && !recent('idle_cash') && r() < 0.6) return { id: 'idle_cash' };
   if (run.h.biz.c > 0 && !recent('price_war') && ((!S.comp && r() < 0.2) || (S.comp && S.comp.next === 'D' && r() < 0.6))) return { id: 'price_war' };
   // Otherwise a weighted pick, tilted by chapter and goal.
   const ch = chapterOf(run.age).id;

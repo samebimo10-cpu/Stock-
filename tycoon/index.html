@@ -736,6 +736,23 @@ body.calm .mood.flip, body.calm .rows, body.calm .flows, body.calm .big-nw, body
 .age-big b { font-family: var(--display); font-size: 24px; letter-spacing: .04em; color: var(--gold); }
 .age-big small { font-size: 12px; color: var(--muted); font-weight: 700; }
 .tabbar.five { grid-template-columns: repeat(5, 1fr); }
+.tabbar.three { grid-template-columns: repeat(3, 1fr); }
+.today .scene-btn { display: block; width: 100%; border-radius: 18px; overflow: hidden; border: 2px solid var(--line); }
+.today .scene-btn svg { display: block; width: 100%; height: auto; max-height: 190px; }
+.wealth-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 14px; border-radius: 18px; background: var(--bg-2); border: 1px solid var(--line); text-align: left; }
+.wc-txt { flex: 1; display: grid; gap: 4px; min-width: 0; }
+.wc-txt > small { color: var(--muted); font-size: 13px; }
+.wc-txt > b { font-family: var(--display); font-size: 30px; line-height: 1.05; }
+.wc-txt .fbar { height: 10px; }
+.wc-txt .free-pc { color: var(--gain); font-family: inherit; font-size: 13px; }
+.wc-goal { display: flex; align-items: center; gap: 4px; color: var(--orange) !important; font-weight: 700; }
+.mood-line { text-align: center; font-weight: 800; font-size: 18px; color: var(--mc); margin: 4px 0; }
+.year-why { text-align: center; font-size: 16px; margin: 6px 0 10px; }
+.outcome-box .btn.ghost { margin-top: 6px; }
+.more-tools { margin: 14px 0; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); padding: 4px 12px; }
+.more-tools > summary { display: flex; align-items: center; gap: 8px; padding: 12px 2px; font-weight: 800; cursor: pointer; list-style: none; }
+.more-tools > summary::after { content: '▾'; margin-left: auto; color: var(--muted); }
+.more-tools[open] > summary::after { content: '▴'; }
 .today { display: grid; gap: 12px; padding-top: 12px; }
 .scene-btn.big { display: block; width: 100%; border-radius: 18px; overflow: hidden; border: 2px solid var(--line); }
 .scene-btn.big svg { display: block; width: 100%; height: auto; }

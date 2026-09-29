@@ -455,6 +455,38 @@ export const STORY = [
       { label: 'Too busy', note: '', fx: (run, h) => { h.flag('mentorMet', 'busy'); return 'Maybe another time.'; } },
     ],
   },
+  // ---- Money habits, asked as messages so nobody needs a dashboard to play well.
+  {
+    id: 'pay_first', cat: 'Money habit', cast: 'mentor', tags: ['money'], w: 0,
+    title: 'Pay yourself first',
+    text: (v, h) => `${h.name('mentor')}: "Before you spend anything, move a slice of your pay into investments. Set it once and it happens every year, even when you forget."`,
+    choices: [
+      { label: 'Save 10% of my pay, every year', note: 'Invested for you, automatically', tags: ['investment'], lesson: 'b_purse', fx: (run, h) => { run.plan.pyf = 0.1; h.rel('mentor', { trust: 5 }); h.memory('decision', 'You started paying yourself first', `At ${run.age} you set 10% of your pay to be invested every year.`, 0.1 * run.salary * 3, ['decision', 'investment']); return 'Done. From now on 10% of your pay goes to work before you see it.'; } },
+      { label: 'Save 20% of my pay', note: '−3 joy now, grows much faster', tags: ['investment'], lesson: 'p_compound', fx: (run, h) => { run.plan.pyf = 0.2; h.joy(-3); h.rel('mentor', { trust: 8 }); h.memory('decision', 'You started paying yourself first', `At ${run.age} you set 20% of your pay to be invested every year.`, 0.2 * run.salary * 3, ['decision', 'investment']); return 'Bold. A fifth of every pay slip now builds your future.'; } },
+      { label: 'Not yet', note: 'Keep all your pay for now', fx: (run, h) => { h.rel('mentor', { trust: -2 }); return '"Maybe next year," you say. Your mentor smiles. They have heard that before.'; } },
+    ],
+  },
+  {
+    id: 'idle_cash', cat: 'Your money', cast: 'banker', tags: ['money'], w: 0,
+    setup: (run, h) => ({ amt: Math.max(0, run.cash - 0.5 * h.costs()) }),
+    title: 'Money sitting idle',
+    text: (v, h, run) => `You have ${h.f(run.cash)} in your current account. Prices rise every year, so idle money quietly shrinks. ${h.name('banker')}: "Keep six months of costs safe and put the rest to work?"`,
+    choices: [
+      { label: (v, h) => `Put ${h.f(v.amt)} in the index fund`, note: 'Grows with the market, can dip', tags: ['investment'], lesson: 'p_compound', fx: (run, h, v) => { const a = h.invest('index', v.amt); h.memory('investment', 'You put idle money to work', `You invested ${h.f(a)} at ${run.age}.`, a * 0.2, ['investment', 'decision']); return 'Your money has a job now.'; } },
+      { label: 'Half safe savings, half the fund', note: 'Steadier, grows a bit slower', tags: ['investment'], lesson: 'g_defensive', fx: (run, h, v) => { h.invest('save', v.amt / 2); h.invest('index', v.amt / 2); return 'A cushion and a growth engine. Sensible.'; } },
+      { label: 'Keep it as cash', note: 'Ready for anything, loses to rising prices', lesson: 'b_multiply', fx: () => 'It stays where it is. Next year it will buy a little less.' },
+    ],
+  },
+  {
+    id: 'raise_plan', cat: 'Money habit', cast: 'mentor', tags: ['money'], w: 1.4, chapter: ['build', 'big'],
+    cond: (run) => run.plan.pyf > 0 && run.plan.pyf < 0.2 && !run.flags.retired,
+    title: 'Your pay went up',
+    text: (v, h, run) => `You now earn ${h.f(run.salary / 12)} a month. ${h.name('mentor')}: "Most people spend every raise. Raise your savings instead and you will not miss it."`,
+    choices: [
+      { label: 'Save 20% from now on', note: 'Freedom comes years sooner', tags: ['investment'], lesson: 'p_compound', fx: (run, h) => { run.plan.pyf = 0.2; h.memory('decision', 'You saved your raise', `At ${run.age} you raised your savings to 20% of pay.`, 0.1 * run.salary * 3, ['decision', 'investment']); return 'Your future self says thank you.'; } },
+      { label: 'Enjoy it', note: '+5 joy', fx: (run, h) => { h.joy(5); return 'A nicer life today. That counts too.'; } },
+    ],
+  },
 ];
 
 // Principles for the new ideas, credited to their sources (paraphrased).
