@@ -123,7 +123,9 @@ export function validateValue(field, raw, { dateOrder = 'DMY', date1904 = false,
   if (type === 'date') {
     const d = parseDate(text, dateOrder);
     if (!d) return { ok: false, write: null, display: text, message: `"${text}" is not a date FormFill can read, so it will not be written.` };
-    if (cellKind === 'text') return { ok: true, write: { kind: 'text', text: formatDate(d, dateOrder) }, display: formatDate(d, dateOrder) };
+    // A date serial only shows as a date in a date-formatted cell; anywhere
+    // else the date goes in as text so it reads the same as on the document.
+    if (cellKind !== 'date') return { ok: true, write: { kind: 'text', text: formatDate(d, dateOrder) }, display: formatDate(d, dateOrder), date: d };
     return { ok: true, write: { kind: 'number', number: dateToSerial(d.y, d.m, d.d, date1904) }, display: formatDate(d, dateOrder), date: d };
   }
   if (type === 'yesno') {

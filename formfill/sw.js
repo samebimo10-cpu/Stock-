@@ -3,10 +3,10 @@
 // Everything the app needs is kept on the device: the app itself, the
 // spreadsheet engine, the PDF and Word readers and, downloaded in the
 // background after install, the text-recognition pack for scans and photos.
-// The only thing that ever needs a connection is the optional AI proxy, which
-// is on another origin and never passes through here.
+// Only the optional proxy (AI, Google Sheets, Drive) needs a connection; it is
+// on another origin and never passes through here.
 
-const CACHE = 'formfill-v1';
+const CACHE = 'formfill-v2';
 const OCR_CACHE = 'formfill-ocr-v1';
 const NETWORK_WAIT_MS = 3000;
 
@@ -27,6 +27,7 @@ const SHELL = [
   './js/readers.js',
   './js/ai.js',
   './js/store.js',
+  './js/gsheet.js',
   './vendor/jszip.min.js',
   './vendor/pdf.min.js',
   './vendor/pdf.worker.min.js',

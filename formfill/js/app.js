@@ -5,10 +5,11 @@
 // review every value -> preview -> download or share the filled form.
 
 import * as X from './xlsx.js';
-import { detectFields, manualField, guessType, suggestOutputName } from './detect.js';
+import { detectFields, manualField, guessType, suggestOutputName, layoutForAI, applyAINames } from './detect.js';
 import { validateValue, displayCell, outputFileName, slugify, FIELD_TYPES, parseDate, formatDate } from './normalize.js';
 import { extractOnDevice } from './extract.js';
-import { extractWithAI, pingProxy } from './ai.js';
+import { extractWithAI, pingProxy, callProxy, nameFieldsWithAI } from './ai.js';
+import { sheetModel, layoutHash, isSheetsUrl } from './gsheet.js';
 import { readDocument, documentKind, prefetchOcr, OCR_FILES } from './readers.js';
 import * as store from './store.js';
 
@@ -21,7 +22,7 @@ const TYPE_LABELS = { text: 'Text', number: 'Number', date: 'Date', currency: 'M
 const LOW_CONFIDENCE = 0.8;
 
 const state = {
-  settings: { proxyUrl: '', proxyToken: '', dateOrder: 'DMY', useAI: true },
+  settings: { proxyUrl: '', proxyToken: '', dateOrder: 'DMY', useAI: true, aiNaming: true },
   record: null, // stored template { hash, name, bytes, map }
   tpl: null, // opened workbook
   sheet: null, // sheet name shown in grids
@@ -91,6 +92,15 @@ function download(bytes, name, type) {
 
 const online = () => navigator.onLine !== false;
 const aiReady = () => Boolean(state.settings.proxyUrl) && online();
+const proxy = () => ({ url: state.settings.proxyUrl, token: state.settings.proxyToken });
+const isSheets = (rec) => rec && rec.kind === 'gsheet';
+
+function toBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const fromBase64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function fmtWhen(ms) {
@@ -102,7 +112,7 @@ function fmtWhen(ms) {
 
 async function openRecord(record) {
   state.record = record;
-  state.tpl = await X.openTemplate(JSZip, record.bytes);
+  state.tpl = isSheets(record) ? sheetModel(record.layout) : await X.openTemplate(JSZip, record.bytes);
   const visible = state.tpl.sheets.filter((s) => s.state === 'visible');
   state.sheet = (record.map && record.map.fields[0] && record.map.fields[0].sheet) || (visible[0] || state.tpl.sheets[0]).name;
 }
@@ -134,9 +144,76 @@ async function addTemplate() {
     }
     const record = { hash, name, bytes, map, confirmed: false, recheck, replaces: previous ? previous.hash : null, addedAt: Date.now() };
     await openRecord(record);
+    if (!recheck) await nameWithAI(true);
     renderSetup();
   } catch (e) {
     toast(e.message || 'That file could not be opened.', 6000);
+  }
+}
+
+// With a connection and the proxy set up, the AI names and types the detected
+// fields from the form's layout. Offline, the on-device names stay.
+async function nameWithAI(quiet) {
+  const map = state.record.map;
+  if (!aiReady() || (quiet && !state.settings.aiNaming) || !map.fields.length) {
+    if (!quiet) toast(online() ? 'Set up the AI proxy in Settings first.' : 'You are offline; the on-device names are kept.');
+    return false;
+  }
+  toast('Naming the fields with the AI…', 60000);
+  try {
+    const n = applyAINames(map, await nameFieldsWithAI(proxy(), layoutForAI(state.tpl, map)));
+    toast(n ? `The AI named ${map.fields.length} fields.` : 'The AI agreed with the detected names.');
+    return true;
+  } catch (e) {
+    toast(`AI naming was skipped (${e.message}). The detected names are kept.`, 5000);
+    return false;
+  }
+}
+
+// Google Sheets forms: the layout is read through the proxy, the fields are
+// detected on the device exactly as for an .xlsx.
+function renderAddSheet() {
+  const input = h('input', { type: 'url', placeholder: 'https://docs.google.com/spreadsheets/d/…', 'aria-label': 'Google Sheets link' });
+  screen(
+    h('h2', {}, 'Add a Google Sheets form'),
+    h('p', { class: 'muted small' }, 'Paste the link to the Google Sheet. Filling makes a copy in your "FormFill output" Drive folder and sets only the mapped cells, so the original stays blank. The Google account that runs your FormFill proxy must be able to open the sheet.'),
+    !state.settings.proxyUrl ? h('div', { class: 'banner warn' }, 'Google Sheets forms go through your FormFill proxy. Set it up in Settings first.') : null,
+    !online() ? h('div', { class: 'banner warn' }, 'You are offline. Adding a Google Sheet needs a connection; filling it later can be queued offline.') : null,
+    h('label', { class: 'field' }, h('span', {}, 'Google Sheets link'), input),
+  );
+  bar(
+    h('button', { class: 'btn', type: 'button', onclick: () => renderHome() }, 'Cancel'),
+    h('button', { class: 'btn primary', type: 'button', onclick: () => addSheetsTemplate(input.value.trim()) }, 'Read the sheet'),
+  );
+}
+
+async function inspectSheet(spreadsheet) {
+  const layout = await callProxy(proxy(), 'sheets.inspect', { spreadsheet });
+  return { layout, hash: await layoutHash(layout) };
+}
+
+async function addSheetsTemplate(link) {
+  if (!isSheetsUrl(link)) { toast('Paste a Google Sheets link (docs.google.com/spreadsheets/d/…).'); return; }
+  if (!aiReady()) { toast(online() ? 'Set up the proxy in Settings first.' : 'Adding a Google Sheet needs a connection.'); return; }
+  toast('Reading the Google Sheet…', 60000);
+  try {
+    const { layout, hash } = await inspectSheet(link);
+    const existing = await store.getTemplate(hash);
+    if (existing) { await openRecord(existing); toast('This form is already saved.'); return renderSetup(); }
+    const all = await store.listTemplates();
+    const previous = all.find((t) => isSheets(t) && t.spreadsheetId === layout.spreadsheetId);
+    const tpl = sheetModel(layout);
+    const templateId = slugify(layout.name).replace(/_/g, '-');
+    let map;
+    if (previous) map = { ...previous.map, templateHash: hash, fields: previous.map.fields.filter((f) => tpl.sheets.some((s) => s.name === f.sheet)) };
+    else map = detectFields(tpl, { templateId, templateHash: hash, dateOrder: state.settings.dateOrder });
+    const record = { hash, name: layout.name, kind: 'gsheet', spreadsheetId: layout.spreadsheetId, url: layout.url, layout, map, confirmed: false, recheck: Boolean(previous), replaces: previous ? previous.hash : null, addedAt: Date.now() };
+    await openRecord(record);
+    if (!previous) await nameWithAI(true);
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    renderSetup();
+  } catch (e) {
+    toast(`Could not read the sheet: ${e.message}`, 6000);
   }
 }
 
@@ -229,11 +306,11 @@ function mapMarks(map, sheetName) {
 
 async function renderHome() {
   state.fill = null;
-  const [templates, history] = await Promise.all([store.listTemplates(), store.listHistory()]);
+  const [templates, history, outbox] = await Promise.all([store.listTemplates(), store.listHistory(), store.listOutbox()]);
   const forms = templates.length
     ? h('div', { class: 'list' }, templates.map((t) => h('div', { class: 'item' },
       h('div', { class: 'grow' },
-        h('div', { class: 't' }, t.name),
+        h('div', { class: 't' }, t.name, isSheets(t) ? h('span', { class: 'chip', style: { marginLeft: '6px' } }, 'Google Sheets') : null),
         h('div', { class: 'muted small' }, `${t.map.fields.length} fields${t.map.table ? ` · table of ${t.map.table.maxRows} rows` : ''}${t.confirmed ? '' : ' · not confirmed yet'}`)),
       h('button', { class: 'btn small', type: 'button', onclick: async () => { await openRecord(t); renderSetup(); } }, 'Fields'),
       h('button', { class: 'btn small primary', type: 'button', onclick: async () => { await openRecord(t); if (!t.confirmed) { toast('Confirm the fields once first.'); renderSetup(); } else startFill(); } }, 'Fill'))))
@@ -241,18 +318,28 @@ async function renderHome() {
 
   const hist = history.length
     ? h('div', { class: 'list' }, history.map((e) => h('div', { class: 'item' },
-      h('div', { class: 'grow' }, h('div', { class: 't' }, e.fileName), h('div', { class: 'muted small' }, `${e.templateName} · ${fmtWhen(e.at)}`)),
+      h('div', { class: 'grow' }, h('div', { class: 't' }, e.fileName), h('div', { class: 'muted small' }, `${e.templateName} · ${fmtWhen(e.at)}${e.queued ? ' · waiting to send' : ''}`)),
+      e.url ? h('a', { class: 'btn small', href: e.url, target: '_blank', rel: 'noopener' }, 'Sheet') : null,
       h('button', { class: 'btn small', type: 'button', onclick: () => regenerate(e) }, 'Open'))))
     : h('p', { class: 'muted small' }, 'Your last 20 fills appear here (values only, never the documents).');
 
+  const waiting = outbox.length
+    ? h('div', { class: 'banner info' }, `${outbox.length} Google Sheets fill(s) waiting to be sent. They go out automatically when you are online.`,
+      outbox.some((o) => o.error) ? h('div', {}, `Last problem: ${outbox.find((o) => o.error).error}`) : null,
+      online() && state.settings.proxyUrl ? h('div', {}, h('button', { class: 'btn small', type: 'button', style: { marginTop: '6px' }, onclick: () => flushOutbox(true) }, 'Send now')) : null)
+    : null;
   screen(
     h('h2', {}, 'Your forms'),
+    waiting,
     forms,
     h('h3', {}, 'Recent fills'),
     hist,
     h('p', { class: 'muted small', style: { marginTop: '24px' } }, 'Everything stays on this device and works offline. Install it: browser menu → "Add to Home Screen".'),
   );
-  bar(h('button', { class: 'btn primary', type: 'button', onclick: addTemplate }, '+ Add a form (.xlsx)'));
+  bar(
+    h('button', { class: 'btn primary', type: 'button', onclick: addTemplate }, '+ Excel form'),
+    h('button', { class: 'btn', type: 'button', onclick: renderAddSheet }, '+ Google Sheet'),
+  );
 }
 
 async function regenerate(entry) {
@@ -351,7 +438,8 @@ function renderSetup() {
       h('div', { class: 'row' },
         h('button', { class: 'btn small', type: 'button', onclick: exportMap }, 'Export map (.json)'),
         h('button', { class: 'btn small', type: 'button', onclick: importMap }, 'Load map'),
-        h('button', { class: 'btn small', type: 'button', onclick: () => { if (confirm('Detect fields again? Your edits on this screen are replaced.')) { rec.map = detectFields(tpl, { templateId: map.templateId, templateHash: rec.hash, dateOrder: map.dateOrder }); rerender(); } } }, 'Detect again'))),
+        h('button', { class: 'btn small', type: 'button', onclick: () => { if (confirm('Detect fields again? Your edits on this screen are replaced.')) { rec.map = detectFields(tpl, { templateId: map.templateId, templateHash: rec.hash, dateOrder: map.dateOrder }); rerender(); } } }, 'Detect again'),
+        state.settings.proxyUrl ? h('button', { class: 'btn small', type: 'button', onclick: async () => { if (await nameWithAI(false)) rerender(); } }, 'Name fields with AI') : null)),
     rec.confirmed ? h('button', { class: 'btn danger block', type: 'button', style: { marginTop: '12px' }, onclick: deleteCurrent }, 'Delete this form') : null,
   );
   bar(
@@ -528,8 +616,7 @@ async function readAll(useAI) {
     if (useAI) {
       try {
         toast('Asking the AI…', 60000);
-        result = await extractWithAI({ url: state.settings.proxyUrl, token: state.settings.proxyToken }, map, docs, { dateOrder });
-        if (result.documents > 1) fill.notes.push({ kind: 'warn', text: `These files seem to hold ${result.documents} separate documents. The values below come from the first; to fill one form per document, read them one at a time.` });
+        result = await extractWithAI(proxy(), map, docs, { dateOrder });
       } catch (e) {
         fill.notes.push({ kind: 'warn', text: `The AI could not be used (${e.message}). Values were read on this device instead.` });
         // Scans were kept as images for the AI; read them here now.
@@ -542,25 +629,58 @@ async function readAll(useAI) {
       }
     }
     if (!result) result = extractOnDevice(map, docs, { dateOrder });
-    fill.results = result;
     fill.source = result.source;
-    fill.values = {};
-    for (const f of map.fields) {
-      const r = result.fields[f.name];
-      let v = r && r.value != null ? String(r.value) : '';
-      // Show dates in the user's own order.
-      if (f.type === 'date' && v) { const d = parseDate(v, dateOrder); if (d) v = formatDate(d, dateOrder); }
-      fill.values[f.name] = v;
-    }
-    fill.rows = result.rows || [];
-    if (result.moreRows > 0) fill.notes.push({ kind: 'warn', text: `The document has ${result.moreRows} more line item(s) than the form's ${map.table.maxRows} rows. Only the first ${map.table.maxRows} are filled.` });
+    fill.documents = result.documents || [result];
+    fill.baseNotes = fill.notes.slice();
     document.querySelectorAll('.toast').forEach((t) => t.remove());
-    renderReview();
+    if (fill.documents.length > 1) renderChooseDocument();
+    else { applyDocument(0); renderReview(); }
   } catch (e) {
     toast(e.message || 'Reading failed.', 6000);
     buttons.forEach((b) => { b.disabled = false; });
     prog.classList.add('hidden');
   }
+}
+
+// Loads one document's values into the fill.
+function applyDocument(index) {
+  const fill = state.fill;
+  const map = state.record.map;
+  const dateOrder = map.dateOrder || state.settings.dateOrder;
+  const doc = fill.documents[index];
+  fill.docIndex = index;
+  fill.results = { ...doc, source: fill.source };
+  fill.values = {};
+  fill.fileName = '';
+  for (const f of map.fields) {
+    const r = doc.fields[f.name];
+    let v = r && r.value != null ? String(r.value) : '';
+    // Show dates in the user's own order.
+    if (f.type === 'date' && v) { const d = parseDate(v, dateOrder); if (d) v = formatDate(d, dateOrder); }
+    fill.values[f.name] = v;
+  }
+  fill.rows = (doc.rows || []).map((r) => ({ ...r }));
+  fill.notes = (fill.baseNotes || []).slice();
+  if (fill.documents.length > 1) fill.notes.unshift({ kind: 'info', text: `Document ${index + 1} of ${fill.documents.length}: ${doc.label}` });
+  if (doc.moreRows > 0) fill.notes.push({ kind: 'warn', text: `The document has ${doc.moreRows} more line item(s) than the form's ${map.table.maxRows} rows. Only the first ${map.table.maxRows} are filled.` });
+}
+
+// Several invoices in one upload: ask which one, or fill one file per document.
+function renderChooseDocument() {
+  const fill = state.fill;
+  fill.queue = [];
+  screen(
+    h('h2', {}, `${fill.documents.length} documents found`),
+    h('p', { class: 'muted small' }, 'These files hold more than one invoice or form. Pick the one to fill, or fill one file for each; you check every one before it is written.'),
+    h('div', { class: 'list' }, fill.documents.map((d, i) => h('div', { class: 'item' },
+      h('div', { class: 'grow' }, h('div', { class: 't' }, d.label || `Document ${i + 1}`),
+        h('div', { class: 'muted small' }, `${Object.values(d.fields).filter((r) => r.value != null).length} of ${state.record.map.fields.length} fields found${d.rows && d.rows.length ? ` · ${d.rows.length} line item(s)` : ''}`)),
+      h('button', { class: 'btn small primary', type: 'button', onclick: () => { applyDocument(i); renderReview(); } }, 'Fill this one')))),
+  );
+  bar(
+    h('button', { class: 'btn', type: 'button', onclick: () => renderDocs() }, 'Back'),
+    h('button', { class: 'btn primary', type: 'button', onclick: () => { fill.queue = fill.documents.map((_, i) => i).slice(1); applyDocument(0); renderReview(); } }, `One file per document (${fill.documents.length})`),
+  );
 }
 
 // ---------------------------------------------------------------- review
@@ -587,7 +707,14 @@ function evaluate() {
     const cell = targetCell(f.sheet, f.cell);
     const v = validateValue(f, fill.values[f.name], { ...opts, cell });
     checks[f.name] = v;
-    if (v.write) writes.push({ sheet: f.sheet, cell: f.cell, value: v.write, display: v.display });
+    if (v.write) {
+      writes.push({ sheet: f.sheet, cell: f.cell, value: v.write, display: v.display });
+      // Written anyway, but flagged: the cell will cut it off or spill over.
+      if (X.overflows(X.getSheet(state.tpl, f.sheet), cell.ref, state.tpl.styles, v.display)) {
+        const cap = X.cellCapacity(X.getSheet(state.tpl, f.sheet), cell.ref, state.tpl.styles);
+        v.long = `Longer than the cell shows (about ${cap.chars * cap.lines} characters fit). It will be written; the column width is not changed, so check the printed form.`;
+      }
+    }
   }
   const rowChecks = [];
   const t = map.table;
@@ -600,7 +727,10 @@ function evaluate() {
         const field = { name, type: columnType(name, (t.labels || {})[name], cell) };
         const v = validateValue(field, row[name], { ...opts, cell });
         rc[name] = v;
-        if (v.write) writes.push({ sheet: t.sheet, cell: ref, value: v.write, display: v.display });
+        if (v.write) {
+          writes.push({ sheet: t.sheet, cell: ref, value: v.write, display: v.display });
+          if (X.overflows(X.getSheet(state.tpl, t.sheet), cell.ref, state.tpl.styles, v.display)) v.long = `${ref} is longer than the cell shows.`;
+        }
       }
       rowChecks.push(rc);
     });
@@ -615,22 +745,24 @@ function renderReview() {
   const results = fill.results;
   const dateOrder = map.dateOrder || state.settings.dateOrder;
 
-  const writeBtn = h('button', { class: 'btn primary', type: 'button', onclick: () => writeForm() }, 'Write form');
+  const writeBtn = h('button', { class: 'btn primary', type: 'button', onclick: () => writeForm() }, isSheets(state.record) ? (aiReady() ? 'Write to Google Sheets' : 'Queue for Google Sheets') : 'Write form');
   const status = h('div', { class: 'small', id: 'review-status' });
   const refresh = () => {
     const ev = evaluate();
     writeBtn.disabled = ev.missingRequired.length > 0 || ev.writes.length === 0;
     const invalid = Object.values(ev.checks).filter((c) => !c.ok).length + ev.rowChecks.reduce((n, rc) => n + Object.values(rc).filter((c) => !c.ok).length, 0);
+    const longRows = ev.rowChecks.flatMap((rc) => Object.values(rc).filter((c) => c.long).map((c) => c.long));
     status.replaceChildren(...nodesOf([
       ev.missingRequired.length ? h('div', { class: 'banner bad' }, `Required before writing: ${ev.missingRequired.map((f) => f.name).join(', ')}`) : null,
       invalid ? h('div', { class: 'banner warn' }, `${invalid} value(s) do not fit their cell and will be left blank. Fix or clear them.`) : null,
+      longRows.length ? h('div', { class: 'banner warn' }, `Line items longer than their cells (written anyway): ${longRows.map((m) => m.split(' ')[0]).join(', ')}`) : null,
       h('p', { class: 'muted' }, `${ev.writes.length} cell(s) will be written.`)]));
     for (const f of map.fields) {
       const el = document.getElementById(`msg-${f.name}`);
       const c = ev.checks[f.name];
-      if (el) { el.textContent = c.message || ''; el.className = `small ${c.ok ? 'muted' : ''}`; el.style.color = c.ok ? '' : 'var(--bad)'; }
+      if (el) { el.textContent = c.message || c.long || ''; el.className = 'small'; el.style.color = !c.ok ? 'var(--bad)' : c.long ? 'var(--warn)' : 'var(--muted)'; }
       const row = document.getElementById(`rv-${f.name}`);
-      if (row) row.classList.toggle('flag-bad', !c.ok || (f.required && c.empty));
+      if (row) { row.classList.toggle('flag-bad', !c.ok || (f.required && c.empty)); row.classList.toggle('flag-warn', Boolean(c.long) || row.dataset.flagged === '1'); }
     }
     return ev;
   };
@@ -653,7 +785,7 @@ function renderReview() {
       input = h('input', { type: 'text', value: fill.values[f.name] || '', inputmode: f.type === 'number' || f.type === 'currency' ? 'decimal' : null, placeholder: f.type === 'date' ? (dateOrder === 'MDY' ? 'MM/DD/YYYY' : 'DD/MM/YYYY') : TYPE_LABELS[f.type || 'text'], oninput: onInput, 'aria-label': f.name });
     }
     const flagged = results && (!r || r.value == null || r.confidence < LOW_CONFIDENCE);
-    return h('div', { class: `fieldrow${flagged ? ' flag-warn' : ''}`, id: `rv-${f.name}` },
+    return h('div', { class: `fieldrow${flagged ? ' flag-warn' : ''}`, id: `rv-${f.name}`, 'data-flagged': flagged ? '1' : null },
       h('div', { class: 'head' }, h('span', { class: 'name grow' }, f.label || f.name), chips, h('span', { class: 'chip' }, f.cell)),
       input,
       r && r.snippet ? h('div', { class: 'snippet' }, `“${r.snippet}”${r.page ? ` · p${r.page}` : ''}`) : null,
@@ -718,12 +850,15 @@ async function writeForm() {
   const fill = state.fill;
   const ev = evaluate();
   if (ev.missingRequired.length) { toast('Fill the required fields first.'); return; }
+  let name = (fill.fileName || outputFileName(map.outputName, Object.fromEntries(map.fields.map((f) => [f.name, fill.values[f.name] || ''])), { templateId: map.templateId })).trim();
+  if (!/\.xlsx$/i.test(name)) name += '.xlsx';
+  const writes = ev.writes.map(({ sheet, cell, value }) => ({ sheet, cell, value }));
+  const entry = { templateHash: state.record.hash, templateName: state.record.name, values: { ...fill.values }, rows: fill.rows.map((r) => ({ ...r })), fileName: name };
   try {
-    const { bytes, skipped } = await X.fillTemplate(JSZip, state.tpl, ev.writes.map(({ sheet, cell, value }) => ({ sheet, cell, value })));
-    let name = (fill.fileName || outputFileName(map.outputName, Object.fromEntries(map.fields.map((f) => [f.name, fill.values[f.name] || ''])), { templateId: map.templateId })).trim();
-    if (!/\.xlsx$/i.test(name)) name += '.xlsx';
-    fill.written = { bytes, name, skipped, count: ev.writes.length - skipped.length };
-    await store.addHistory({ templateHash: state.record.hash, templateName: state.record.name, values: { ...fill.values }, rows: fill.rows.map((r) => ({ ...r })), fileName: name });
+    if (isSheets(state.record)) return await writeSheet(name, writes, entry);
+    const { bytes, skipped } = await X.fillTemplate(JSZip, state.tpl, writes);
+    fill.written = { bytes, name, skipped, count: writes.length - skipped.length };
+    await store.addHistory(entry);
     download(bytes, name, XLSX_TYPE);
     renderDone();
   } catch (e) {
@@ -731,8 +866,101 @@ async function writeForm() {
   }
 }
 
+// Google Sheets: a copy of the sheet gets the values. Offline, the fill waits
+// in the outbox and goes out as soon as there is a connection.
+async function writeSheet(name, writes, entry) {
+  const fill = state.fill;
+  const title = name.replace(/\.xlsx$/i, '');
+  const item = { templateHash: state.record.hash, spreadsheetId: state.record.spreadsheetId, name: title, writes };
+  if (!aiReady()) {
+    entry.queued = true;
+    item.historyId = await store.addHistory({ ...entry, fileName: title });
+    await store.addOutbox(item);
+    fill.written = { sheet: true, queued: true, name: title, count: writes.length, skipped: [] };
+    return renderDone();
+  }
+  toast('Writing to Google Sheets…', 60000);
+  const res = await sendSheetFill(item);
+  document.querySelectorAll('.toast').forEach((t) => t.remove());
+  if (res.changed) return;
+  await store.addHistory({ ...entry, fileName: title, url: res.url });
+  fill.written = { sheet: true, url: res.url, name: title, count: res.written, skipped: res.skipped || [] };
+  renderDone();
+}
+
+// Sends one Google Sheets fill. The sheet is read again first: if someone
+// edited the form since its fields were confirmed, nothing is written and the
+// user re-checks the map, as with an edited .xlsx.
+async function sendSheetFill(item, { background = false } = {}) {
+  const rec = await store.getTemplate(item.templateHash);
+  const { layout, hash } = await inspectSheet(item.spreadsheetId);
+  if (hash !== item.templateHash) {
+    const msg = 'The Google Sheet was edited after its fields were confirmed. Check the fields again, then fill it.';
+    if (!background && rec) {
+      const tpl = sheetModel(layout);
+      const map = { ...rec.map, templateHash: hash, fields: rec.map.fields.filter((f) => tpl.sheets.some((s) => s.name === f.sheet)) };
+      await openRecord({ ...rec, hash, layout, map, confirmed: false, recheck: true, replaces: rec.hash });
+      toast(msg, 6000);
+      renderSetup();
+    }
+    return { changed: true, error: msg };
+  }
+  return callProxy(proxy(), 'sheets.fill', { spreadsheet: item.spreadsheetId, name: item.name, writes: item.writes });
+}
+
+let flushing = false;
+async function flushOutbox(manual = false) {
+  if (flushing || !aiReady()) return;
+  flushing = true;
+  try {
+    const items = await store.listOutbox();
+    let sent = 0;
+    for (const item of items) {
+      try {
+        const res = await sendSheetFill(item, { background: true });
+        if (res.changed) { await store.putOutbox({ ...item, error: res.error }); continue; }
+        await store.deleteOutbox(item.id);
+        const hist = (await store.listHistory()).find((e) => e.id === item.historyId);
+        if (hist) await store.updateHistory({ ...hist, queued: false, url: res.url });
+        sent++;
+      } catch (e) {
+        await store.putOutbox({ ...item, error: e.message });
+      }
+    }
+    if (sent) toast(`${sent} queued Google Sheets fill(s) sent.`, 5000);
+    else if (manual && items.length) toast('Nothing could be sent yet; see the note on the home screen.', 5000);
+    if (sent || manual) { if (!state.fill && document.querySelector('main h2')?.textContent === 'Your forms') renderHome(); }
+  } finally { flushing = false; }
+}
+
+function nextDocumentButton() {
+  const fill = state.fill;
+  if (!fill.queue || !fill.queue.length) return null;
+  const next = fill.queue[0];
+  return h('button', { class: 'btn primary block', type: 'button', onclick: () => { fill.queue.shift(); applyDocument(next); fill.written = null; renderReview(); } }, `Next document (${next + 1} of ${fill.documents.length})`);
+}
+
 function renderDone() {
   const w = state.fill.written;
+  if (w.sheet) {
+    const shareLink = w.url && navigator.share ? h('button', { class: 'btn block', type: 'button', onclick: async () => { try { await navigator.share({ title: w.name, url: w.url }); } catch (e) { if (e.name !== 'AbortError') toast('Sharing failed.'); } } }, 'Share link (WhatsApp, email…)') : null;
+    screen(
+      h('h2', {}, w.queued ? 'Queued for Google Sheets' : 'Form filled'),
+      w.queued
+        ? h('div', { class: 'banner info' }, `You are offline, so "${w.name}" will be written to Google Sheets as soon as you are back online. Nothing else is needed.`)
+        : h('div', { class: 'banner ok' }, `${w.count} cell(s) written into a copy named "${w.name}" in your "FormFill output" Drive folder. The original form is unchanged.`),
+      w.skipped.length ? h('div', { class: 'banner warn' }, 'Not written:', h('ul', {}, w.skipped.map((s) => h('li', {}, `${s.cell}: ${s.reason}`)))) : null,
+      h('div', { class: 'list' },
+        nextDocumentButton(),
+        w.url ? h('a', { class: 'btn primary block', href: w.url, target: '_blank', rel: 'noopener', style: { textAlign: 'center', textDecoration: 'none' } }, 'Open in Google Sheets') : null,
+        shareLink,
+        w.url && !navigator.share ? h('a', { class: 'btn block', href: `https://wa.me/?text=${encodeURIComponent(`${w.name} ${w.url}`)}`, target: '_blank', rel: 'noopener', style: { textAlign: 'center', textDecoration: 'none' } }, 'Send on WhatsApp') : null,
+        h('button', { class: 'btn block', type: 'button', onclick: () => startFill() }, 'Fill another'),
+        h('button', { class: 'btn block', type: 'button', onclick: () => renderReview() }, 'Back to values')),
+    );
+    bar(h('button', { class: 'btn', type: 'button', onclick: () => renderHome() }, 'Home'));
+    return;
+  }
   const file = new File([w.bytes], w.name, { type: XLSX_TYPE });
   const canShare = Boolean(navigator.canShare && navigator.canShare({ files: [file] }));
   screen(
@@ -740,7 +968,8 @@ function renderDone() {
     h('div', { class: 'banner ok' }, `${w.count} cell(s) written into ${w.name}. Everything else in the form is unchanged.`),
     w.skipped.length ? h('div', { class: 'banner warn' }, 'Not written:', h('ul', {}, w.skipped.map((s) => h('li', {}, `${s.cell}: ${s.reason}`)))) : null,
     h('div', { class: 'list' },
-      h('button', { class: 'btn primary block', type: 'button', onclick: () => download(w.bytes, w.name, XLSX_TYPE) }, 'Download again'),
+      nextDocumentButton(),
+      h('button', { class: `btn ${state.fill.queue && state.fill.queue.length ? '' : 'primary '}block`, type: 'button', onclick: () => download(w.bytes, w.name, XLSX_TYPE) }, 'Download again'),
       canShare ? h('button', { class: 'btn block', type: 'button', onclick: async () => { try { await navigator.share({ files: [file], title: w.name, text: w.name }); } catch (e) { if (e.name !== 'AbortError') toast('Sharing failed; download the file and attach it instead.'); } } }, 'Share (WhatsApp, email…)') : h('p', { class: 'muted small' }, 'To send it, attach the downloaded file in WhatsApp or your email app.'),
       h('button', { class: 'btn block', type: 'button', onclick: () => startFill() }, 'Fill another'),
       h('button', { class: 'btn block', type: 'button', onclick: () => renderReview() }, 'Back to values')),
@@ -776,8 +1005,8 @@ async function renderSettings() {
       h('p', { class: 'small muted' }, 'Typed PDFs and Word files are read offline straight away. Scans and photos need the text-recognition pack; it downloads once and then works without a connection.'),
       h('div', { class: 'row' }, ocrStatus, ocrBtn)),
     h('div', { class: 'card' },
-      h('h3', { style: { marginTop: 0 } }, 'AI reading (optional, needs a connection)'),
-      h('p', { class: 'small muted' }, 'With a Google Apps Script proxy set up (see apps-script/Code.gs), documents are read by the AI when you are online, which is better at messy scans and unusual layouts. The API key stays in the script. Documents pass through the AI provider; nothing is stored.'),
+      h('h3', { style: { marginTop: 0 } }, 'Proxy: AI, Google Sheets and Drive (optional, needs a connection)'),
+      h('p', { class: 'small muted' }, 'With the Google Apps Script proxy set up (see apps-script/Code.gs), documents are read by the AI when you are online (better at messy scans and unusual layouts), new forms get their fields named by the AI, Google Sheets forms can be filled, and forms can be kept in Drive. The API key stays in the script. With AI reading on, documents pass through the AI provider; nothing is stored.'),
       h('label', { class: 'field' }, h('span', {}, 'Proxy URL'), urlIn),
       h('label', { class: 'field' }, h('span', {}, 'Access token'), tokIn),
       h('div', { class: 'row' },
@@ -788,19 +1017,74 @@ async function renderSettings() {
         } }, 'Save'),
         h('button', { class: 'btn small', type: 'button', onclick: async () => {
           if (!online()) { toast('You are offline.'); return; }
-          try { await pingProxy(urlIn.value.trim(), tokIn.value.trim()); toast('The proxy answered. AI reading is ready.'); } catch (e) { toast(`Test failed: ${e.message}`, 6000); }
+          try { const r = await pingProxy(urlIn.value.trim(), tokIn.value.trim()); toast(r.ai ? 'The proxy answered. AI, Google Sheets and Drive are ready.' : 'The proxy answered. Google Sheets and Drive are ready; add ANTHROPIC_API_KEY to the script for AI.', 5000); } catch (e) { toast(`Test failed: ${e.message}`, 6000); }
         } }, 'Test'))),
     h('div', { class: 'card' },
       h('h3', { style: { marginTop: 0 } }, 'New forms'),
       h('label', { class: 'field' }, h('span', {}, 'Default date order in documents'), h('select', { onchange: async (e) => { s.dateOrder = e.target.value; await store.setSetting('dateOrder', s.dateOrder); } },
         h('option', { value: 'DMY', selected: s.dateOrder === 'DMY' }, 'Day / month / year'),
-        h('option', { value: 'MDY', selected: s.dateOrder === 'MDY' }, 'Month / day / year')))),
+        h('option', { value: 'MDY', selected: s.dateOrder === 'MDY' }, 'Month / day / year'))),
+      h('label', { class: 'row small' }, h('input', { type: 'checkbox', checked: s.aiNaming, onchange: async (e) => { s.aiNaming = e.target.checked; await store.setSetting('aiNaming', s.aiNaming); } }),
+        'Let the AI name and type the fields of a new form when online (only the form\'s labels are sent, never documents).')),
+    h('div', { class: 'card' },
+      h('h3', { style: { marginTop: 0 } }, 'Forms in Google Drive'),
+      h('p', { class: 'small muted' }, 'Keep your forms and their confirmed field maps in a "FormFill templates" folder in the Drive of the account that runs your proxy, so another phone or a colleague can restore them.'),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn small', type: 'button', onclick: backupToDrive }, 'Back up all forms'),
+        h('button', { class: 'btn small', type: 'button', onclick: restoreFromDrive }, 'Restore from Drive'))),
     h('div', { class: 'card' },
       h('h3', { style: { marginTop: 0 } }, 'Privacy'),
       h('p', { class: 'small muted' }, 'Forms, field maps and the last 20 fills (values only) are stored in this browser. Documents are never stored after a fill. With AI reading on, documents are sent to your proxy and the AI provider to be read.'),
       h('button', { class: 'btn small danger', type: 'button', onclick: async () => { if (!confirm('Clear the fill history?')) return; for (const e of await store.listHistory()) await store.deleteHistory(e.id); toast('History cleared.'); } }, 'Clear history')),
   );
   bar(h('button', { class: 'btn', type: 'button', onclick: () => renderHome() }, 'Done'));
+}
+
+// ---------------------------------------------------------------- Drive templates
+
+async function backupToDrive() {
+  if (!aiReady()) { toast(online() ? 'Set up the proxy first.' : 'Backing up needs a connection.'); return; }
+  const all = (await store.listTemplates()).filter((t) => t.confirmed);
+  if (!all.length) { toast('No confirmed forms to back up yet.'); return; }
+  let done = 0;
+  try {
+    for (const t of all) {
+      toast(`Backing up ${t.name}…`, 60000);
+      await callProxy(proxy(), 'drive.save', {
+        name: t.name, hash: t.hash, kind: t.kind || 'xlsx', spreadsheetId: t.spreadsheetId || null,
+        map: publicMap(t.map), xlsxBase64: isSheets(t) ? null : toBase64(t.bytes),
+      });
+      done++;
+    }
+    toast(`${done} form(s) saved to the "FormFill templates" folder in Drive.`, 5000);
+  } catch (e) { toast(`Backup stopped after ${done}: ${e.message}`, 6000); }
+}
+
+async function restoreFromDrive() {
+  if (!aiReady()) { toast(online() ? 'Set up the proxy first.' : 'Restoring needs a connection.'); return; }
+  try {
+    toast('Looking in Drive…', 60000);
+    const { templates } = await callProxy(proxy(), 'drive.list');
+    const have = new Set((await store.listTemplates()).map((t) => t.hash));
+    const missing = (templates || []).filter((t) => !have.has(t.hash));
+    let added = 0;
+    for (const t of missing) {
+      toast(`Restoring ${t.name}…`, 60000);
+      const { template } = await callProxy(proxy(), 'drive.get', { name: t.name });
+      const map = { ...template.map, fields: (template.map.fields || []).map((f) => ({ type: 'text', hint: '', required: false, confidence: 1, ...f })) };
+      if (template.kind === 'gsheet') {
+        const { layout, hash } = await inspectSheet(template.spreadsheetId);
+        await store.putTemplate({ hash, name: template.name, kind: 'gsheet', spreadsheetId: layout.spreadsheetId, url: layout.url, layout, map: { ...map, templateHash: hash }, confirmed: hash === template.hash, recheck: hash !== template.hash, addedAt: Date.now() });
+      } else {
+        const bytes = fromBase64(template.xlsxBase64 || '');
+        await X.openTemplate(JSZip, bytes);
+        const hash = await X.sha256Hex(bytes);
+        await store.putTemplate({ hash, name: template.name, bytes, map: { ...map, templateHash: hash }, confirmed: hash === template.hash, recheck: hash !== template.hash, addedAt: Date.now() });
+      }
+      added++;
+    }
+    toast(added ? `${added} form(s) restored from Drive.` : 'Every form in Drive is already on this device.', 5000);
+  } catch (e) { toast(`Restore failed: ${e.message}`, 6000); }
 }
 
 // ---------------------------------------------------------------- start
@@ -813,7 +1097,7 @@ function updateNet() {
 async function init() {
   document.getElementById('home-link').addEventListener('click', () => renderHome());
   document.getElementById('settings-btn').addEventListener('click', () => renderSettings());
-  window.addEventListener('online', updateNet);
+  window.addEventListener('online', () => { updateNet(); flushOutbox(); });
   window.addEventListener('offline', updateNet);
   updateNet();
   if (!JSZip) { screen(h('div', { class: 'banner bad' }, 'FormFill could not load its files. Reload the page once while online.')); return; }
@@ -822,11 +1106,13 @@ async function init() {
     state.settings.proxyToken = await store.getSetting('proxyToken', '');
     state.settings.dateOrder = await store.getSetting('dateOrder', 'DMY');
     state.settings.useAI = await store.getSetting('useAI', true);
+    state.settings.aiNaming = await store.getSetting('aiNaming', true);
   } catch (e) {
     screen(h('div', { class: 'banner bad' }, `Storage is not available (${e.message}). Private browsing can block it.`));
     return;
   }
   renderHome();
+  flushOutbox();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     try {

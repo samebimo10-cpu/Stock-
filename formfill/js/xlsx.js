@@ -188,6 +188,8 @@ function parseStyles(xml) {
     for (const x of findElements(cx.inner || '', 'xf')) {
       const a = parseAttrs(x.attrs);
       const prot = x.inner ? firstElement(x.inner, 'protection') : null;
+      const align = x.inner ? firstElement(x.inner, 'alignment') : null;
+      const aa = align ? parseAttrs(align.attrs) : {};
       const pa = prot ? parseAttrs(prot.attrs) : {};
       const numFmtId = Number(a.numFmtId || 0);
       const code = numFmts[numFmtId] || BUILTIN_FORMATS[numFmtId] || 'General';
@@ -199,13 +201,15 @@ function parseStyles(xml) {
         fill: fills[Number(a.fillId || 0)] || { filled: false, rgb: null },
         border: borders[Number(a.borderId || 0)] || { left: false, right: false, top: false, bottom: false },
         locked: !(pa.locked === '0' || pa.locked === 'false'),
+        wrap: aa.wrapText === '1' || aa.wrapText === 'true',
+        shrink: aa.shrinkToFit === '1' || aa.shrinkToFit === 'true',
       });
     }
   }
   return { xfs };
 }
 
-const DEFAULT_XF = { numFmtId: 0, numFmt: 'General', kind: 'general', bold: false, fill: { filled: false, rgb: null }, border: { left: false, right: false, top: false, bottom: false }, locked: true };
+const DEFAULT_XF = { numFmtId: 0, numFmt: 'General', kind: 'general', bold: false, fill: { filled: false, rgb: null }, border: { left: false, right: false, top: false, bottom: false }, locked: true, wrap: false, shrink: false };
 
 function parseSheet(xml, sst, styles) {
   const cells = new Map();
@@ -259,7 +263,11 @@ function parseSheet(xml, sst, styles) {
   const prot = firstElement(xml, 'sheetProtection');
   const pa = prot ? parseAttrs(prot.attrs) : {};
   const isProtected = Boolean(prot && (pa.sheet === '1' || pa.sheet === 'true'));
-  return { cells, rowsInfo, merges, cols, protected: isProtected, maxRow, maxCol };
+  const fmt = firstElement(xml, 'sheetFormatPr');
+  const fa = fmt ? parseAttrs(fmt.attrs) : {};
+  const defaultColWidth = fa.defaultColWidth ? Number(fa.defaultColWidth) : (fa.baseColWidth ? Number(fa.baseColWidth) + 0.71 : 8.43);
+  const defaultRowHeight = fa.defaultRowHeight ? Number(fa.defaultRowHeight) : 15;
+  return { cells, rowsInfo, merges, cols, protected: isProtected, maxRow, maxCol, defaultColWidth, defaultRowHeight };
 }
 
 export class TemplateError extends Error {}
@@ -340,6 +348,16 @@ function defaultStyleIndex(sheet, row, col) {
   return 0;
 }
 
+const inRange = (r, row, col) => row >= r.r1 && row <= r.r2 && col >= r.c1 && col <= r.c2;
+
+// Locked on a protected sheet, or inside a protected range (Google Sheets).
+export function isLocked(sheet, row, col, style) {
+  if (sheet.lockedRanges && sheet.lockedRanges.some((r) => inRange(r, row, col))) return true;
+  if (!sheet.protected) return false;
+  if (sheet.unlockedRanges && sheet.unlockedRanges.some((r) => inRange(r, row, col))) return false;
+  return Boolean(style && style.locked);
+}
+
 // Why a value may not go into this cell, or null when it may.
 export function writeBlocker(tpl, sheetName, ref) {
   const sheet = getSheet(tpl, sheetName);
@@ -350,8 +368,39 @@ export function writeBlocker(tpl, sheetName, ref) {
   const target = m ? makeRef(m.c1, m.r1) : makeRef(p.col, p.row);
   const c = cellInfo(sheet, target, tpl.styles);
   if (c.formula) return `${target} holds a formula, so it is never overwritten.`;
-  if (sheet.protected && c.style.locked) return `${target} is locked on a protected sheet.`;
+  if (isLocked(sheet, c.row, c.col, c.style)) return `${target} is locked (protected).`;
   return null;
+}
+
+// About how many characters a cell shows before its text is cut off or spills
+// out of the printed box: the width of its columns (merged ranges count as
+// one box) and, for wrapped cells, its number of lines. Excel measures column
+// width in widths of the digit 0; ordinary text is slightly narrower.
+export function cellCapacity(sheet, ref, styles) {
+  const p = parseRef(ref);
+  const m = mergeAt(sheet, p.row, p.col) || { r1: p.row, r2: p.row, c1: p.col, c2: p.col };
+  let width = 0;
+  for (let c = m.c1; c <= m.c2; c++) {
+    const col = sheet.cols.find((x) => c >= x.min && c <= x.max);
+    width += col && col.hidden ? 0 : (col && col.width != null ? col.width : sheet.defaultColWidth || 8.43);
+  }
+  const cell = cellInfo(sheet, makeRef(m.c1, m.r1), styles);
+  let lines = 1;
+  if (cell.style.wrap) {
+    let height = 0;
+    for (let r = m.r1; r <= m.r2; r++) { const ri = sheet.rowsInfo.get(r); height += (ri && ri.ht) || sheet.defaultRowHeight || 15; }
+    lines = Math.max(1, Math.floor(height / 15));
+  }
+  return { chars: Math.max(1, Math.floor(width * 1.15)), lines, shrink: Boolean(cell.style.shrink) };
+}
+
+// True when a value will not fit in the cell as printed.
+export function overflows(sheet, ref, styles, text) {
+  const cap = cellCapacity(sheet, ref, styles);
+  const t = String(text || '');
+  if (!t || cap.shrink) return false;
+  if (cap.lines > 1) return t.length > cap.chars * cap.lines * 0.9;
+  return t.length > cap.chars;
 }
 
 // ---------------------------------------------------------------- dates

@@ -121,16 +121,17 @@ function findPhrase(line, phrase) {
   return m.index + m[1].length;
 }
 
-// Looks for one field in the document. Returns
-// { value, confidence, snippet, page } or { value: null, confidence: 0 }.
-export function findField(field, doc, { dateOrder = 'DMY' } = {}) {
+// Every line where the field's label appears with a usable value, best
+// candidate per line: [{ line, value, confidence, snippet, page }].
+export function findMatches(field, doc, { dateOrder = 'DMY' } = {}) {
   const phrases = labelPhrases(field);
   const avoid = avoidPhrases(field);
   const type = field.type || 'text';
-  let best = null;
   const lines = doc.lines;
+  const out = [];
 
   for (let i = 0; i < lines.length; i++) {
+    let best = null;
     const line = lines[i];
     const n = norm(line.text);
     if (!n) continue;
@@ -180,12 +181,22 @@ export function findField(field, doc, { dateOrder = 'DMY' } = {}) {
         if (type === 'text' && /[:：]$/.test(value)) continue;
         const conf = weight * startFactor * labelFactor * cand.f * (valid ? 1 : 0.35);
         if (!best || conf > best.confidence) {
-          best = { value, confidence: Math.round(conf * 100) / 100, snippet: line.text.replace(/\t/g, '  ').trim().slice(0, 160), page: line.page || 1 };
+          best = { line: i, value, confidence: Math.round(conf * 100) / 100, snippet: line.text.replace(/\t/g, '  ').trim().slice(0, 160), page: line.page || 1 };
         }
       }
     }
+    if (best) out.push(best);
   }
+  return out;
+}
+
+// Looks for one field in the document. Returns
+// { value, confidence, snippet, page } or { value: null, confidence: 0 }.
+export function findField(field, doc, opts = {}) {
+  let best = null;
+  for (const m of findMatches(field, doc, opts)) if (!best || m.confidence > best.confidence) best = m;
   if (!best) return { value: null, confidence: 0, snippet: '', page: null };
+  best = { value: best.value, confidence: best.confidence, snippet: best.snippet, page: best.page };
   // Blurry OCR lowers everything read from that page.
   const q = doc.quality && doc.quality[best.page] != null ? doc.quality[best.page] : 1;
   best.confidence = Math.round(best.confidence * Math.min(1, Math.max(0.4, q)) * 100) / 100;
@@ -212,6 +223,39 @@ function headerMatch(cell, colName, colLabel) {
   return 0;
 }
 
+// Splits a one-cell header line at the template's column names (or their
+// synonyms), in the order they appear. Null when fewer than two are found.
+function splitHeader(text, table) {
+  const n = norm(text);
+  const found = [];
+  for (const name of Object.keys(table.columns)) {
+    const words = new Set([norm((table.labels || {})[name] || ''), norm(name)]);
+    for (const w of [...words]) for (const g of SYNONYMS) if (g.includes(w)) g.forEach((x) => words.add(x));
+    let best = null;
+    for (const w of words) {
+      if (!w || w.length < 2) continue;
+      const at = findPhrase(n, w);
+      if (at >= 0 && (!best || w.length > best.w.length)) best = { at, w };
+    }
+    if (best && !found.some((f) => best.at < f.at + f.w.length && f.at < best.at + best.w.length)) found.push(best);
+  }
+  if (found.length < 2) return null;
+  // Words between the matches (a column the form does not have) stay as
+  // their own cells so the positions still line up with the data rows.
+  found.sort((a, b) => a.at - b.at);
+  const cells = [];
+  let pos = 0;
+  for (const f of found) {
+    const gap = n.slice(pos, f.at).trim();
+    if (gap) cells.push(gap);
+    cells.push(n.slice(f.at, f.at + f.w.length));
+    pos = f.at + f.w.length;
+  }
+  const tail = n.slice(pos).trim();
+  if (tail) cells.push(...tail.split(' ').filter(Boolean));
+  return cells;
+}
+
 // Finds the line-item rows for the template's table.
 // Returns { rows: [{col: value}], more: n, snippet } where more > 0 when the
 // document has more rows than the form holds.
@@ -221,13 +265,18 @@ export function findTable(table, doc) {
   const sources = [];
   for (const t of doc.tables || []) sources.push(t);
   // Lines with several cells, grouped into runs, stand in for tables in PDFs
-  // and photos.
+  // and photos. A header whose words sit close together ("Description Qty
+  // Unit price") comes through as one cell; it is split on the column names.
   let run = [];
-  for (const line of doc.lines) {
-    const cells = splitCells(line.text);
+  doc.lines.forEach((line, i) => {
+    let cells = splitCells(line.text);
+    if (cells.length < 2 && !run.length) {
+      const next = doc.lines[i + 1] ? splitCells(doc.lines[i + 1].text) : [];
+      if (next.length >= 2) cells = splitHeader(line.text, table) || cells;
+    }
     if (cells.length >= 2) run.push(cells);
     else { if (run.length >= 2) sources.push(run); run = []; }
-  }
+  });
   if (run.length >= 2) sources.push(run);
 
   let best = null;
@@ -269,18 +318,94 @@ export function findTable(table, doc) {
   return { rows: out.slice(0, max), more: Math.max(0, out.length - max), snippet: best.header.join(' | ') };
 }
 
-// Runs extraction for every field and the table against one or more documents.
-export function extractOnDevice(map, docs, { dateOrder = 'DMY' } = {}) {
-  const merged = { lines: [], tables: [], quality: {} };
+function mergeDocs(docs) {
+  const merged = { lines: [], tables: [], quality: {}, pageStarts: [] };
   let pageBase = 0;
   for (const d of docs) {
-    for (const l of d.lines) merged.lines.push({ ...l, page: (l.page || 1) + pageBase });
+    let lastPage = null;
+    for (const l of d.lines) {
+      const page = (l.page || 1) + pageBase;
+      if (page !== lastPage) { merged.pageStarts.push(merged.lines.length); lastPage = page; }
+      merged.lines.push({ ...l, page });
+    }
     for (const t of d.tables || []) merged.tables.push(t);
     for (const [p, q] of Object.entries(d.quality || {})) merged.quality[Number(p) + pageBase] = q;
     pageBase += d.pages || 1;
   }
+  return merged;
+}
+
+const IDENTITY = /\b(invoice|receipt|order|ref|reference|no|number|id|certificate|policy|account|claim|voucher|serial)\b/i;
+
+// Several invoices in one upload (a multi-page PDF, or a few photos) show up
+// as the same label repeating with different values: "Invoice No: 101" and
+// later "Invoice No: 102". Returns the line where each document starts, or
+// [0] for a single document.
+export function documentStarts(map, merged, opts = {}) {
+  let anchor = null;
+  map.fields.forEach((f, order) => {
+    if ((f.type || 'text') !== 'text') return;
+    const ms = findMatches(f, merged, opts).filter((m) => m.confidence >= 0.6);
+    const firsts = new Map();
+    for (const m of ms) { const k = norm(m.value); if (k && !firsts.has(k)) firsts.set(k, m.line); }
+    if (firsts.size < 2) return;
+    const score = firsts.size * 10 + (IDENTITY.test(`${f.label || ''} ${f.name}`) ? 5 : 0) + (f.required ? 2 : 0) - order * 0.01;
+    if (!anchor || score > anchor.score) anchor = { score, lines: [...firsts.values()].sort((a, b) => a - b) };
+  });
+  if (!anchor) return [0];
+  // Lines above the first anchor (a letterhead, a logo's caption) belong to
+  // each document too, so every boundary moves up by that much, or to the
+  // start of the anchor's page when that is closer.
+  const lead = anchor.lines[0];
+  const starts = [0];
+  for (let k = 1; k < anchor.lines.length; k++) {
+    const at = anchor.lines[k];
+    const prev = anchor.lines[k - 1];
+    const pageStart = [...merged.pageStarts].reverse().find((p) => p <= at && p > prev);
+    let b = pageStart != null ? pageStart : at - lead;
+    if (b <= prev) b = prev + 1;
+    if (b <= starts[starts.length - 1]) continue;
+    starts.push(b);
+  }
+  return starts;
+}
+
+function extractOne(map, doc, dateOrder) {
   const fields = {};
-  for (const f of map.fields) fields[f.name] = findField(f, merged, { dateOrder });
-  const table = findTable(map.table, merged);
-  return { fields, rows: table.rows, moreRows: table.more, source: 'device' };
+  for (const f of map.fields) fields[f.name] = findField(f, doc, { dateOrder });
+  const table = findTable(map.table, doc);
+  return { fields, rows: table.rows, moreRows: table.more };
+}
+
+// A short description of one document for the "which one?" choice.
+export function documentLabel(map, fields, index) {
+  const pick = (re) => map.fields.find((f) => re.test(`${f.label || ''} ${f.name}`) && fields[f.name] && fields[f.name].value);
+  const parts = [];
+  for (const f of [pick(IDENTITY), pick(/name|supplier|client|customer|company/i), map.fields.find((f) => f.type === 'date' && fields[f.name] && fields[f.name].value), map.fields.find((f) => f.type === 'currency' && fields[f.name] && fields[f.name].value)]) {
+    if (f && !parts.includes(fields[f.name].value)) parts.push(fields[f.name].value);
+  }
+  return parts.length ? parts.join(' · ') : `Document ${index + 1}`;
+}
+
+// Runs extraction for every field and the table. Returns the first document's
+// values at the top level and every document found in `documents`.
+export function extractOnDevice(map, docs, { dateOrder = 'DMY' } = {}) {
+  const merged = mergeDocs(docs);
+  let starts = documentStarts(map, merged, { dateOrder });
+  const split = (st) => st.map((start, k) => {
+    const end = k + 1 < starts.length ? starts[k + 1] : merged.lines.length;
+    const part = { lines: merged.lines.slice(start, end), tables: starts.length === 1 ? merged.tables : [], quality: merged.quality };
+    const r = extractOne(map, part, dateOrder);
+    return { ...r, label: documentLabel(map, r.fields, k), snippet: part.lines.slice(0, 1).map((l) => l.text).join('') };
+  });
+  let documents = split(starts);
+  // A real second document carries most of the same fields. Two names on one
+  // invoice ("Bill to" and "Ship to") do not, so that stays one document.
+  if (documents.length > 1) {
+    const found = (d) => map.fields.filter((f) => d.fields[f.name].value != null).length;
+    const whole = split([0])[0];
+    const need = Math.max(2, Math.ceil(found(whole) * 0.6));
+    if (documents.some((d) => found(d) < need)) { starts = [0]; documents = [whole]; }
+  }
+  return { ...documents[0], documents, source: 'device' };
 }

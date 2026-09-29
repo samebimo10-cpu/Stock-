@@ -7,7 +7,7 @@
 // number format. The user confirms the result once and it is saved as the
 // template's field map.
 
-import { makeRef, numToCol, mergeAt, cellInfo, parseRef } from './xlsx.js';
+import { makeRef, numToCol, mergeAt, cellInfo, parseRef, isLocked } from './xlsx.js';
 import { slugify } from './normalize.js';
 
 const MAX_ROWS = 300;
@@ -17,6 +17,12 @@ const MAX_COLS = 40;
 // a signature, not for values found in a document.
 const SKIP_SECTION = /\b(office use|official use|for office|internal use|for use by|admin(istration)? only|do not write)\b/i;
 const SKIP_LABEL = /\b(signature|signed|sign here|stamp|seal|initials?|thumbprint)\b/i;
+
+// Labels that mean little without their section.
+const GENERIC = /^(full |first |last |sur)?(name|names|address|phone|tel|telephone|mobile|e-?mail|email address|date|no\.?|number|ref|reference|city|town|state|country|contact|contact person|title|position|designation|id|code|account|account no\.?|account number|bank|signature|website|fax|postcode|zip)$/i;
+const TITLE_GENERIC = /^(date|no\.?|number|ref|reference)$/i;
+const DOC_NOUN = /\b(invoice|receipt|order|quote|quotation|application|certificate|claim|delivery|bill|voucher|payment|request|requisition)\b/i;
+const SECTION_FILLER = /\b(details?|information|info|section|particulars|data|of the)\b|\d+[.)]?/gi;
 
 const TYPE_RULES = [
   [/\b(yes\s*\/\s*no|y\/n|tick|agree|consent|approved\?)\b/i, 'yesno'],
@@ -61,7 +67,7 @@ function inputCandidate(sheet, row, col, styles) {
   const c = cellInfo(sheet, makeRef(col, row), styles);
   if (c.formula) return null;
   if (String(c.value || '').trim() !== '') return null;
-  if (sheet.protected && c.style.locked) return null;
+  if (isLocked(sheet, row, col, c.style)) return null;
   const b = c.style.border;
   // A merged input takes its borders from the whole range, so look along it.
   let bordered = b.bottom || b.top || b.left || b.right;
@@ -215,24 +221,36 @@ export function detectFields(tpl, { templateId = 'form', templateHash = '', date
           hint: '',
           required: /\*/.test(raw),
           section: section ? section.text : '',
+          sectionIsTitle: Boolean(section && section === headingRows[0] && section.row <= 2),
           confidence: Math.min(1, 0.55 + (punct ? 0.2 : 0) + (pick.styled ? 0.2 : 0) + (pick.where === 'right' ? 0.05 : 0)),
         });
       }
     }
   }
 
-  // Names must be unique. A repeated label ("Name" under both "Supplier" and
-  // "Customer") takes its section's name as a prefix.
-  const counts = {};
-  for (const f of fields) counts[f.name] = (counts[f.name] || 0) + 1;
+  // Generic labels take their section's name, the way a person would read the
+  // form: "Name" under "Supplier details" is supplier_name. Under the form's
+  // title only dates and numbers do ("Date" on an invoice is invoice_date).
+  for (const f of fields) {
+    const base = slugify(f.label);
+    if (f.section && GENERIC.test(f.label)) {
+      if (f.sectionIsTitle) {
+        const noun = DOC_NOUN.exec(f.section);
+        if (noun && TITLE_GENERIC.test(f.label)) f.name = `${slugify(noun[1])}_${base}`;
+      } else {
+        const sec = slugify(f.section.replace(SECTION_FILLER, ' '));
+        if (sec && sec !== 'field' && !base.startsWith(sec)) f.name = `${sec}_${base}`;
+      }
+    }
+  }
+  // Names must be unique; a repeat gets a number.
   const taken = new Set();
   for (const f of fields) {
-    let name = f.name;
-    if (counts[f.name] > 1 && f.section) name = `${slugify(f.section.replace(/\b(details?|information|info|section)\b/gi, ''))}_${f.name}`;
-    let n = name; let i = 2;
-    while (taken.has(n)) n = `${name}_${i++}`;
+    let n = f.name; let i = 2;
+    while (taken.has(n)) n = `${f.name}_${i++}`;
     taken.add(n);
     f.name = n;
+    delete f.sectionIsTitle;
   }
 
   return {
@@ -266,4 +284,59 @@ export function manualField(tpl, sheetName, ref, existing = []) {
   while (names.has(n)) n = `${name}_${i++}`;
   name = n;
   return { name, label: label || name.replace(/_/g, ' '), sheet: sheetName, cell: ref, type: guessType(label, cellInfo(sheet, ref, tpl.styles)), hint: '', required: false, section: '', confidence: 1, manual: true };
+}
+
+// ---------------------------------------------------------------- AI naming
+
+// The compact layout the AI names fields from: the form's text cells row by
+// row plus the input cells found above. The workbook itself never leaves the
+// device.
+export function layoutForAI(tpl, map) {
+  const sheets = [];
+  for (const sheet of tpl.sheets) {
+    if (sheet.state !== 'visible') continue;
+    const rows = [];
+    let count = 0;
+    for (let r = 1; r <= Math.min(sheet.maxRow, MAX_ROWS) && count < 400; r++) {
+      const parts = [];
+      for (let c = 1; c <= Math.min(sheet.maxCol, MAX_COLS); c++) {
+        const cell = sheet.cells.get(makeRef(c, r));
+        if (!cell || cell.formula || String(cell.value || '').trim() === '') continue;
+        parts.push(`${cell.ref}: ${String(cell.value).trim().slice(0, 60)}`);
+        count++;
+      }
+      if (parts.length) rows.push(parts.join(' | '));
+    }
+    sheets.push({ name: sheet.name, rows });
+  }
+  return {
+    sheets,
+    inputs: map.fields.map((f) => ({ sheet: f.sheet, cell: f.cell, label: f.label, section: f.section || '', name: f.name, type: f.type })),
+    table: map.table ? { sheet: map.table.sheet, startRow: map.table.startRow, columns: map.table.columns } : null,
+  };
+}
+
+// Applies the AI's names, types and hints to the detected fields. The cells
+// themselves never change here: the app, not the AI, decides where values go.
+export function applyAINames(map, suggestions) {
+  const byCell = new Map((suggestions || []).map((s) => [`${s.sheet || ''}!${String(s.cell || '').toUpperCase()}`, s]));
+  const taken = new Set();
+  let changed = 0;
+  for (const f of map.fields) {
+    const s = byCell.get(`${f.sheet}!${f.cell}`) || byCell.get(`!${f.cell}`);
+    if (!s || f.manual) { taken.add(f.name); continue; }
+    let name = s.name ? slugify(s.name) : f.name;
+    let n = name; let i = 2;
+    while (taken.has(n)) n = `${name}_${i++}`;
+    name = n;
+    if (name !== f.name) changed++;
+    f.name = name;
+    if (['text', 'number', 'date', 'currency', 'yesno'].includes(s.type) && !(f.type === 'date' && s.type === 'text')) f.type = s.type;
+    if (s.hint && !f.hint) f.hint = String(s.hint).slice(0, 120);
+    if (typeof s.confidence === 'number') f.confidence = Math.max(0, Math.min(1, s.confidence));
+    f.aiNamed = true;
+    taken.add(name);
+  }
+  map.outputName = suggestOutputName(map.templateId, map.fields);
+  return changed;
 }

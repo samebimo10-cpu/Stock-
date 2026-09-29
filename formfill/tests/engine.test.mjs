@@ -94,13 +94,14 @@ test('detection finds the label/input pairs, the line-item table and skips offic
   const tpl = await X.openTemplate(JSZip, await buildFixture());
   const map = detectFields(tpl, { templateId: 'supplier-invoice' });
   const byName = Object.fromEntries(map.fields.map((f) => [f.name, f]));
-  assert.deepEqual(Object.keys(byName).sort(), ['date', 'invoice_no', 'name', 'phone']);
+  // "Supplier details" + "Name" -> supplier_name; "Date" under the invoice title -> invoice_date.
+  assert.deepEqual(Object.keys(byName).sort(), ['invoice_date', 'invoice_no', 'supplier_name', 'supplier_phone']);
   assert.equal(byName.invoice_no.cell, 'B3');
   assert.equal(byName.invoice_no.type, 'text');
-  assert.equal(byName.date.cell, 'F3');
-  assert.equal(byName.date.type, 'date');
-  assert.equal(byName.name.cell, 'B6');
-  assert.equal(byName.phone.type, 'text');
+  assert.equal(byName.invoice_date.cell, 'F3');
+  assert.equal(byName.invoice_date.type, 'date');
+  assert.equal(byName.supplier_name.cell, 'B6');
+  assert.equal(byName.supplier_phone.type, 'text');
   assert.ok(map.table);
   assert.equal(map.table.startRow, 10);
   assert.equal(map.table.maxRows, 5);
@@ -108,7 +109,7 @@ test('detection finds the label/input pairs, the line-item table and skips offic
   assert.deepEqual(map.table.columns, { description: 'A', qty: 'C', unit_price: 'D' });
   assert.ok(map.skipped.some((s) => s.cell === 'B18'));
   assert.ok(map.skipped.some((s) => s.cell === 'B19'));
-  assert.match(map.outputName, /\{name\}.*\{date\}/);
+  assert.equal(map.outputName, '{templateId}_{supplier_name}_{invoice_date}.xlsx');
 });
 
 test('values are cleaned and checked against the field and cell type', async () => {
@@ -190,4 +191,87 @@ test('field types come from the label and the input cell format', () => {
   assert.equal(guessType('Amount requested'), 'currency');
   assert.equal(guessType('Date of birth'), 'date');
   assert.equal(guessType('Start', { style: { kind: 'date' } }), 'date');
+});
+
+test('several invoices in one upload are split into separate documents', () => {
+  const inv = (no, date, name, item) => [
+    'ACME SUPPLIES LTD', `Invoice No: ${no}\tDate: ${date}`, `Name: ${name}`,
+    'Description\tQty\tUnit price', `${item}\t1\t500.00`, 'Total: 500.00',
+  ];
+  const lines = [...inv('INV-101', '01/09/2026', 'Acme Ltd', 'Nails'), ...inv('INV-102', '02/09/2026', 'Bolt Ltd', 'Screws')]
+    .map((text, i) => ({ text, page: i < 6 ? 1 : 2 }));
+  const map = {
+    fields: [
+      { name: 'invoice_no', label: 'Invoice No', type: 'text' },
+      { name: 'invoice_date', label: 'Date', type: 'date' },
+      { name: 'supplier_name', label: 'Name', type: 'text' },
+    ],
+    table: { columns: { description: 'A', qty: 'C', unit_price: 'D' }, labels: { description: 'Description', qty: 'Qty', unit_price: 'Unit price' }, maxRows: 5 },
+  };
+  const r = extractOnDevice(map, [{ pages: 2, lines }]);
+  assert.equal(r.documents.length, 2);
+  assert.equal(r.documents[0].fields.invoice_no.value, 'INV-101');
+  assert.equal(r.documents[1].fields.invoice_no.value, 'INV-102');
+  assert.equal(r.documents[1].fields.supplier_name.value, 'Bolt Ltd');
+  assert.deepEqual(r.documents[1].rows, [{ description: 'Screws', qty: '1', unit_price: '500.00' }]);
+  assert.match(r.documents[1].label, /INV-102 · Bolt Ltd · 02\/09\/2026/);
+  // One invoice stays one document, even with two different names on it.
+  assert.equal(extractOnDevice(map, [{ pages: 1, lines: lines.slice(0, 6) }]).documents.length, 1);
+  const shipTo = ['Invoice No: INV-7\tDate: 03/09/2026', 'Bill To Name: Ada Obi', 'Ship To Name: Warehouse 4'].map((text) => ({ text, page: 1 }));
+  assert.equal(extractOnDevice(map, [{ pages: 1, lines: shipTo }]).documents.length, 1);
+});
+
+test('values longer than the cell shows are detected', async () => {
+  const tpl = await X.openTemplate(JSZip, await buildFixture());
+  const sheet = tpl.sheets[0];
+  // B6:D6 is merged, 3 x 14 wide.
+  assert.equal(X.overflows(sheet, 'B6', tpl.styles, 'Acme Supplies Ltd'), false);
+  assert.equal(X.overflows(sheet, 'B6', tpl.styles, 'A'.repeat(60)), true);
+  assert.equal(X.overflows(sheet, 'B7', tpl.styles, '0803 123 4567'), false);
+  assert.equal(X.overflows(sheet, 'B7', tpl.styles, '+234 803 123 4567 ext 22'), true);
+});
+
+test('Google Sheets forms: layout becomes a template, protected ranges are never written', async () => {
+  const { sheetModel, layoutHash } = await import('../js/gsheet.js');
+  const layout = {
+    spreadsheetId: 'abc', name: 'Leave request', url: 'https://docs.google.com/spreadsheets/d/abc',
+    sheets: [{
+      name: 'Form', hidden: false, rows: 12, cols: 4,
+      // [row, col, shown, formula, bold, bg, format, numeric, wrap]
+      cells: [
+        [1, 1, 'LEAVE REQUEST', false, true, '', '', false, false],
+        [3, 1, 'Employee details', false, true, '', '', false, false],
+        [4, 1, 'Name:', false, true, '', '', false, false], [4, 2, '', false, false, 'fff2cc', '', false, false],
+        [5, 1, 'Start date:', false, true, '', '', false, false], [5, 2, '', false, false, 'fff2cc', 'dd/mm/yyyy', false, false],
+        [6, 1, 'Days:', false, true, '', '', false, false], [6, 2, '', false, false, 'fff2cc', '0.###############', false, false],
+        [7, 1, 'Days left:', false, true, '', '', false, false], [7, 2, '10', true, false, '', '', true, false],
+        [9, 1, 'Manager:', false, true, '', '', false, false], [9, 2, '', false, false, 'fff2cc', '', false, false],
+      ],
+      widths: [140, 200, 100, 100], heights: [], merges: ['B4:C4'], protectedSheet: false, unprotected: [], locked: ['B9'],
+    }],
+  };
+  const tpl = sheetModel(layout);
+  const map = detectFields(tpl, { templateId: 'leave' });
+  const byName = Object.fromEntries(map.fields.map((f) => [f.name, f]));
+  assert.deepEqual(Object.keys(byName).sort(), ['days', 'employee_name', 'start_date']);
+  assert.equal(byName.start_date.type, 'date');
+  assert.equal(byName.days.type, 'number');
+  assert.match(X.writeBlocker(tpl, 'Form', 'B9'), /locked/);
+  assert.match(X.writeBlocker(tpl, 'Form', 'B7'), /formula/);
+  assert.equal(X.writeBlocker(tpl, 'Form', 'C4'), null);
+  // Automatic format means General: a date into it goes in as text, not a serial.
+  const auto = X.cellInfo(tpl.sheets[0], 'B6', tpl.styles);
+  assert.deepEqual(validateValue({ type: 'date' }, '05/10/2026', { cell: auto }).write, { kind: 'text', text: '05/10/2026' });
+  const dateCell = X.cellInfo(tpl.sheets[0], 'B5', tpl.styles);
+  assert.equal(validateValue({ type: 'date' }, '05/10/2026', { cell: dateCell }).write.kind, 'number');
+  // Editing the form changes its hash.
+  const edited = JSON.parse(JSON.stringify(layout));
+  edited.sheets[0].cells[2][2] = 'Full name:';
+  assert.notEqual(await layoutHash(layout), await layoutHash(edited));
+});
+
+test('a table header printed without gaps is split on the column names', () => {
+  const lines = ['Invoice No: 5', 'Description Qty Unit price Amount', 'Paint\t3\t1,500.00\t4,500.00', 'Total: 4,500.00'].map((text) => ({ text, page: 1 }));
+  const map = { fields: [], table: { columns: { description: 'A', qty: 'C', unit_price: 'D' }, labels: { description: 'Description', qty: 'Qty', unit_price: 'Unit price' }, maxRows: 5 } };
+  assert.deepEqual(extractOnDevice(map, [{ pages: 1, lines }]).rows, [{ description: 'Paint', qty: '3', unit_price: '1,500.00' }]);
 });
