@@ -26,6 +26,12 @@
 > term a tap away. All art is SVG drawn in code, fonts ship with the game, and there are 17
 > currencies with local number styles across 8 regions.
 
+> **Also here: [FormFill](formfill/README.md)**, an offline app that fills your own Excel forms from
+> invoices, letters and photos. It finds the form's fields, reads the values from a PDF, Word file or
+> photo on the phone, lets you check them, and writes only those cells, so fonts, borders, logos and
+> formulas stay exactly as they were. Open it at **https://samebimo10-cpu.github.io/Stock-/formfill/**
+> and "Add to Home Screen".
+
 A goal-driven stock screener and portfolio allocator covering the **Nigerian Exchange (NGX)** and the
 **New York Stock Exchange (NYSE)**. It uses only publicly available data (no API keys), ranks every
 stock in a configurable universe with a transparent multi-factor model, then builds a portfolio that

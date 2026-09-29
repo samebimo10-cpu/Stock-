@@ -17,6 +17,7 @@ on:
       # the market-data run, which takes five minutes rather than thirty seconds.
       - "douvalue/server/**"
       - "tycoon/**"
+      - "formfill/**"
       - "scripts/assemble_site.sh"
       - ".github/workflows/publish-site.yml"
 
