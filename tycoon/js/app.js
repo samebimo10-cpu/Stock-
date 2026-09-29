@@ -917,7 +917,8 @@ const STAMP = { real: ['tick', 'Real'], fake: ['cross', 'Fake'], noise: ['shrug'
 // message, your money tree and four actions; everything else is a place you
 // visit when you want to (World, Money, People, Story).
 let tab = 'today';
-const TABS = [['today', 'house', 'Today'], ['world', 'map', 'World'], ['money', 'coins', 'Money'], ['people', 'people', 'People'], ['story', 'book', 'Story']];
+// Three places only: your year, your money and your life story. World and People live inside them.
+const TABS = [['today', 'house', 'Today'], ['money', 'coins', 'Money'], ['story', 'people', 'My life']];
 const circleSeen = (r = run) => r.seenEv.includes('circle') || E.circleOpen(r);
 const tabLock = () => null;
 const zoneName = (z, r = run) => COUNTRIES[r.currency].zones[z];
@@ -936,8 +937,8 @@ function topbarHTML() {
 }
 
 function tabbarHTML() {
-  const dot = { people: !!run.flags.circleNew };
-  return `<nav class="tabbar five" aria-label="Game sections">${TABS.map(([id, ic, name]) => `<button class="tb ${tab === id || (tab === 'map' && id === 'world') ? 'on' : ''}" data-act="tab" data-t="${id}" aria-label="${name}" ${tab === id ? 'aria-current="page"' : ''}>${A.icon(ic, 24, '')}<span>${name}</span>${dot[id] ? '<i class="tb-dot"></i>' : ''}</button>`).join('')}</nav>`;
+  const dot = { story: !!run.flags.circleNew };
+  return `<nav class="tabbar three" aria-label="Game sections">${TABS.map(([id, ic, name]) => `<button class="tb ${tab === id || (tab === 'map' && id === 'money') ? 'on' : ''}" data-act="tab" data-t="${id}" aria-label="${name}" ${tab === id ? 'aria-current="page"' : ''}>${A.icon(ic, 24, '')}<span>${name}</span>${dot[id] ? '<i class="tb-dot"></i>' : ''}</button>`).join('')}</nav>`;
 }
 
 function familyOf(r) {
@@ -966,14 +967,16 @@ function treeFor(r, size = 96) {
 function renderGame() {
   if (!run) return home();
   E.upgradeRun(run);
-  if (!['today', 'world', 'money', 'people', 'story', 'map'].includes(tab)) tab = 'today';
-  if (tab === 'people') run.flags.circleNew = false;
-  const body = { today: todayTab, world: worldTab, map: mapTab, money: moneyTab, people: peopleTab, story: storyTab }[tab]();
+  if (tab === 'world') tab = 'money';
+  if (tab === 'people') tab = 'story';
+  if (!['today', 'money', 'story', 'map'].includes(tab)) tab = 'today';
+  if (tab === 'story') run.flags.circleNew = false;
+  const body = { today: todayTab, map: mapTab, money: moneyTab, story: () => `${storyTab()}${peopleTab()}<details class="more-tools"><summary>${A.icon('trophy', 22, '')} Achievements, report and settings</summary>${storyMore()}</details>` }[tab]();
   app.innerHTML = `
   <div class="game tab-${tab}">
     ${topbarHTML()}
     ${body}
-    ${tab === 'today' ? `<footer class="actionbar"><div class="actions-row"><button class="home-big" data-act="home" aria-label="Home screen (your game is saved)">${A.icon('house', 28, '')}<span>Home</span></button><button class="next ${run.pending ? 'wait' : ''}" data-act="next"><span>${run.pending ? 'Open your message' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></div></footer>` : ''}
+    ${tab === 'today' ? `<footer class="actionbar"><div class="actions-row"><button class="next ${run.pending ? 'wait' : ''}" data-act="next"><span>${run.pending ? 'Open your message' : `Live ${run.ypt === 1 ? 'the year' : `${run.ypt} years`} ▸`}</span><small>Age ${run.age} → ${run.age + run.ypt}</small><i class="timer"></i></button></div></footer>` : ''}
     ${tabbarHTML()}
   </div>`;
   if (tab === 'money') requestAnimationFrame(drawSparks);
@@ -1015,12 +1018,12 @@ function todayTab() {
   const acts = [['work-sheet', 'desk', 'Work'], ['invest', 'coins', 'Invest'], ['life-sheet', 'house', 'Life'], ['opps', 'dice', 'Opportunity']];
   return `
     <section class="today">
-      <button class="scene-btn big" data-act="life-sheet" aria-label="Your life">${sceneFor(run)}</button>
-      <div class="wealth"><b class="${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b><span>NET WORTH</span></div>
-      <button class="tree-row" data-act="passive">${treeFor(run, 92)}
-        <span class="tree-txt"><b>${Math.round(Math.min(1, prog) * 100)}% FREE</b><span class="fbar"><i style="width:${(Math.min(1, prog) * 100).toFixed(1)}%"></i></span>
-        <small>${run.freeAge ? `Free since ${run.freeAge}. Your money pays for your life.` : need > 0 ? `You need another ${f(need)} a year` : 'Your money covers your life'}</small></span></button>
-      ${gv ? `<button class="goal" data-act="tab" data-t="story">${A.icon('flag', 22, '')}<span><small>Your goal</small><b>${esc(gv.title)}</b><span class="gbar"><i style="width:${Math.round(gv.prog * 100)}%"></i></span></span></button>` : ''}
+      <button class="scene-btn" data-act="life-sheet" aria-label="Your life">${sceneFor(run)}</button>
+      <button class="wealth-card" data-act="passive">${treeFor(run, 84)}
+        <span class="wc-txt"><small>Net worth</small><b class="${nw < 0 ? 'down' : ''}" id="nw">${f(nw)}</b>
+          <span class="fbar"><i style="width:${(Math.min(1, prog) * 100).toFixed(1)}%"></i></span>
+          <small><b class="free-pc">${Math.round(Math.min(1, prog) * 100)}% free</b> · ${run.freeAge ? `free since ${run.freeAge}` : need > 0 ? `need ${f(need)} a year more` : 'your money covers your life'}</small>
+          ${gv ? `<small class="wc-goal">${A.icon('flag', 14, '')} Goal: ${esc(gv.title)} (${Math.round(gv.prog * 100)}%)</small>` : ''}</span></button>
       ${run.teaser && run.pending ? '' : ''}
       ${messageCard()}
       ${guideTip()}
@@ -1169,7 +1172,13 @@ function moneyTab() {
   const heldCards = run.cards.map((id) => { const c = E.cardById(id); return c ? `<span class="hc ${c.type === 'Tool' ? 'tool' : ''}">${A.icon(A.TYPE_ICON[c.type] === 'hype' ? 'warn' : A.TYPE_ICON[c.type], 16, '')} ${esc(c.name)}${run.charges[id] ? ` ×${run.charges[id]}` : ''}</span>` : ''; }).join('');
   return `
     <section class="sec">
-      <div class="sec-h"><h2>${A.icon('coins', 24, '')} Your money</h2><span class="note">The instrument panel</span></div>
+      <div class="sec-h"><h2>${A.icon('coins', 24, '')} Your money</h2></div>
+      <div class="brk ledger">
+        <div class="tot"><span>Net worth</span><b>${f(E.netWorth(run))}</b></div>
+        <div><span>Left over a year</span><b class="${saving >= 0 ? 'up' : 'down'}">${f(saving, true)}</b></div>
+        <div><span>Money that comes by itself</span><b>${f(p.total)}/yr</b></div>
+      </div>
+      <details class="why"><summary>All the numbers</summary>
       <div class="brk ledger">
         ${row('Cash', run.cash, run.cash < 0 ? 'down' : '')}
         ${row('Savings and investments', h.save + h.index + E.stocksTotal(run) + h.crypto + h.fx)}
@@ -1179,7 +1188,7 @@ function moneyTab() {
         ${row('Income a year', income, 'up')}${row('Living costs a year', -C, 'down')}
         <div><span>Left over a year</span><b class="${saving >= 0 ? 'up' : 'down'}">${f(saving, true)}</b></div>
         <div class="tot"><span>Money that comes by itself</span><b>${f(p.total)}/yr</b></div>
-      </div>
+      </div></details>
       ${idle > 0 && run.cash > 0 ? `<p class="warn">Cash sitting idle loses ${pctS(run.infl)} a year to rising prices.</p>` : ''}
     </section>
     <section class="sec"><div class="wallet">${planHTML(sea)}</div></section>
@@ -1187,10 +1196,13 @@ function moneyTab() {
       <div class="sec-h"><h2>Where your money is</h2><span class="note">Tap to put in or take out</span></div>
       <div class="grid">${ORDER.map(tileHTML).join('')}${ponzi}</div>
     </section>
+    <details class="more-tools"><summary>${A.icon('gear', 22, '')} More tools: forecasts, statement, costs, town and news</summary>
     ${run.eraId ? '' : run.think ? `<button class="big-row" data-act="think">${A.icon('dice', 30, '')}<span><b>Market and forecasts</b><small>Base rates, headlines, Mr. Market${run.learnMode ? ', and your yearly call' : ''}</small></span><span>▸</span></button>` : `<div class="big-row locked">${A.icon('lock', 30, '')}<span><b>Market and forecasts</b><small>Unlock after your second game.</small></span></div>`}
     <div class="two-btn"><button class="big-row" data-act="statement">${A.icon('payslip', 28, '')}<span><b>Statement</b><small>Rich Dad's test</small></span></button><button class="big-row" data-act="cures">${A.icon('star', 28, '')}<span><b>Coach</b><small>Arkad's seven cures</small></span></button></div>
     <button class="big-row" data-act="costs">${A.icon('bowl', 28, '')}<span><b>Where your costs go</b><small>${f(C)} a year</small></span><span>▸</span></button>
-    ${heldCards ? `<section class="sec"><div class="sec-h"><h2>What you have become</h2></div><div class="held">${heldCards}</div></section>` : ''}`;
+    ${heldCards ? `<section class="sec"><div class="sec-h"><h2>What you have become</h2></div><div class="held">${heldCards}</div></section>` : ''}
+    ${worldTab()}
+    </details>`;
 }
 
 // ------------------------------------------------------------------ People: everyone in your life
@@ -1259,14 +1271,19 @@ function timelineHTML(mem, max = 40) {
 
 function storyTab() {
   const S = run.story;
-  const earned = run.cards.map((id) => E.cardById(id)).filter(Boolean);
-  const got = trophiesAll();
   return `
     <section class="sec chapter-card"><span class="kicker">Chapter</span><h2>${esc(chapterName(S.chapter))}</h2><p class="muted">${esc((CHAPTERS.find((c) => c.id === S.chapter) || {}).line || '')}</p></section>
     <section class="sec">
       <div class="sec-h"><h2>${A.icon('book', 24, '')} Your life so far</h2></div>
       ${timelineHTML(S.memories)}
-    </section>
+    </section>`;
+}
+
+function storyMore() {
+  const S = run.story;
+  const earned = run.cards.map((id) => E.cardById(id)).filter(Boolean);
+  const got = trophiesAll();
+  return `
     <section class="sec">
       <div class="sec-h"><h2>${A.icon('trophy', 24, '')} Achievements</h2><span class="note">${S.goalsDone.length} goals reached</span></div>
       ${earned.length ? `<div class="held">${earned.map((c) => `<span class="hc">${A.icon(A.TYPE_ICON[c.type] === 'hype' ? 'warn' : A.TYPE_ICON[c.type], 16, '')} ${esc(c.name)}</span>`).join('')}</div>` : '<p class="muted">Cards are earned by what you do: hold through two crashes, pay yourself first for years, own a rental.</p>'}
@@ -1305,19 +1322,34 @@ function decisionScreen() {
     </div>`);
 }
 
+let lastChoice = '';
+let lastFace = '';
 function outcomeScreen(text) {
   const lesson = run.eventLesson;
   openModal(`
     <div class="decide outcome-box">
-      <span class="kicker">What happened</span>
+      ${lastFace ? `<div class="dec-face">${lastFace}</div>` : ''}
+      <span class="kicker">${esc(lastChoice || 'What happened')}</span>
       <p class="outcome">${esc(text || 'Done.')}</p>
       <p class="muted">Net worth ${f(E.netWorth(run))} · Joy ${Math.round(run.joy)}</p>
       ${lesson ? `<details class="why"><summary>Want to understand why?</summary>${lessonHTML(lesson)}</details>` : ''}
-      <button class="btn primary wide" data-act="close-go">Continue</button>
+      <button class="btn primary wide" data-act="live-now">Live the year ▸</button>
+      <button class="btn ghost wide" data-act="close-go">Manage my money first</button>
     </div>`);
 }
 
 // ------------------------------------------------------------------ one year later
+
+// The market's year in everyday words.
+const moodLine = (state) => ({ boom: 'A great year for investors', steady: 'A calm, ordinary year', over: 'Prices ran hot this year', crash: 'The markets crashed', recov: 'Markets bounced back' }[state] || 'Another year');
+
+// One sentence: what moved your money most this year.
+function yearWhy(p) {
+  const parts = [['Your pay', p.income + p.expenses], ['Your investments', p.investments], ['Your property', p.property], ['Your business', p.business]].filter(([, v]) => Math.abs(v) > 0.5);
+  if (!parts.length) return 'A quiet year for your money.';
+  const [k, v] = parts.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+  return v >= 0 ? `${k} added ${f(v)}. That did the most for you this year.` : `${k} cost you ${f(-v)} this year.`;
+}
 
 function yearTransition(res) {
   const flows = res.flows || [];
@@ -1342,19 +1374,20 @@ function yearTransition(res) {
       <div class="one-year">${run.ypt === 1 ? 'One year later…' : `${run.ypt} years later…`}</div>
       <div class="years">Age ${res.age0} → ${res.age1}</div>
       <div class="play-scene ${res.nw1 >= res.nw0 ? 'rise' : 'fall'}">${sceneFor(run, { mood: res.state, expr: res.state === 'crash' ? 'shocked' : res.nw1 >= res.nw0 ? 'cheer' : 'tired' })}</div>
-      <div class="mood flip" style="--mc:${STATE_INFO[res.state].color}">${esc(W.word.toUpperCase())}</div>
+      <div class="mood-line" style="--mc:${STATE_INFO[res.state].color}">${esc(moodLine(res.state))}</div>
       ${crash ? `<div class="crash-box"><b>${res.seqHit ? 'A LATE CRASH' : 'MARKET CRASH'}</b>${risky.map((r) => `<div><span>${A.icon(A.PLAIN[r.id].icon, 20, '')} ${esc(A.PLAIN[r.id].label)}</span><b class="${cls(r.pct)}">${E.pct(r.pct, 0)}</b></div>`).join('')}${risky.length ? `<div class="tot"><span>Your investments</span><b class="${cls(port)}">${E.pct(port, 0)}</b></div>` : ''}</div>` : ''}
-      <div class="flows summary">${line('Income', income)}${line('Expenses', expenses)}${line('Investments', investments)}${line('Property and land', property)}${line('Business', business)}</div>
       <div class="big-nw"><span class="lbl">Net worth</span><span class="nw-from">${f(res.nw0)} →</span><b id="roll" class="${res.nw1 >= res.nw0 ? 'up' : 'down'}">${f(res.nw0)}</b></div>
+      <p class="year-why">${esc(yearWhy({ income, expenses, investments, property, business }))}</p>
       ${res.freedom && !res.result ? `<div class="freedom-box"><span class="kicker">You did it</span><h2>FREE AT ${run.age}</h2><p>Your money now pays for your whole life. What now?</p><div class="choices"><button class="choice-card" data-act="free-keep"><b>Keep working</b><small>More money, more to give</small></button><button class="choice-card" data-act="free-retire"><b>Retire</b><small>Work is optional now</small></button><button class="choice-card" data-act="end-game"><b>See my life story</b><small>End here</small></button></div></div>` : ''}
       ${res.goalDone ? `<div class="golden goal-done">${A.icon('flag', 36, '')}<div><span class="kicker">Goal reached</span><b>${esc(res.goalDone.title)}</b><p>${esc(res.goalDone.reward)}</p></div></div>` : ''}
       ${(res.cardsEarned || []).map((c) => `<div class="golden card-earned">${A.cardPic(c.id, 40)}<div><span class="kicker">You became</span><b>${esc(c.name)}</b><p>${esc(c.why)} ${esc(c.text)}</p></div></div>`).join('')}
       ${res.golden ? `<div class="golden">${A.icon('sparkle', 40, '')}<div><span class="kicker">Golden event</span><b>${esc(res.golden.title)}</b><p>${esc(res.golden.text)}</p></div></div>` : ''}
       ${res.milestones && res.milestones.length ? `<div class="unlock-list">${res.milestones.map((m) => `<span>${A.icon('trophy', 16, '')} ${esc(E.MILESTONES[m])}</span>`).join('')}</div>` : ''}
       ${res.envelope ? `<button class="envelope ${res.envelope.big ? 'big' : ''}" data-act="envelope">${A.icon('envelope', 44, '')}<span><b>Mystery envelope</b><small>Tap to open</small></span></button>` : ''}
-      ${res.notes.length ? `<div class="notes">${res.notes.slice(0, 3).map((n) => `<p>${esc(n)}</p>`).join('')}</div>` : ''}
-      ${tip ? `<details class="why"><summary>${A.castFace(guideId(), 'happy', 28, '')} ${esc(guideName())} has a thought</summary>${lessonHTML(tip.p, tip.text)}</details>` : ''}
       <details class="why"><summary>See the details</summary>
+        <div class="flows summary">${line('Income', income)}${line('Expenses', expenses)}${line('Investments', investments)}${line('Property and land', property)}${line('Business', business)}</div>
+        ${res.notes.length ? `<div class="notes">${res.notes.slice(0, 3).map((n) => `<p>${esc(n)}</p>`).join('')}</div>` : ''}
+        ${tip ? `<p class="why">${A.castFace(guideId(), 'happy', 28, '')} <b>${esc(guideName())}:</b> ${esc(tip.text)}</p>` : ''}
         <ul class="rows">${res.rows.map((r) => `<li><span class="r-name">${A.icon(A.PLAIN[r.id].icon, 22, '')}${esc(A.PLAIN[r.id].label)}</span><span class="${cls(r.gain)}">${f(r.gain, true)}</span><span class="p ${cls(r.pct)}">${E.pct(r.pct, 1)}</span></li>`).join('')}</ul>
         <div class="flows">${flows.map((x) => `<div><span>${esc(x.label)}</span><b class="${cls(x.v)}">${f(x.v, true)}</b></div>`).join('')}</div>
         ${res.fc ? `<p class="why">Your forecast: ${pc(res.fc.p)}. The index ${res.fc.up ? 'did' : 'did not'} beat inflation.</p>` : ''}
@@ -2607,6 +2640,7 @@ const ACT = {
   playout: () => { const r = pendingPlay; pendingPlay = null; yearTransition(r || run.lastResult); },
   decide: () => { SFX.tap(); decisionScreen(); },
   'close-go': () => { closeLayer(); renderGame(); },
+  'live-now': () => { closeLayer(); nextTurn(); },
   'year-go': () => {
     stopAutoplay();
     if (pendingResult) { const r = pendingResult; pendingResult = null; return endRun(r); }
@@ -2641,6 +2675,10 @@ const ACT = {
   bizact: (d) => { if (E.bizAction(run, d.k, Number(d.d || 0))) { SFX.card(); toast({ marketing: 'Posters up, adverts out. Watch the customers come.', hire: 'A new pair of hands.', price: 'New prices on the board.', ops: 'Tighter stock, fewer breakdowns.' }[d.k]); persist(); renderGame(); bizSheet(); } else toast('Not this year.'); },
   choose: (d) => {
     const wasCircle = run.pending && run.pending.id === 'circle';
+    const view = E.eventView(run);
+    const pick = (view || { choices: [] }).choices[Number(d.i)];
+    lastFace = view ? eventFace(view).html : '';
+    lastChoice = pick ? `You chose: ${pick.label}` : '';
     const text = E.chooseEvent(run, Number(d.i));
     if (text === null) return;
     SFX.tap();

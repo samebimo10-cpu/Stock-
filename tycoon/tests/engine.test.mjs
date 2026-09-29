@@ -41,12 +41,15 @@ test('every mode, character, era and challenge finishes with finite numbers', ()
   }
 });
 
+const hoard = (r) => (r.pending && ['pay_first', 'idle_cash'].includes(r.pending.id) ? 2 : 0);
+
 test('investing beats hoarding cash', () => {
   let invested = 0;
   let hoarded = 0;
   for (let i = 0; i < 60; i++) {
     invested += play({ mode: 'classic', char: 'graduate', currency: 'NGN', seed: `h${i}` }, investAll).res.score;
-    hoarded += play({ mode: 'classic', char: 'graduate', currency: 'NGN', seed: `h${i}` }).res.score;
+    // A hoarder also says no to the money-habit messages.
+    hoarded += play({ mode: 'classic', char: 'graduate', currency: 'NGN', seed: `h${i}` }, () => {}, hoard).res.score;
   }
   assert.ok(invested > hoarded * 1.5, `${invested} vs ${hoarded}`);
 });

@@ -178,3 +178,14 @@ test('a real-life start opens with where you are now and can invest its savings'
   assert.ok(run.h.index > 0 && run.h.save < save0, 'savings moved into the fund');
   assert.equal(run.story.memories.at(-1).title, 'You put money to work');
 });
+
+test('answering messages alone is a real way to play: savings and idle cash come as messages', () => {
+  let asked = 0; let free = 0;
+  for (let i = 0; i < 12; i++) {
+    const { run, res } = play({ mode: 'journey', char: 'graduate', currency: 'USD', seed: `msg${i}` });
+    if (run.seenEv.includes('pay_first')) asked += 1;
+    if (res.freeAge) free += 1;
+    assert.ok(run.plan.pyf > 0, 'the pay-yourself-first message set a plan');
+  }
+  assert.ok(asked >= 10 && free >= 6, `${asked} asked, ${free} free`);
+});
