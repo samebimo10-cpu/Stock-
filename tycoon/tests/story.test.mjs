@@ -165,3 +165,16 @@ test('a saved game from the previous version picks up a story', () => {
   assert.ok(run.circle.some((c) => c.role === 'boss'));
   assert.equal(run.phase, 'alloc');
 });
+
+test('a real-life start opens with where you are now and can invest its savings', () => {
+  const me = { age: 35, pay: 450000, costs: 300000, cash: 0, save: 2000000, index: 0, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, debt: 0, goal: 0 };
+  const run = E.newRun({ mode: 'classic', char: 'graduate', currency: 'NGN', seed: 'me35', me });
+  assert.equal(run.age, 35);
+  const v = E.eventView(run);
+  assert.equal(v.title, 'Where you are now');
+  assert.ok(v.text.includes('in savings'));
+  const save0 = run.h.save;
+  E.chooseEvent(run, 0);
+  assert.ok(run.h.index > 0 && run.h.save < save0, 'savings moved into the fund');
+  assert.equal(run.story.memories.at(-1).title, 'You put money to work');
+});

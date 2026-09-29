@@ -97,16 +97,26 @@ export const EARNED = [
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 
+// Move money out of savings so a real-life start can invest what it already has.
+function fromSavings(run, amt) {
+  if (!run.custom || run.cash >= amt) return;
+  const x = Math.min(run.h.save, amt - Math.max(0, run.cash));
+  run.h.save -= x; run.cash += x;
+}
+
 export const STORY = [
   // ---- The first decision, dealt before the first year.
   {
     id: 'first_step', cat: 'Your first money', cast: 'ambitious', w: 0, thread: true,
-    setup: (run, h) => ({ amt: Math.max(0.1 * h.unit(), 0.4 * Math.max(0, run.cash)) }),
-    title: 'Your first money',
-    text: (v, h, run) => `You have ${h.f(Math.max(0, run.cash))} and your job pays ${h.f(run.salary / 12)} a month. ${h.name('ambitious')} says: "There's a fund that owns a little of every big company. Put some in and forget about it."`,
+    // A real-life start begins mid-life, so the spare money includes what is already in savings.
+    setup: (run, h) => ({ amt: Math.max(0.1 * h.unit(), 0.4 * Math.max(0, run.cash + (run.custom ? run.h.save : 0))) }),
+    title: (v, h, run) => (run && run.custom ? 'Where you are now' : 'Your first money'),
+    text: (v, h, run) => (run.custom
+      ? `You are ${run.age}. You have ${h.f(Math.max(0, run.cash))} in cash and ${h.f(run.h.save)} in savings, and your pay is ${h.f(run.salary / 12)} a month. ${h.name('ambitious')} says: "${run.h.index > 0 ? 'You already own a fund. Why not add to it and let it grow?' : 'There\'s a fund that owns a little of every big company. Put some in and forget about it.'}"`
+      : `You have ${h.f(Math.max(0, run.cash))} and your job pays ${h.f(run.salary / 12)} a month. ${h.name('ambitious')} says: "There's a fund that owns a little of every big company. Put some in and forget about it."`),
     choices: [
-      { label: (v, h) => `Put ${h.f(v.amt)} in the fund`, note: 'Grows with the market, can dip', tags: ['investment'], lesson: 'p_compound', fx: (run, h, v) => { h.invest('index', v.amt); h.rel('ambitious', { trust: 4 }); h.memory('investment', 'Your first investment', `You put ${h.f(v.amt)} into an index fund at ${run.age}.`, v.amt * 0.2, ['investment', 'first']); return 'Done. Your money now owns a sliver of hundreds of companies.'; } },
-      { label: (v, h) => `Keep ${h.f(v.amt)} safe in the bank`, note: 'Safe, but prices rise faster', lesson: 'b_multiply', fx: (run, h, v) => { h.invest('save', v.amt); return 'Safe and sound. The bank pays a little interest.'; } },
+      { label: (v, h) => `Put ${h.f(v.amt)} in the fund`, note: 'Grows with the market, can dip', tags: ['investment'], lesson: 'p_compound', fx: (run, h, v) => { fromSavings(run, v.amt); const put = h.invest('index', v.amt); h.rel('ambitious', { trust: 4 }); h.memory('investment', run.custom ? 'You put money to work' : 'Your first investment', `You put ${h.f(put)} into an index fund at ${run.age}.`, v.amt * 0.2, ['investment', 'first']); return 'Done. Your money now owns a sliver of hundreds of companies.'; } },
+      { label: (v, h, run) => (run && run.custom ? 'Leave it in savings' : `Keep ${h.f(v.amt)} safe in the bank`), note: 'Safe, but prices rise faster', lesson: 'b_multiply', fx: (run, h, v) => { h.invest('save', run.custom ? Math.max(0, run.cash) * 0.4 : v.amt); return 'Safe and sound. The bank pays a little interest.'; } },
       { label: 'Treat yourself to a new phone', note: '+8 joy', lesson: 'r_doodads', fx: (run, h, v) => { h.cash(-Math.min(v.amt, 0.5 * v.amt + 0.02 * h.unit())); h.joy(8); h.memory('sacrifice', 'The shiny new phone', 'You spent your first spare money on a phone.', -v.amt * 0.2, ['spending']); return 'It is a very nice phone.'; } },
     ],
   },

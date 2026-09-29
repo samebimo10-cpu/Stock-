@@ -1909,7 +1909,7 @@ export function eventView(run) {
     id: ev.id, cat: ev.cat, title: typeof ev.title === 'function' ? ev.title(v, h, run) : ev.title, v, cast: ev.cast || null,
     text: ev.text(v, h, run),
     choices: choicesOf(ev, run, v).map((c) => ({
-      label: typeof c.label === 'function' ? c.label(v, h) : c.label,
+      label: typeof c.label === 'function' ? c.label(v, h, run) : c.label,
       note: c.note || '',
       ok: !c.need || c.need(run, v),
       person: c.person || null,
