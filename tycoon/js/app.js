@@ -429,7 +429,8 @@ function home() {
     ${first
     ? `<button class="play-big" data-act="sprint">${A.icon('play', 60, '')}<span><b>Play</b><small>Your first ten years · about 5 minutes</small></span></button>`
     : `<button class="play-big" data-act="setup" data-mode="journey">${A.icon('play', 60, '')}<span><b>Play</b><small>A whole life, one year at a time</small></span></button>
-    <button class="btn wide" data-act="setup" data-mode="classic">${A.icon('coin', 26, '')} Quick game · about 10 minutes</button>`}
+    <button class="btn wide" data-act="setup" data-mode="classic">${A.icon('coin', 26, '')} Quick game · about 10 minutes</button>
+    <button class="btn wide" data-act="real-start">${A.icon('smile', 26, '')} Start from my real life</button>`}
     ${first ? '<p class="note" style="text-align:center">Finish the Sprint to unlock the full life: every mode, the Map and more.</p>' : `<details class="more"><summary>${A.icon('gift', 26, '')} More ways to play</summary>
       <div class="more-grid">${more.map(([act, ic, name, sub]) => `<button class="more-b" data-act="${act === 'blitz' ? 'setup' : act}" ${act === 'blitz' ? 'data-mode="blitz"' : ''}>${A.icon(ic, 40, '')}<b>${esc(name)}</b><small>${esc(sub)}</small></button>`).join('')}</div>
     </details>`}
@@ -2414,6 +2415,7 @@ const ACT = {
     });
   },
   'start-as': (d) => { P.start = d.v; saveProfile(); setup(); },
+  'real-start': () => { P.start = 'me'; saveProfile(); setup('journey'); },
   aim: (d) => { P.setup.aim = Number(d.v); saveProfile(); setup(); },
   intro: (d) => intro(Number(d.step)),
   'region-screen': () => regionScreen(),
