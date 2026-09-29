@@ -450,6 +450,7 @@ function home() {
       <button class="btn" data-act="share-game">${A.icon('phone', 22, '')} Share with a friend</button>
       <button class="btn" data-act="feedback">${A.icon('envelope', 22, '')} Send feedback</button>
     </div>
+    <p class="maker">${MAKER}</p>
   </main>`;
 }
 
@@ -478,7 +479,7 @@ async function shareCard() {
     x.fillText(`Score ${r.score.toLocaleString()} · ${E.MODES[d.mode].name}`, 540, 1090);
     x.fillText('Can you build a better life?', 540, 1180);
     x.font = '600 34px Figtree, sans-serif';
-    x.fillText(GAME_URL.replace('https://', ''), 540, 1270);
+    x.fillText(MAKER, 540, 1270);
     const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
     const file = new File([blob], 'my-tycoon-rush-life.png', { type: 'image/png' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], text: shareText(d) });
@@ -617,7 +618,9 @@ const GAME_URL = 'https://samebimo10-cpu.github.io/Stock-/tycoon/';
 // Put a WhatsApp number here (country code, digits only, e.g. '2348012345678')
 // to send feedback straight to it. Left empty, WhatsApp asks who to send it to.
 const FEEDBACK_WHATSAPP = '';
-const INVITE = 'Try Tycoon Rush, a free game that teaches money. Grow your money tree and get free before 60. It works offline too.';
+// The name people see as the maker, in shared messages, pictures and the report.
+const MAKER = 'Produced by Ebims';
+const INVITE = 'Try Tycoon Rush by Ebims, a free game that teaches money. Grow your money tree and get free before 60. It works offline too.';
 const waLink = (text, to = '') => `https://wa.me/${to.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`;
 
 function shareGame() {
@@ -2047,7 +2050,7 @@ function shareText(done) {
   const link = resultLink(done);
   if (done.mode === 'daily') return `Tycoon Rush Daily ${done.seed.replace('daily-', '')}\n${E.emojiGrid(done)}\n${outcome}${st} · Score ${r.score.toLocaleString()}\n${link}`;
   if (done.mode === 'duel') return `Tycoon Rush duel ${done.seed.replace('duel-', '')}: ${outcome}${st}, score ${r.score.toLocaleString()}. Same market, can you beat me?\n${E.emojiGrid(done)}\n${link}`;
-  return `Tycoon Rush: ${outcome}${st}, score ${r.score.toLocaleString()}.\n${E.emojiGrid(done)}\n${link}`;
+  return `Tycoon Rush by Ebims: ${outcome}${st}, score ${r.score.toLocaleString()}.\n${E.emojiGrid(done)}\n${link}`;
 }
 
 const starsText = (n) => `${'★'.repeat(Math.floor(n))}${n % 1 ? '½' : ''}${'☆'.repeat(5 - Math.ceil(n))}`;

@@ -434,5 +434,5 @@ export function buildReport(run, { name = '', date = new Date(), modeName = '', 
 
   pdf.y -= 10;
   pdf.para('This report comes from a game with a fictional market. It is for learning, not financial advice. The ideas it cites are paraphrased from the books named.', { size: 8, color: '#8a80b0' });
-  return pdf.build(`Tycoon Rush report${name ? ` for ${name}` : ''}  -  samebimo10-cpu.github.io/Stock-/tycoon`);
+  return pdf.build(`Tycoon Rush report${name ? ` for ${name}` : ''}  -  Produced by Ebims`);
 }
