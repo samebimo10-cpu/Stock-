@@ -2,24 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../js/engine.js';
+import { play, decide } from './helpers.mjs';
 import { ERAS, CHALLENGES, CARDS, EVENTS } from '../js/content.js';
 
-function play(opts, bot = () => {}) {
-  const run = E.newRun(opts);
-  let res = null;
-  let guard = 0;
-  while (!res && guard++ < 60) {
-    if (run.quiz) E.answerQuiz(run, 0);
-    if (E.canAct(run)) bot(run);
-    if (run.learnMode) E.setForecast(run, E.upOdds(run).ideal);
-    assert.ok(E.live(run));
-    let ci = 0;
-    for (let g = 0; run.phase === 'event' && g < 20; g++) { const out = E.chooseEvent(run, ci); ci = out === E.AGAIN ? 0 : ci + 1; }
-    E.makeOffer(run, E.unlockedCards(999));
-    res = E.pickCard(run, run.quiet ? null : run.offer[0]);
-  }
-  return { run, res };
-}
 
 const investAll = (run) => E.setHolding(run, 'index', run.h.index + Math.max(0, run.cash));
 
@@ -134,6 +119,7 @@ test('buying below fair value really does pay more (margin of safety)', () => {
 test('paying yourself first never borrows', () => {
   // Pay covers living costs but not a 50% plan on top: the plan gets what is left.
   const run = E.newRun({ mode: 'journey', char: 'graduate', currency: 'USD', seed: 'pyf', aim: 45 });
+  decide(run);
   run.cash = 0;
   E.setLife(run, 1);
   E.setPlan(run, { pyf: 0.5 });
@@ -147,11 +133,11 @@ test('paying yourself first never borrows', () => {
   assert.ok(res.pyf <= left + 1e-6, `${res.pyf} vs ${left}`);
 });
 
-test('journey years alternate between events and quiet years, with forecasts scored', () => {
+test('the journey deals one life event a year, with forecasts scored', () => {
   const { run, res } = play({ mode: 'journey', char: 'graduate', currency: 'NGN', seed: 'j1', aim: 45 }, (r) => {
     E.setPlan(r, { pyf: 0.2, mix: 'growth', rebalance: true });
   });
-  assert.ok(run.seenEv.length <= Math.ceil(run.fc.length / 2) + 2);
+  assert.ok(run.seenEv.length >= run.turn - 1 && run.seenEv.length <= run.turn + 1, `${run.seenEv.length} events in ${run.turn} years`);
   assert.ok(res.seenP.length > 5);
   assert.equal(res.learnMode, true);
 });
@@ -183,8 +169,9 @@ test('a real-life start plays to the end, and older players still get years to p
 test('someone already free by the 4% rule is free after the first year', () => {
   const rich = { age: 40, pay: 5000, costs: 2000, cash: 0, save: 2000000, index: 0, stocks: 0, crypto: 0, fx: 0, prop: 0, mortgage: 0, biz: 0, debt: 0, goal: 0 };
   const { res } = play({ mode: 'classic', char: 'graduate', currency: 'USD', seed: 'me3', me: rich });
+  // Freedom is recorded when it comes; the life carries on to 60.
   assert.equal(res.reason, 'free');
-  assert.equal(res.age, 42);
+  assert.equal(res.freeAge, 42);
 });
 
 test('the home you live in earns no rent, but a second property does', () => {

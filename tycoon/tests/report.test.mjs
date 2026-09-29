@@ -2,19 +2,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../js/engine.js';
+import { decide } from './helpers.mjs';
 import { buildReport, judge, Pdf, money } from '../js/report.js';
 
 function playTo(run, stopTurn = Infinity) {
   let res = null;
+  decide(run);
   while (!res && run.turn < stopTurn) {
-    if (run.quiz) E.answerQuiz(run, 0);
     if (E.canAct(run)) E.setHolding(run, 'index', run.h.index + Math.max(0, run.cash) * 0.7);
     if (run.learnMode) E.setForecast(run, 0.6);
-    E.live(run);
-    let i = 0;
-    while (run.phase === 'event' && E.chooseEvent(run, i) === null) i += 1;
-    E.makeOffer(run, E.unlockedCards(0));
-    res = E.pickCard(run, run.quiet ? null : run.offer[0]);
+    res = E.live(run).result || null;
+    if (!res) decide(run);
   }
   return res;
 }

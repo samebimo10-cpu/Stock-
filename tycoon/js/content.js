@@ -63,6 +63,9 @@ export const CHARACTERS = {
   heir: { name: 'The Heir', blurb: 'Big starting cash and a lavish habit you must rein in.', salary: 20000, costs: 16800, cash: 200000, life: 3, joy: 75, unlock: 0, home: 'flat2', district: 'upscale', car: 'saloon' },
   farmer: { name: 'The Farmer', blurb: 'Starts with a farm business. Weather hits harder.', salary: 12000, costs: 13500, cash: 3000, biz: 50000, life: 1, unlock: 40, weather: 2, home: 'studio', district: 'inner', car: 'none' },
   hustler: { name: 'The Hustler', blurb: 'Income swings wildly. Starts holding crypto.', salary: 26000, costs: 16800, cash: 1000, crypto: 12000, life: 1, unlock: 100, volatile: 0.35, home: 'studio', district: 'inner', car: 'none' },
+  programmer: { name: 'The Programmer', blurb: 'Big tech pay, but tech firms cut staff first in a crash.', salary: 34000, costs: 20000, cash: 2000, life: 1, unlock: 0, home: 'studio', district: 'suburb', car: 'none', riskyJob: true },
+  skilled: { name: 'The Skilled Worker', blurb: 'Starts at 19 with a trade: steady pay, no student debt, a long runway.', salary: 19000, costs: 13000, cash: 2500, life: 1, unlock: 0, startAge: 19, home: 'studio', district: 'inner', car: 'used' },
+  starter: { name: 'The Fresh Starter', blurb: 'Starts at 18 with almost nothing. The longest runway of all.', salary: 11000, costs: 9800, cash: 300, life: 1, unlock: 0, startAge: 18, home: 'room', district: 'inner', car: 'none' },
   // Not picked from the list: used when a player starts from their own real life.
   me: { name: 'You', blurb: 'Your real age, money and goals.', salary: 24000, costs: 16800, cash: 0, life: 1, unlock: 0, custom: true },
   sailor: { name: 'The Sailor', blurb: 'High pay, but at sea every other turn: you can only invest in port, and it gets lonely.', salary: 38000, costs: 21000, cash: 4000, life: 1, unlock: 180, sailor: true, home: 'studio', district: 'suburb', car: 'none' },
