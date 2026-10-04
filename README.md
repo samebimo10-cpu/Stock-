@@ -12,6 +12,17 @@
 > work, and your next steps, ranked by impact. Open it at **https://samebimo10-cpu.github.io/Stock-/tycoon/**,
 > then "Add to Home Screen"; it works offline and your numbers never leave the phone.
 >
+> * **Everything you own.** Cash, savings, T-bills, money market funds, cooperative/ajo savings, money
+>   lent out, NGX and NYSE shares, local and global funds, REITs, FGN bonds, dollar savings, Eurobonds,
+>   gold, crypto, pension (RSA), houses, land, businesses, farms and cars, each with its own return,
+>   risk and currency behaviour.
+> * **Your household.** Spending by category (rent paid yearly, food, transport, power, health, family
+>   support and more), each rising at its own pace above inflation; children's school fees from nursery to
+>   university; replacing the car every few years; and giving as a share of income.
+> * **Insights.** Your portfolio's real return and risk, whether each savings account beats inflation,
+>   what your wealth is made of over the years, a year-by-year cash-flow table, stress tests (currency
+>   devaluation, a 2008-style crash, a year without income, an inflation spike, a family emergency) and
+>   which changes matter most. Any figure can be shown in today's money or future money.
 > * **Live prices.** Shares you own on NGX or NYSE are valued at the latest price from this repository's
 >   daily data job, and dollar holdings at the latest USD/NGN rate. Two years of daily closes measure how
 >   much *your* shares actually swing, so one company counts as riskier than a fund.

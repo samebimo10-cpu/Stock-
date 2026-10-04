@@ -5,7 +5,7 @@
 // connection it asks the network first, so new versions and fresh prices show
 // up; if the network is slow or gone it falls back to the saved copy.
 
-const CACHE = 'tycoon-rush-v12-planner';
+const CACHE = 'tycoon-rush-v13-planner';
 
 // How long to wait for the network before using the saved copy.
 const NETWORK_WAIT_MS = 3000;

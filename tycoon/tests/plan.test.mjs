@@ -9,7 +9,8 @@ import { planPdf } from '../js/pdf.js';
 import { simulate, makeShocks, rng, safeSpending, extraSavingNeeded, earliestRetirement, quantile } from '../js/sim.js';
 import { payoff, compare } from '../js/debt.js';
 import { slimPack, seriesStats, portfolioVol, searchStocks, emptyMarket } from '../js/market.js';
-import { newState, totals, buildInputs, valueOf, measuredRisk, upgrade, ageOf } from '../js/model.js';
+import { newState, totals, buildInputs, valueOf, measuredRisk, upgrade, ageOf, spendPath, extraPath, depositRateOf, monthlyOf, feeAt } from '../js/model.js';
+import { schoolTotal } from '../js/analyse.js';
 
 const close = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)), `${msg || ''} ${a} vs ${b}`);
 
@@ -245,6 +246,76 @@ test('the plan PDF is a valid document', () => {
   const tail = String.fromCharCode(...bytes.slice(-6));
   assert.ok(tail.includes('%%EOF'));
   assert.ok(bytes.length > 3000);
+});
+
+test('household: yearly rent, category inflation, giving and school fees by stage', () => {
+  const st = demoState();
+  st.spending = [{ id: 'r', cat: 'rent', name: 'Rent', amount: 2400000, freq: 'year' }, { id: 'f', cat: 'food', name: 'Food', amount: 150000, freq: 'month' }];
+  assert.equal(monthlyOf(st.spending[0]), 200000);
+  const p = spendPath(st, 10, () => 0);
+  close(p[0], 2400000 + 1800000, 1e-12);
+  close(p[10], 2400000 * 1.01 ** 10 + 1800000 * 1.02 ** 10, 1e-9, 'rent +1%, food +2% a year above inflation');
+  st.household.givingPct = 0.1;
+  close(spendPath(st, 1, () => 6000000)[0], 4200000 + 600000, 1e-12, 'giving follows pay');
+  const y = new Date().getFullYear();
+  st.household.kids = [{ id: 'k', name: 'Ada', born: y - 5 }];
+  st.household.eduPrem = 0;
+  assert.equal(feeAt(st, 5), st.household.fees.nursery);
+  assert.equal(feeAt(st, 6), st.household.fees.primary);
+  assert.equal(feeAt(st, 22), 0);
+  const e = extraPath(st, 20);
+  assert.equal(e[0], st.household.fees.nursery, 'age 5 now: nursery');
+  assert.equal(e[1], st.household.fees.primary, 'age 6 next year: primary');
+  assert.equal(e[17], 0, 'finished university at 22');
+  const total = 1 * st.household.fees.nursery + 6 * st.household.fees.primary + 6 * st.household.fees.secondary + 4 * st.household.fees.university;
+  close(schoolTotal(st, 30), total, 1e-12, 'school total through university');
+  assert.equal(totals(st, demoMarket()).school, st.household.fees.nursery / 12);
+});
+
+test('household: the car is replaced on schedule, and savings earn their own rates', () => {
+  const st = demoState();
+  st.household.car = { every: 5, cost: 1000000 };
+  const e = extraPath(st, 12);
+  assert.equal(e[5], 1000000); assert.equal(e[10], 1000000); assert.equal(e[4], 0); assert.equal(e[0], 0);
+  st.accounts = [{ id: 'a', type: 'tbill', value: 3000000, rate: 0.2 }, { id: 'b', type: 'coop', value: 1000000, rate: 0 }];
+  close(depositRateOf(st, demoMarket()), 0.15, 1e-12, 'value-weighted rate');
+});
+
+test('version 1 plans gain categories and a household', () => {
+  const st = upgrade({ v: 1, currency: 'NGN', spending: [{ id: 's', name: 'Food and groceries', amount: 100 }] });
+  assert.equal(st.spending[0].cat, 'food');
+  assert.equal(st.spending[0].freq, 'month');
+  assert.ok(Array.isArray(st.household.kids) && st.household.fees.university > 0);
+});
+
+test('every kind of asset is valued and modelled, including land, gold, Eurobonds and the car', () => {
+  const st = demoState();
+  st.accounts.push({ id: 'l', type: 'land', value: 5000000 }, { id: 'g', type: 'gold', value: 400000 }, { id: 'e', type: 'eurobond', value: 2000 }, { id: 'c', type: 'car', value: 3000000 }, { id: 'r', type: 'reit', value: 100000 }, { id: 'f', type: 'farm', value: 800000, profit: 50000 });
+  const T = totals(st, demoMarket());
+  assert.equal(T.byClass.land, 5000000);
+  assert.equal(T.byClass.usdBonds, 2000 * 1500);
+  assert.equal(T.byClass.car, 3000000);
+  assert.equal(T.byClass.business, 800000);
+  assert.equal(T.profit, 50000);
+  const sh = makeShocks(200, 70, 'all');
+  const r = simulate(buildInputs(st, demoMarket()), sh, { trace: true });
+  assert.ok(r.rows.length > 10 && r.rows[0].classes.land > 0);
+  assert.ok(r.rows[5].classes.car < 3000000 * 0.7, 'cars lose value');
+});
+
+test('insights: portfolio, middle path, stress tests and sensitivities', () => {
+  const st = demoState();
+  st.income[0].amount = 1300000;
+  const A = analyse(st, demoMarket(), { paths: 300, quick: 200 });
+  assert.ok(A.portfolio.vol > 0 && A.portfolio.vol < 0.5);
+  assert.ok(A.portfolio.accounts.some((a) => a.real < 0), 'a current account loses to inflation');
+  assert.equal(A.middle[0].age, A.age + 1);
+  assert.ok(A.stress.some((x) => x.id === 'deval') && A.stress.some((x) => x.id === 'crash'));
+  const job = A.stress.find((x) => x.id === 'job');
+  assert.ok(job.delta <= 0.001, 'losing a year of income never helps');
+  const more = A.sensitivity.find((x) => x.label.startsWith('Save 20% more'));
+  const less = A.sensitivity.find((x) => x.label.startsWith('Save 20% less'));
+  assert.ok(more.delta >= less.delta);
 });
 
 // ------------------------------------------------------------------ fixtures

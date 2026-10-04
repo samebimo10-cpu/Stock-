@@ -118,7 +118,14 @@ export function attachCharts(root) {
       const px = ((ev.clientX - box.left) / box.width) * vb.width;
       const frac = Math.min(1, Math.max(0, (px - L) / (W - L - R)));
       let html = ''; let x = px;
-      if (fig.dataset.kind === 'fan') {
+      if (fig.dataset.kind === 'stack') {
+        const D = JSON.parse(fig.dataset.pts);
+        const i = Math.round(frac * (D.r.length - 1));
+        const row = D.r[i];
+        x = L + (i / (D.r.length - 1)) * (W - L - R);
+        const tot = row.slice(1).reduce((s, v) => s + v, 0);
+        html = `<b>Age ${row[0]} · ${fmt(tot, cur)}</b>${D.s.map(([n, c], j) => (row[j + 1] > 0 ? `<span><i class="sq ${c}"></i>${n} ${fmt(row[j + 1], cur)}</span>` : '')).join('')}`;
+      } else if (fig.dataset.kind === 'fan') {
         const pts = JSON.parse(fig.dataset.pts);
         const i = Math.round(frac * (pts.length - 1));
         const [age, p10, p50, p90] = pts[i];
@@ -170,4 +177,58 @@ function yOnPath(path, x) {
     if (x >= x0 - 0.01 && x <= x1 + 0.01) return x1 === x0 ? y0 : y0 + ((x - x0) / (x1 - x0)) * (y1 - y0);
   }
   return null;
+}
+
+// What your wealth is made of over the years: one band per asset class,
+// stacked, the biggest six by name and the rest as "Other". Colours follow
+// the categorical order (never cycled) so a class keeps its colour.
+export function stackedArea(rows, { cur, names, factor = () => 1, height = 260, id = 'stack' } = {}) {
+  if (!rows || rows.length < 2) return '';
+  const keys = Object.keys(rows[0].classes);
+  const peak = Object.fromEntries(keys.map((k) => [k, Math.max(...rows.map((r) => Math.max(0, r.classes[k])))]));
+  const top = keys.filter((k) => peak[k] > 0).sort((a, b) => peak[b] - peak[a]);
+  const shown = top.slice(0, 6);
+  const rest = top.slice(6);
+  const series = [...shown.map((k, i) => ({ k, name: names[k] || k, cls: `c${i + 1}` })), ...(rest.length ? [{ k: '_other', name: 'Other', cls: 'cother' }] : [])];
+  const val = (r, k, i) => Math.max(0, k === '_other' ? rest.reduce((s, x) => s + r.classes[x], 0) : r.classes[k]) * factor(i);
+  const W = 640; const H = height; const L = 56; const R = 16; const Tp = 12; const B = 28;
+  const totals = rows.map((r, i) => series.reduce((s, x) => s + val(r, x.k, i), 0));
+  const ticks = niceTicks(0, Math.max(...totals, 1));
+  const y1 = ticks[ticks.length - 1];
+  const X = (i) => L + (i / (rows.length - 1)) * (W - L - R);
+  const Y = (v) => Tp + (1 - v / y1) * (H - Tp - B);
+  const acc = rows.map(() => 0);
+  const paths = series.map((s) => {
+    const lo = acc.slice();
+    rows.forEach((r, i) => { acc[i] += val(r, s.k, i); });
+    const d = `${rows.map((r, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(acc[i]).toFixed(1)}`).join('')}${rows.map((r, i) => i).reverse().map((i) => `L${X(i).toFixed(1)},${Y(lo[i]).toFixed(1)}`).join('')}Z`;
+    return `<path class="area ${s.cls}" d="${d}"/>`;
+  });
+  const decade = rows.map((r, i) => [r.age, i]).filter(([a]) => a % 10 === 0);
+  const data = esc(JSON.stringify({ s: series.map((x) => [x.name, x.cls]), r: rows.map((r, i) => [r.age, ...series.map((x) => Math.round(val(r, x.k, i)))]) }));
+  return `<figure class="chart" id="${id}" data-kind="stack" data-cur="${cur}" data-pts="${data}" data-l="${L}" data-r="${R}" data-w="${W}">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Your wealth by asset class from age ${rows[0].age} to ${rows[rows.length - 1].age}">
+      ${ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/><text class="tick" x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${esc(fmt(t, cur))}</text>`).join('')}
+      ${decade.map(([a, i]) => `<text class="tick" x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${a}</text>`).join('')}
+      ${paths.join('')}
+      <g class="hover" hidden><line class="cross" y1="${Tp}" y2="${H - B}"/></g>
+      <rect class="hit" x="${L}" y="${Tp}" width="${W - L - R}" height="${H - Tp - B}"/>
+    </svg>
+    <div class="tip" hidden></div>
+    <figcaption>${series.map((s) => `<span class="key"><i class="sq ${s.cls}"></i>${esc(s.name)}</span>`).join('')}</figcaption>
+  </figure>`;
+}
+
+// Change in your chance of success, either side of zero. Signs and words carry
+// the meaning as well as the two colours.
+export function deltaBars(items) {
+  const max = Math.max(0.05, ...items.map((x) => Math.abs(x.delta)));
+  return `<div class="dbars">${items.map((x) => {
+    const w = (Math.abs(x.delta) / max) * 50;
+    const pts = Math.round(x.delta * 100);
+    return `<div class="dbar" title="${esc(x.label)}: ${pts >= 0 ? '+' : ''}${pts} points">
+      <span class="dl">${esc(x.label)}</span>
+      <span class="dtrack"><i class="${x.delta >= 0 ? 'pos' : 'neg'}" style="${x.delta >= 0 ? `left:50%;width:${w.toFixed(1)}%` : `right:50%;width:${w.toFixed(1)}%`}"></i></span>
+      <span class="dv">${pts >= 0 ? '+' : '−'}${Math.abs(pts)} pts</span></div>`;
+  }).join('')}</div>`;
 }

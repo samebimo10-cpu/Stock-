@@ -3,7 +3,8 @@
 // the currency code (NGN 2.4M) rather than its symbol.
 
 import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, pct } from './money.js';
-import { ACCOUNT_TYPES, ageOf, valueOf } from './model.js';
+import { ACCOUNT_TYPES, ageOf, valueOf, monthlyOf } from './model.js';
+import { SPEND_CATS } from './money.js';
 
 const ASCII = { '−': '-', '–': '-', '—': '-', '×': 'x', '‘': "'", '’': "'", '“': '"', '”': '"', '…': '...', '→': '->', '·': '-', '•': '-', '₦': 'NGN ', '£': 'GBP ', '€': 'EUR ', '₹': 'INR ' };
 const clean = (s) => String(s).replace(/[^\x20-\x7E]/g, (c) => (ASCII[c] != null ? ASCII[c] : ''));
@@ -159,6 +160,27 @@ export function planPdf(st, market, A, { date = new Date() } = {}) {
   if (A.earliestRetire) pdf.row(`Earliest you could stop work (${pct(A.target)} success)`, `${A.earliestRetire}`);
   if (A.extraMonthly > 0) pdf.row(`Extra saving for ${pct(A.target)} success`, `${M(A.extraMonthly)}/month`);
   for (const g of st.goals) { const r = A.goals.find((x) => x.id === g.id); pdf.row(`Goal: ${g.name} (${M(g.amount)} at ${g.age})`, r ? `${pct(r.prob)} likely` : '-'); }
+
+  pdf.heading('Household spending (monthly)');
+  for (const x of st.spending) pdf.row(`${x.name || (SPEND_CATS[x.cat] || SPEND_CATS.other).name}${x.freq === 'year' ? ` (${M(x.amount)} a year)` : ''}`, M(monthlyOf(x)));
+  if (T.school) pdf.row(`School fees (${st.household.kids.length} ${st.household.kids.length === 1 ? 'child' : 'children'})`, M(T.school));
+  if (T.giving) pdf.row('Giving', M(T.giving));
+  pdf.row('Total', M(T.monthlySpend), { bold: true });
+
+  if (A.portfolio) {
+    pdf.heading('Your investments');
+    const P = A.portfolio;
+    pdf.para(`Expected return after inflation ${pct(P.mu, 1)} a year, typical yearly swing ${pct(P.vol, 0)} (${P.level.toLowerCase()} risk). In a bad year (1 in 20) the whole mix could move about ${pct(P.badYear, 0)}. ${pct(P.usdShare, 0)} is in dollars, gold or crypto; ${pct(P.liquidShare, 0)} can be sold quickly.`, { size: 9.5 });
+    for (const r of P.rows) pdf.row(`${r.name} (${pct(r.weight, 0)})`, `${M(r.value)}  -  real ${pct(r.real, 1)}`);
+  }
+  if (A.stress && A.stress.length) {
+    pdf.heading('What could go wrong');
+    for (const x of A.stress) pdf.row(x.name, `${pct(x.success)} success (${x.delta >= 0 ? '+' : '-'}${Math.abs(Math.round(x.delta * 100))} pts)`);
+  }
+  if (A.sensitivity && A.sensitivity.length) {
+    pdf.heading('What matters most');
+    for (const x of A.sensitivity) pdf.row(x.label, `${x.delta >= 0 ? '+' : '-'}${Math.abs(Math.round(x.delta * 100))} pts`);
+  }
 
   pdf.heading('Your accounts');
   for (const a of st.accounts) pdf.row(`${a.name || ACCOUNT_TYPES[a.type].name}${a.type === 'stock' ? ` (${a.shares} x ${a.sym})` : ''}`, M(valueOf(a, st, market).v));

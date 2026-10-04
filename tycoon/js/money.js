@@ -29,18 +29,58 @@ export const CURRENCY_ORDER = ['NGN', 'USD', 'GBP', 'EUR', 'GHS', 'KES', 'ZAR', 
 // higher volatility. Crypto gets no assumed premium, only its risk.
 export const ASSET_CLASSES = {
   cash: { name: 'Cash and current accounts', short: 'Cash', mu: null, sd: 0, liquid: true },
-  deposit: { name: 'Savings, fixed deposits, T-bills, money market', short: 'Savings', mu: null, sd: 0.02, liquid: true },
-  bonds: { name: 'Bonds', short: 'Bonds', mu: 0.015, sd: 0.08, liquid: true },
+  deposit: { name: 'Savings, fixed deposits, T-bills, money market', short: 'Savings & T-bills', mu: null, sd: 0.02, liquid: true },
+  bonds: { name: 'Bonds in your currency', short: 'Bonds', mu: 0.015, sd: 0.08, liquid: true },
   localEq: { name: 'Local shares and funds', short: 'Local shares', mu: 0.045, sd: 0.26, liquid: true },
   globalEq: { name: 'US and global shares and funds', short: 'Global shares', mu: 0.05, sd: 0.17, liquid: true, usd: true },
-  usdCash: { name: 'Dollar savings and dollar bonds', short: 'Dollar savings', mu: 0.008, sd: 0.03, liquid: true, usd: true },
+  reit: { name: 'Real estate funds (REITs)', short: 'REITs', mu: 0.03, sd: 0.2, liquid: true },
+  usdCash: { name: 'Dollar and foreign-currency savings', short: 'Dollar savings', mu: 0.008, sd: 0.03, liquid: true, usd: true },
+  usdBonds: { name: 'Eurobonds and dollar bonds', short: 'Eurobonds', mu: 0.02, sd: 0.08, liquid: true, usd: true },
+  gold: { name: 'Gold', short: 'Gold', mu: 0.005, sd: 0.15, liquid: true, usd: true },
   crypto: { name: 'Crypto', short: 'Crypto', mu: 0, sd: 0.65, liquid: true, usd: true },
   pension: { name: 'Pension', short: 'Pension', mu: 0.03, sd: 0.09, liquid: false },
-  property: { name: 'Property and land', short: 'Property', mu: 0.005, sd: 0.12, liquid: false },
-  business: { name: 'Business', short: 'Business', mu: 0, sd: 0.25, liquid: false },
+  property: { name: 'Property you own', short: 'Property', mu: 0.005, sd: 0.12, liquid: false },
+  land: { name: 'Land', short: 'Land', mu: 0.02, sd: 0.15, liquid: false },
+  business: { name: 'Business and farm', short: 'Business', mu: 0, sd: 0.25, liquid: false },
+  car: { name: 'Cars and vehicles', short: 'Car', mu: -0.12, sd: 0.04, liquid: false, consumer: true },
 };
 
-export const CLASS_ORDER = ['cash', 'deposit', 'bonds', 'localEq', 'globalEq', 'usdCash', 'crypto', 'pension', 'property', 'business'];
+export const CLASS_ORDER = ['cash', 'deposit', 'bonds', 'localEq', 'globalEq', 'reit', 'usdCash', 'usdBonds', 'gold', 'crypto', 'pension', 'property', 'land', 'business', 'car'];
+
+// Household spending categories. Prices do not all rise together: in many
+// economies school fees, food and health climb faster than the general index.
+// premium is how much faster than general inflation each one rises, a year.
+export const SPEND_CATS = {
+  rent: { name: 'Rent', prem: 0.01, yearly: true },
+  housing: { name: 'Home upkeep, service charge, repairs', prem: 0 },
+  food: { name: 'Food and groceries', prem: 0.02 },
+  transport: { name: 'Transport and fuel', prem: 0.01 },
+  power: { name: 'Power, fuel for generator, water', prem: 0.01 },
+  bills: { name: 'Phone, data, TV', prem: 0 },
+  health: { name: 'Health and insurance', prem: 0.02 },
+  family: { name: 'Family support', prem: 0 },
+  domestic: { name: 'Domestic help', prem: 0 },
+  clothing: { name: 'Clothing and personal', prem: 0 },
+  fun: { name: 'Eating out, travel, fun', prem: 0 },
+  other: { name: 'Other', prem: 0 },
+};
+export const SPEND_ORDER = Object.keys(SPEND_CATS);
+
+// School fees a year per child by stage, in today's money (private-school
+// levels as a starting point; everyone edits these).
+export const SCHOOL = {
+  stages: [['nursery', 'Nursery', 3, 5], ['primary', 'Primary', 6, 11], ['secondary', 'Secondary', 12, 17], ['university', 'University', 18, 21]],
+  NGN: { nursery: 600000, primary: 900000, secondary: 1500000, university: 2500000 },
+  USD: { nursery: 12000, primary: 0, secondary: 0, university: 28000 },
+  GBP: { nursery: 12000, primary: 0, secondary: 0, university: 9250 },
+  EUR: { nursery: 6000, primary: 0, secondary: 0, university: 4000 },
+  GHS: { nursery: 15000, primary: 25000, secondary: 40000, university: 30000 },
+  KES: { nursery: 120000, primary: 200000, secondary: 300000, university: 250000 },
+  ZAR: { nursery: 40000, primary: 60000, secondary: 90000, university: 80000 },
+  CAD: { nursery: 15000, primary: 0, secondary: 0, university: 9000 },
+  INR: { nursery: 80000, primary: 120000, secondary: 180000, university: 300000 },
+  AED: { nursery: 30000, primary: 45000, secondary: 65000, university: 80000 },
+};
 
 // Where new savings go by default, by how far away the money is needed.
 export function suggestedMix(yearsToGoal, usdFx) {

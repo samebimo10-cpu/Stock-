@@ -5,9 +5,9 @@
 // (monthly check-ins against the plan). The heavy maths runs in a worker.
 
 import * as M from './model.js';
-import { CURRENCIES, CURRENCY_ORDER, ASSET_CLASSES, CLASS_ORDER, fmt, pct, clamp, parseMoney } from './money.js';
+import { CURRENCIES, CURRENCY_ORDER, ASSET_CLASSES, CLASS_ORDER, SPEND_CATS, SPEND_ORDER, SCHOOL, fmt, pct, clamp, parseMoney } from './money.js';
 import { loadCached, refresh as refreshMarket, searchStocks } from './market.js';
-import { fanChart, lineChart, barRows, attachCharts } from './charts.js';
+import { fanChart, lineChart, barRows, stackedArea, deltaBars, attachCharts } from './charts.js';
 import { compare, payoff } from './debt.js';
 import { planPdf } from './pdf.js';
 import { analyse, whatIf } from './analyse.js';
@@ -25,6 +25,7 @@ let ob = null;
 let whatIfExtra = 0;
 let whatIfOut = null;
 let debtExtra = 0;
+let nominal = false;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f = (n, o) => fmt(n, st ? st.currency : 'NGN', o);
@@ -41,6 +42,7 @@ const ICON = {
   money: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>',
   plan: '<path d="M4 19h16M6 16l4-5 3 3 5-7"/>',
   track: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+  insights: '<path d="M5 20V11M10 20V5M15 20v-7M20 20V8"/>',
   gear: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
   ok: '<path d="m5 12 4 4 10-10"/>',
   warn: '<path d="M12 4 2 20h20zM12 10v4m0 3v.5"/>',
@@ -121,13 +123,13 @@ function topbar() {
   </header>`;
 }
 function tabbar() {
-  const t = [['home', 'Home'], ['money', 'Money'], ['plan', 'Plan'], ['track', 'Track']];
+  const t = [['home', 'Home'], ['money', 'Money'], ['plan', 'Plan'], ['insights', 'Insights'], ['track', 'Track']];
   return `<nav class="tabbar" aria-label="Sections">${t.map(([id, n]) => `<button class="${tab === id ? 'on' : ''}" data-act="tab" data-t="${id}" ${tab === id ? 'aria-current="page"' : ''}>${icon(id)}<span>${n}</span></button>`).join('')}</nav>`;
 }
 
 function render() {
   if (!st) return renderOnboarding();
-  const body = { home: homeTab, money: moneyTab, plan: planTab, track: trackTab }[tab]();
+  const body = { home: homeTab, money: moneyTab, plan: planTab, insights: insightsTab, track: trackTab }[tab]();
   app.innerHTML = `${topbar()}<main class="page">${body}</main>${tabbar()}`;
   attachCharts(app);
 }
@@ -204,7 +206,7 @@ function moneyTab() {
     ${rows.length ? `<section class="card"><h2 class="sec">Where your money is</h2>${barRows(rows, { cur: st.currency, total: T.assets })}</section>` : ''}
     <section>
       <div class="sec-h"><h2 class="sec">What you own</h2><button class="btn small" data-act="add-acc">${icon('plus')} Add</button></div>
-      <div class="list">${st.accounts.length ? st.accounts.map(accRow).join('') : '<p class="muted pad">Add your bank accounts, savings, shares, pension and property.</p>'}</div>
+      ${st.accounts.length ? M.TYPE_GROUPS.map(([g, types]) => { const accs = st.accounts.filter((a) => types.includes(a.type)); if (!accs.length) return ''; const sub = accs.reduce((s2, a) => s2 + M.valueOf(a, st, market).v, 0); return `<div class="group-h"><span>${esc(g)}</span><b>${f(sub)}</b></div><div class="list">${accs.map(accRow).join('')}</div>`; }).join('') : '<div class="list"><p class="muted pad">Add your bank accounts, T-bills, shares, dollars, land, property, business, gold, crypto, pension and car.</p></div>'}
     </section>
     <section id="debts">
       <div class="sec-h"><h2 class="sec">What you owe</h2><button class="btn small" data-act="add-debt">${icon('plus')} Add</button></div>
@@ -218,12 +220,85 @@ function moneyTab() {
       ${T.profit ? `<div class="row static"><span><b>Business profit</b><small>From your business accounts</small></span><span class="amt">${f(T.profit)}</span></div>` : ''}</div>
     </section>
     <section>
-      <div class="sec-h"><h2 class="sec">Spending (monthly)</h2><button class="btn small" data-act="add-sp">${icon('plus')} Add</button></div>
-      <div class="list">${st.spending.map((x) => `<button class="row" data-act="edit-sp" data-id="${x.id}"><span><b>${esc(x.name)}</b></span><span class="amt">${f(x.amount)}</span></button>`).join('')}
-      <div class="row static total"><span><b>Total spending</b></span><span class="amt">${f(T.monthlySpend)}</span></div>
+      <div class="sec-h"><h2 class="sec">Household spending</h2><button class="btn small" data-act="add-sp">${icon('plus')} Add</button></div>
+      <div class="list">${st.spending.map((x) => { const C = SPEND_CATS[x.cat] || SPEND_CATS.other; return `<button class="row" data-act="edit-sp" data-id="${x.id}"><span><b>${esc(x.name || C.name)}</b><small>${x.freq === 'year' ? `${f(x.amount)} a year · ` : ''}${C.prem ? `rises ${pct(C.prem, 0)} faster than prices` : 'rises with prices'}</small></span><span class="amt">${f(M.monthlyOf(x))}<small>a month</small></span></button>`; }).join('')}
+      ${T.school ? `<div class="row static"><span><b>School fees</b><small>From your children below</small></span><span class="amt">${f(T.school)}<small>a month</small></span></div>` : ''}
+      ${T.giving ? `<div class="row static"><span><b>Giving</b><small>${pct(st.household.givingPct, 0)} of income</small></span><span class="amt">${f(T.giving)}<small>a month</small></span></div>` : ''}
+      <div class="row static total"><span><b>Total spending</b></span><span class="amt">${f(T.monthlySpend)}<small>a month</small></span></div>
       ${T.debtPay ? `<div class="row static"><span><b>Debt payments</b><small>From your debts</small></span><span class="amt">${f(T.debtPay)}</span></div>` : ''}</div>
     </section>
+    ${householdSection()}
     ${pricesLine()}`;
+}
+
+function householdSection() {
+  const H = st.household;
+  const stage = (a) => { const s2 = SCHOOL.stages.find(([, , a0, a1]) => a >= a0 && a <= a1); return s2 ? s2[1] : a < 3 ? 'Not in school yet' : 'Finished school'; };
+  return `<section id="household">
+      <div class="sec-h"><h2 class="sec">Children and school</h2><button class="btn small" data-act="add-kid">${icon('plus')} Add child</button></div>
+      <div class="list">${H.kids.length ? H.kids.map((k) => { const a = M.kidAge(k); return `<button class="row" data-act="edit-kid" data-id="${k.id}"><span><b>${esc(k.name || 'Child')}</b><small>Age ${a} · ${stage(a)}</small></span><span class="amt">${f(M.feeAt(st, a))}<small>a year now</small></span></button>`; }).join('') : '<p class="muted pad">Add children to plan their school fees from nursery to university.</p>'}
+      <button class="row" data-act="household"><span><b>School fees, car and giving</b><small>Fees a year: ${SCHOOL.stages.map(([id, n]) => `${n.toLowerCase()} ${f(H.fees[id] || 0)}`).join(', ')}${H.car.every ? ` · new car every ${H.car.every} years` : ''}${H.givingPct ? ` · giving ${pct(H.givingPct, 0)}` : ''}</small></span>${icon('chev')}</button></div>
+      <p class="fine">School fees rise ${pct(H.eduPrem, 0)} a year faster than prices in your plan.</p>
+    </section>`;
+}
+
+// ------------------------------------------------------------------ Insights
+
+const NAMES = Object.fromEntries(Object.entries(ASSET_CLASSES).map(([k, v]) => [k, v.short]));
+const stat = (k, v, cls) => `<div class="stat ${cls}"><span>${k}</span><b>${v}</b></div>`;
+
+function insightsTab() {
+  if (!A || !A.portfolio) return '<section class="card"><p>Working out your plan…</p></section>';
+  const P = A.portfolio;
+  const infl = A.infl;
+  const fac = (t) => (nominal ? Math.pow(1 + infl, t) : 1);
+  const money = nominal ? `future money (prices rising about ${pct(infl, 0)} a year)` : "today's money";
+  const rows = A.middle || [];
+  const pick = rows.filter((r, i) => i < 10 || r.age % 5 === 0 || r.age === st.plan.retireAge || i === rows.length - 1);
+  const yr0 = new Date().getFullYear();
+  return `
+    <section class="seg-row"><span>Show amounts in</span><div class="seg"><button class="${nominal ? '' : 'on'}" data-act="nominal" data-v="0">Today's money</button><button class="${nominal ? 'on' : ''}" data-act="nominal" data-v="1">Future money</button></div></section>
+    <section class="card">
+      <h2 class="sec">Your investments today</h2>
+      <div class="stat-row">
+        ${stat('Expected return after inflation', `${pct(P.mu, 1)} a year`, P.mu < 0 ? 'bad' : '')}
+        ${stat('Typical yearly swing', pct(P.vol, 0), '')}
+        ${stat('Risk level', P.level, '')}
+        ${stat('A bad year (1 in 20)', pct(P.badYear, 0), 'bad')}
+        ${stat('In dollars, gold or crypto', pct(P.usdShare, 0), '')}
+        ${stat('Easy to sell quickly', pct(P.liquidShare, 0), '')}
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>What you own</th><th>Value</th><th>Share</th><th>Real return</th></tr></thead><tbody>
+        ${P.rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${f(r.value)}</td><td>${pct(r.weight, 0)}</td><td class="${r.real < 0 ? 'neg' : ''}">${pct(r.real, 1)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Add what you own under Money.</td></tr>'}
+      </tbody></table></div>
+      <p class="muted">Real return means after inflation of ${pct(infl, 1)} a year. Cars lose value and are left out.</p>
+    </section>
+    ${P.accounts.length ? `<section class="card"><h2 class="sec">Is your safe money beating inflation?</h2><div class="table-wrap"><table><thead><tr><th>Account</th><th>Rate</th><th>Real</th></tr></thead><tbody>
+      ${P.accounts.map((a) => `<tr><td>${esc(a.name)}</td><td>${pct(a.rate, 1)}</td><td><span class="status ${a.real >= 0 ? 'good' : a.real > -0.02 ? 'warn' : 'bad'}">${icon(a.real >= 0 ? 'ok' : 'warn')} ${pct(a.real, 1)}</span></td></tr>`).join('')}
+    </tbody></table></div></section>` : ''}
+    <section class="card">
+      <h2 class="sec">What your wealth is made of</h2>
+      <p class="muted">The middle path, in ${money}. Hover or tap for the numbers.</p>
+      ${stackedArea(rows.map((r) => ({ ...r, classes: Object.fromEntries(Object.entries(r.classes).filter(([k]) => k !== 'car')) })), { cur: st.currency, names: NAMES, factor: (i) => fac(i + 1), height: 360 })}
+    </section>
+    <section class="card">
+      <h2 class="sec">What could go wrong</h2>
+      <p class="muted">How each shock would change your chance of success, which is ${pct(A.success)} now.</p>
+      <div class="list flat">${A.stress.map((x) => `<div class="row static"><span><b>${esc(x.name)}</b><small>${esc(x.what)}</small></span><span class="amt"><span class="status ${x.delta >= -0.02 ? 'good' : x.delta > -0.1 ? 'warn' : 'bad'}">${pct(x.success)}</span><small>${x.delta >= 0 ? '+' : '−'}${Math.abs(Math.round(x.delta * 100))} pts</small></span></div>`).join('')}</div>
+    </section>
+    <section class="card">
+      <h2 class="sec">What matters most to your plan</h2>
+      <p class="muted">Each change on its own, in points of success. Effort pays most at the top.</p>
+      ${deltaBars(A.sensitivity)}
+    </section>
+    <section class="card">
+      <h2 class="sec">Year by year</h2>
+      <p class="muted">The middle path, in ${money}. Saved is what is left after spending and debt payments; growth is what your money earned.</p>
+      <div class="table-wrap"><table class="yby"><thead><tr><th>Age</th><th>Year</th><th>Income</th><th>Living</th><th>School, car</th><th>Debts</th><th>Saved</th><th>Growth</th><th>Net worth</th></tr></thead><tbody>
+        ${pick.map((r) => { const i = rows.indexOf(r) + 1; const k = fac(i); return `<tr class="${r.age === st.plan.retireAge ? 'mark' : ''}"><td>${r.age}</td><td>${yr0 + i}</td><td>${f(r.income * k)}</td><td>${f(r.living * k)}</td><td>${r.extra ? f(r.extra * k) : '–'}</td><td>${r.debtCost ? f(r.debtCost * k) : '–'}</td><td class="${r.saved < 0 ? 'neg' : ''}">${f(r.saved * k)}</td><td class="${r.growth < 0 ? 'neg' : ''}">${f(r.growth * k)}</td><td><b>${f(r.nw * k)}</b></td></tr>`; }).join('')}
+      </tbody></table></div>
+      <p class="fine">The highlighted row is the year you stop work.</p>
+    </section>`;
 }
 
 function debtPlanner() {
@@ -248,14 +323,14 @@ function planTab() {
   const P = st.plan;
   const age = M.ageOf(st);
   const mix = M.mixOf(st);
-  const spendR = P.spendRetire ?? T.monthlySpend;
+  const spendR = P.spendRetire ?? T.monthlyLiving;
   const H = health();
   const maxExtra = Math.max(10000, Math.round((T.allIn * 0.5) / 1000) * 1000);
   return `
     <section class="card">
       <h2 class="sec">Your plan</h2>
       <label class="field"><span>Stop work at <b id="ra">${P.retireAge}</b></span><input type="range" min="${Math.max(age + 1, 30)}" max="80" value="${P.retireAge}" data-act="retire" aria-label="Stop work age"></label>
-      ${moneyIn('spendRetire', spendR, 'Spending each month once you stop (today\'s money)', `You spend ${f(T.monthlySpend)} a month now.`)}
+      ${moneyIn('spendRetire', spendR, 'Spending each month once you stop (today\'s money)', `Your living costs now: ${f(T.monthlyLiving)} a month. School fees and car replacements are planned separately.`)}
       ${moneyIn('pensionIncome', P.pensionIncome, `Pension or other income from ${CURRENCIES[st.currency].pensionAge} (monthly, today's money)`, 'Leave empty if unsure.')}
       <div class="seg-row"><span>Outlook</span><div class="seg">${Object.entries(M.OUTLOOKS).map(([k, o]) => `<button class="${P.outlook === k ? 'on' : ''}" data-act="outlook" data-v="${k}">${o.name}</button>`).join('')}</div></div>
       <div class="seg-row"><span>How sure do you want to be?</span><div class="seg">${[0.75, 0.85, 0.95].map((x) => `<button class="${P.success === x ? 'on' : ''}" data-act="sure" data-v="${x}">${pct(x)}</button>`).join('')}</div></div>
@@ -264,8 +339,9 @@ function planTab() {
     ${A ? `
     <section class="card">
       <div class="sec-h"><h2 class="sec">Your net worth over time</h2>${H ? `<span class="status ${H.cls}">${icon(H.icon)} ${H.label}</span>` : ''}</div>
-      <p class="muted">In today's money. 2,000 possible futures with random markets, inflation${CURRENCIES[st.currency].usdFx ? ' and exchange rates' : ''}.</p>
-      ${fanChart(A.bands, { cur: st.currency, retireAge: P.retireAge, height: 330, mark: { v: T.freedomNumber, label: `Freedom number ${f(T.freedomNumber)}` } })}
+      <div class="seg small"><button class="${nominal ? '' : 'on'}" data-act="nominal" data-v="0">Today's money</button><button class="${nominal ? 'on' : ''}" data-act="nominal" data-v="1">Future money</button></div>
+      <p class="muted">${nominal ? `In future money, with prices rising about ${pct(A.infl, 0)} a year.` : "In today's money."} 2,000 possible futures with random markets, inflation${CURRENCIES[st.currency].usdFx ? ' and exchange rates' : ''}.</p>
+      ${fanChart(nominal ? A.bands.map((b, i) => { const k = Math.pow(1 + A.infl, i); return { age: b.age, p10: b.p10 * k, p25: b.p25 * k, p50: b.p50 * k, p75: b.p75 * k, p90: b.p90 * k }; }) : A.bands, { cur: st.currency, retireAge: P.retireAge, height: 330, mark: { v: T.freedomNumber, label: `Freedom number ${f(T.freedomNumber)}` } })}
     </section>
     <section class="answers">
       ${ans('Plan works in', `${pct(A.success)} of futures`, `Money lasts to ${P.planAge}. You want ${pct(A.target)}.`)}
@@ -360,7 +436,7 @@ function checkinSheet() {
 function accountSheet(acc) {
   const isNew = !acc;
   if (isNew) {
-    sheet(`${sheetHead('Add something you own')}<div class="type-grid">${M.TYPE_ORDER.map((t) => `<button class="type" data-act="new-acc" data-type="${t}"><b>${M.ACCOUNT_TYPES[t].name}</b><small>${M.ACCOUNT_TYPES[t].hint}</small></button>`).join('')}</div>`);
+    sheet(`${sheetHead('Add something you own')}${M.TYPE_GROUPS.map(([g, types]) => `<h3 class="group-t">${esc(g)}</h3><div class="type-grid">${types.map((t) => `<button class="type" data-act="new-acc" data-type="${t}"><b>${M.ACCOUNT_TYPES[t].name}</b><small>${M.ACCOUNT_TYPES[t].hint}</small></button>`).join('')}</div>`).join('')}`);
     return;
   }
   const T = M.ACCOUNT_TYPES[acc.type];
@@ -376,7 +452,7 @@ function accountSheet(acc) {
         <p class="muted" id="stock-px">${acc.key && market.prices[acc.key] ? `Latest price ${fmt(market.prices[acc.key].p, market.prices[acc.key].c)}` : ''}</p>`
       : usd ? `<label class="field"><span>Value in dollars</span><span class="money-in"><i>$</i><input name="value" inputmode="decimal" value="${acc.value ? Math.round(acc.value) : ''}"></span><small>${M.usdRate(st, market) ? `At ${sym()}${Math.round(M.usdRate(st, market)).toLocaleString()} per dollar.` : 'Set the dollar rate in Settings → Assumptions.'}</small></label>`
         : moneyIn('value', acc.value, 'What it is worth today')}
-      ${T.rate ? pctIn('rate', acc.rate ?? st.assumptions.deposit, 'Interest rate a year') : ''}
+      ${T.rate ? pctIn('rate', acc.rate ?? (T.rate0 ?? st.assumptions.deposit), 'Interest or yield a year', `Prices are rising about ${pct(st.assumptions.infl, 0)} a year.`) : ''}
       ${T.rent ? moneyIn('rent', acc.rent, 'Rent you receive each month (after costs)') : ''}
       ${T.profit ? moneyIn('profit', acc.profit, 'Profit you take out each month') : ''}
       <div class="btn-row"><button class="btn primary" data-act="save-acc">Save</button>${acc.id ? '<button class="btn danger" data-act="del-acc">Delete</button>' : ''}</div>
@@ -411,13 +487,44 @@ function incomeSheet(x = {}) {
     </form>`);
 }
 function spendSheet(x = {}) {
-  sheet(`${sheetHead(x.id ? 'Edit spending' : 'Add spending', 'Monthly. Leave out debt payments: they are counted under debts.')}
+  const cat = x.cat || 'food';
+  const freq = x.freq || (cat === 'rent' ? 'year' : 'month');
+  sheet(`${sheetHead(x.id ? 'Edit spending' : 'Add spending', 'Leave out debt payments and school fees: they are counted under debts and children.')}
     <form id="sp" data-id="${x.id || ''}">
-      <label class="field"><span>What for</span><select name="name">${[...new Set([x.name, ...M.SPEND_CATEGORIES].filter(Boolean))].map((c) => `<option ${c === x.name ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-      ${moneyIn('amount', x.amount, 'Each month')}
+      <label class="field"><span>Category</span><select name="cat" id="sp-cat">${SPEND_ORDER.map((c) => `<option value="${c}" ${c === cat ? 'selected' : ''}>${esc(SPEND_CATS[c].name)}${SPEND_CATS[c].prem ? ` (rises ${pct(SPEND_CATS[c].prem, 0)} faster than prices)` : ''}</option>`).join('')}</select></label>
+      <label class="field"><span>Name (optional)</span><input name="name" id="sp-name" value="${esc(x.name || '')}" placeholder="e.g. Flat rent, Diesel, Groceries"></label>
+      ${moneyIn('amount', x.amount, 'Amount')}
+      <div class="seg-row"><span>How often</span><div class="seg"><label><input type="radio" name="freq" value="month" ${freq === 'month' ? 'checked' : ''}> Each month</label><label><input type="radio" name="freq" value="year" ${freq === 'year' ? 'checked' : ''}> Each year</label></div></div>
       <div class="btn-row"><button class="btn primary" data-act="save-sp">Save</button>${x.id ? '<button class="btn danger" data-act="del-sp">Delete</button>' : ''}</div>
     </form>`);
 }
+
+function kidSheet(k = {}) {
+  const yr = new Date().getFullYear();
+  sheet(`${sheetHead(k.id ? 'Edit child' : 'Add a child', 'Fees follow their age: nursery 3–5, primary 6–11, secondary 12–17, university 18–21.')}
+    <form id="kid" data-id="${k.id || ''}">
+      <label class="field"><span>Name</span><input name="name" id="kid-name" value="${esc(k.name || '')}" placeholder="e.g. Ada"></label>
+      ${numIn('born', k.born || yr - 3, 'Year of birth (or expected birth)', '', `min="${yr - 30}" max="${yr + 10}"`)}
+      <div class="btn-row"><button class="btn primary" data-act="save-kid">Save</button>${k.id ? '<button class="btn danger" data-act="del-kid">Delete</button>' : ''}</div>
+    </form>`);
+}
+
+function householdSheet() {
+  const H = st.household;
+  sheet(`${sheetHead('School fees, car and giving', 'In today\'s money. The plan adds inflation for you.')}
+    <form id="hh">
+      <h3 class="group-t">School fees a year, per child</h3>
+      ${SCHOOL.stages.map(([id, n, a0, a1]) => moneyIn(`fee_${id}`, H.fees[id], `${n} (ages ${a0}–${a1})`)).join('')}
+      ${pctIn('eduPrem', H.eduPrem, 'How much faster than prices school fees rise, a year')}
+      <h3 class="group-t">Car</h3>
+      ${numIn('carEvery', H.car.every || '', 'Replace your car every how many years? (empty for never)')}
+      ${moneyIn('carCost', H.car.cost, 'Cost of each replacement, after selling the old one')}
+      <h3 class="group-t">Giving</h3>
+      ${pctIn('givingPct', H.givingPct, 'Share of your income you give (tithe, charity, family)')}
+      <button class="btn primary wide" data-act="save-hh">Save</button>
+    </form>`);
+}
+
 function goalSheet(g = {}) {
   const age = M.ageOf(st);
   sheet(`${sheetHead(g.id ? 'Edit goal' : 'Add a goal', 'In today\'s money. The plan adds inflation for you.')}
@@ -503,7 +610,7 @@ function oldGameNumbers() {
 function renderOnboarding() {
   if (!ob) {
     const me = oldGameNumbers();
-    ob = { step: 0, currency: 'NGN', age: me ? me.age : '', income: me ? me.pay : '', spend: me ? me.costs : '', cash: me ? me.cash : '', savings: me ? me.save : '', invest: me ? (me.index || 0) + (me.stocks || 0) : '', usd: '', pension: '', property: me ? me.prop : '', debt: me ? (me.debt || 0) + (me.mortgage || 0) : '', debtRate: '', debtPay: '', retireAge: me && me.aim ? me.aim : 55, spendRetire: '', fromGame: !!me };
+    ob = { step: 0, rent: '', kids: '', currency: 'NGN', age: me ? me.age : '', income: me ? me.pay : '', spend: me ? me.costs : '', cash: me ? me.cash : '', savings: me ? me.save : '', invest: me ? (me.index || 0) + (me.stocks || 0) : '', usd: '', pension: '', property: me ? me.prop : '', debt: me ? (me.debt || 0) + (me.mortgage || 0) : '', debtRate: '', debtPay: '', retireAge: me && me.aim ? me.aim : 55, spendRetire: '', fromGame: !!me };
   }
   const steps = [obWelcome, obYou, obMonthly, obHave, obGoal];
   app.innerHTML = `<main class="ob"><div class="ob-prog" aria-hidden="true">${steps.map((_, i) => `<i class="${i <= ob.step ? 'on' : ''}"></i>`).join('')}</div>${steps[ob.step]()}</main>`;
@@ -527,7 +634,9 @@ function obYou() {
 function obMonthly() {
   return `<section class="ob-card"><h2>Each month</h2><form id="ob">
     ${moneyIn('income', ob.income, 'Money coming in, after tax', 'Salary, business profit you take home, side income.')}
-    ${moneyIn('spend', ob.spend, 'What you spend', 'Rent, food, transport, school fees, family, fun. Leave out loan payments.')}
+    ${moneyIn('spend', ob.spend, 'What you spend', 'Food, transport, power, bills, family, fun. Leave out rent, school fees and loan payments.')}
+    ${moneyIn('rent', ob.rent, 'Rent a year (if you rent)', 'Many landlords collect a year at a time.')}
+    ${numIn('kids', ob.kids, 'Children (yours or ones you pay school fees for)', 'Add their ages under Money → Children later.', 'min="0" max="12"')}
     </form>${obNav()}</section>`;
 }
 function obHave() {
@@ -546,21 +655,23 @@ function obHave() {
 function obGoal() {
   return `<section class="ob-card"><h2>Your goal</h2><form id="ob">
     ${numIn('retireAge', ob.retireAge, 'Age you want work to be optional', '', 'min="30" max="80"')}
-    ${moneyIn('spendRetire', ob.spendRetire || ob.spend, 'Monthly spending you want then, in today\'s money')}
+    ${moneyIn('spendRetire', ob.spendRetire || (ob.spend || 0) + (ob.rent || 0) / 12, 'Monthly spending you want then, in today\'s money', 'Starts at what you spend now, including rent.')}
     </form>${obNav('See my plan')}</section>`;
 }
 function obRead() {
   const el = document.getElementById('ob');
   if (!el) return;
   const d = form(el);
-  for (const [k, v] of Object.entries(d)) ob[k] = ['currency'].includes(k) ? v : ['age', 'retireAge'].includes(k) ? +v : k === 'debtRate' ? parsePct(v) : parseMoney(v);
+  for (const [k, v] of Object.entries(d)) ob[k] = ['currency'].includes(k) ? v : ['age', 'retireAge', 'kids'].includes(k) ? +v : k === 'debtRate' ? parsePct(v) : parseMoney(v);
 }
 function obFinish() {
   const s = M.newState(ob.currency);
   const now = new Date();
   s.born = `${now.getFullYear() - (ob.age || 30)}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   if (ob.income) s.income.push({ id: M.uid(), name: 'Take-home pay', amount: ob.income, kind: 'work' });
-  if (ob.spend) s.spending.push({ id: M.uid(), name: 'Living costs', amount: ob.spend });
+  if (ob.spend) s.spending.push({ id: M.uid(), cat: 'other', name: 'Living costs', amount: ob.spend, freq: 'month' });
+  if (ob.rent) s.spending.push({ id: M.uid(), cat: 'rent', name: 'Rent', amount: ob.rent, freq: 'year' });
+  for (let i = 0; i < Math.min(12, ob.kids || 0); i++) s.household.kids.push({ id: M.uid(), name: `Child ${i + 1}`, born: now.getFullYear() - 6 });
   const add = (type, name, value, extra = {}) => { if (value > 0) s.accounts.push({ id: M.uid(), type, name, value, ...extra }); };
   add('current', 'Cash and current accounts', ob.cash);
   add('savings', 'Savings and T-bills', ob.savings, { rate: s.assumptions.deposit });
@@ -570,7 +681,7 @@ function obFinish() {
   add('property', 'Property and land', ob.property);
   if (ob.debt > 0) s.debts.push({ id: M.uid(), name: 'Debts', balance: ob.debt, rate: ob.debtRate || 0.2, payment: ob.debtPay || 0 });
   s.plan.retireAge = clamp(ob.retireAge || 55, (ob.age || 30) + 1, 80);
-  s.plan.spendRetire = ob.spendRetire || ob.spend || null;
+  s.plan.spendRetire = ob.spendRetire || null;
   st = s; ob = null; tab = 'home';
   M.save(st); render(); rerun(0);
 }
@@ -631,7 +742,20 @@ const ACT = {
   'del-inc': (d, el) => { const id = el.closest('form').dataset.id; st.income = st.income.filter((x) => x.id !== id); closeSheet(); commit(); },
   'add-sp': () => spendSheet(),
   'edit-sp': (d) => spendSheet(byId(st.spending, d.id)),
-  'save-sp': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.spending, fm.dataset.id, { name: v.name, amount: parseMoney(v.amount) }); closeSheet(); commit(); },
+  'save-sp': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.spending, fm.dataset.id, { cat: v.cat, name: v.name.trim() || SPEND_CATS[v.cat].name, amount: parseMoney(v.amount), freq: v.freq || 'month' }); closeSheet(); commit(); },
+  'add-kid': () => kidSheet(),
+  'edit-kid': (d) => kidSheet(byId(st.household.kids, d.id)),
+  'save-kid': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.household.kids, fm.dataset.id, { name: v.name.trim() || 'Child', born: +v.born || new Date().getFullYear() }); closeSheet(); commit(); },
+  'del-kid': (d, el) => { const id = el.closest('form').dataset.id; st.household.kids = st.household.kids.filter((x) => x.id !== id); closeSheet(); commit(); },
+  household: householdSheet,
+  'save-hh': (d, el) => {
+    const v = form(el.closest('form')); const H = st.household;
+    for (const [id] of SCHOOL.stages) H.fees[id] = parseMoney(v[`fee_${id}`]);
+    H.eduPrem = parsePct(v.eduPrem); H.givingPct = parsePct(v.givingPct);
+    H.car = { every: Math.max(0, Math.round(+v.carEvery || 0)), cost: parseMoney(v.carCost) };
+    closeSheet(); commit();
+  },
+  nominal: (d) => { nominal = d.v === '1'; render(); },
   'del-sp': (d, el) => { const id = el.closest('form').dataset.id; st.spending = st.spending.filter((x) => x.id !== id); closeSheet(); commit(); },
   'add-goal': () => goalSheet(),
   'edit-goal': (d) => goalSheet(byId(st.goals, d.id)),
@@ -733,7 +857,7 @@ document.addEventListener('input', (e) => {
     wiTimer = setTimeout(async () => {
       if (!whatIfExtra) return;
       const inp = M.buildInputs(st, market);
-      whatIfOut = await compute('whatif', { spendNow: inp.spendNow - whatIfExtra * 12 });
+      whatIfOut = await compute('whatif', { spendCut: whatIfExtra * 12 });
       const o = document.getElementById('wi-out'); if (o) o.innerHTML = whatIfHTML();
     }, 250);
   }

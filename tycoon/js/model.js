@@ -2,29 +2,48 @@
 // your assumptions. Everything stays on this phone (localStorage) unless you
 // export a backup yourself.
 
-import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, suggestedMix, clamp } from './money.js';
+import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, SPEND_CATS, SCHOOL, suggestedMix, clamp } from './money.js';
 import { portfolioVol } from './market.js';
 
 export const KEY = 'tycoonplan.v1';
-export const VERSION = 1;
+export const VERSION = 2;
 
 // The kinds of account people add, and the asset class each one is modelled as.
+// usd: the amount is entered in dollars. rate: it earns a stated interest rate.
 export const ACCOUNT_TYPES = {
-  current: { name: 'Current account / cash', cls: 'cash', icon: 'wallet', hint: 'Money for everyday spending. Earns nothing.' },
-  savings: { name: 'Savings, fixed deposit, T-bills, money market', cls: 'deposit', icon: 'bank', hint: 'Safe money that earns interest. Enter its rate.', rate: true },
-  stock: { name: 'Shares in a company', cls: null, icon: 'chart', hint: 'Search NGX or NYSE and enter how many shares you own. Valued at the latest price.', stock: true },
-  fundLocal: { name: 'Local share or index fund', cls: 'localEq', icon: 'basket', hint: 'A fund that owns many local companies.' },
-  fundGlobal: { name: 'US or global share fund', cls: 'globalEq', icon: 'globe', hint: 'An index fund or ETF of US or world companies. Enter its value in dollars.', usd: true },
-  usd: { name: 'Dollar savings / dollar bonds', cls: 'usdCash', icon: 'dollar', hint: 'Domiciliary account, dollar money market or Eurobonds. Enter dollars.', usd: true },
-  bond: { name: 'Bonds', cls: 'bonds', icon: 'paper', hint: 'Government or company bonds in your own currency.' },
-  pension: { name: 'Pension (e.g. RSA)', cls: 'pension', icon: 'shield', hint: 'Retirement savings you can reach from pension age.' },
-  property: { name: 'Property or land', cls: 'property', icon: 'house', hint: 'What it would sell for today. Add any rent you receive. Add its mortgage under debts.', rent: true },
-  business: { name: 'Business', cls: 'business', icon: 'shop', hint: 'What you could sell your share for, and the profit you take out each month.', profit: true },
-  crypto: { name: 'Crypto', cls: 'crypto', icon: 'coin', hint: 'What it is worth today in your currency.' },
+  current: { name: 'Current account / cash', cls: 'cash', hint: 'Money for everyday spending. Earns nothing.' },
+  savings: { name: 'Savings or fixed deposit', cls: 'deposit', hint: 'Bank savings that earn interest. Enter the rate.', rate: true },
+  tbill: { name: 'Treasury bills / commercial paper', cls: 'deposit', hint: 'Short government or company debt. Enter the yield.', rate: true },
+  mmf: { name: 'Money market fund', cls: 'deposit', hint: 'A fund that holds T-bills and deposits. Enter its yield.', rate: true },
+  coop: { name: 'Cooperative, ajo or esusu', cls: 'deposit', hint: 'Group or cooperative savings. Enter any interest or dividend rate (0 if none).', rate: true, rate0: 0 },
+  loanOut: { name: 'Money you lent to someone', cls: 'deposit', hint: 'Count it only if you expect it back. Enter any interest rate (0 if none).', rate: true, rate0: 0 },
+  stock: { name: 'Shares in a company', cls: null, hint: 'Search NGX or NYSE and enter how many shares you own. Valued at the latest price.', stock: true },
+  fundLocal: { name: 'Local share or index fund', cls: 'localEq', hint: 'A fund that owns many local companies.' },
+  fundGlobal: { name: 'US or global share fund / ETF', cls: 'globalEq', hint: 'An index fund or ETF of US or world companies. Enter its value in dollars.', usd: true },
+  reit: { name: 'Real estate fund (REIT)', cls: 'reit', hint: 'Listed property funds. Earn rent and move with property prices.' },
+  bond: { name: 'Bonds in your currency (FGN bonds)', cls: 'bonds', hint: 'Government or company bonds. Enter what they would sell for.' },
+  usd: { name: 'Dollar or foreign-currency savings', cls: 'usdCash', hint: 'Domiciliary account, dollar money market, cash dollars, pounds or euros. Enter the value in dollars.', usd: true },
+  eurobond: { name: 'Eurobonds / dollar bonds', cls: 'usdBonds', hint: 'Bonds paid in dollars. Enter the value in dollars.', usd: true },
+  gold: { name: 'Gold and precious metals', cls: 'gold', hint: 'What it would sell for today in your currency.' },
+  crypto: { name: 'Crypto', cls: 'crypto', hint: 'What it is worth today in your currency.' },
+  pension: { name: 'Pension (RSA)', cls: 'pension', hint: 'Retirement savings you can reach from pension age.' },
+  property: { name: 'House or flat', cls: 'property', hint: 'What it would sell for today. Add any rent you receive. Put its mortgage under debts.', rent: true },
+  land: { name: 'Land', cls: 'land', hint: 'What it would sell for today. Land pays no rent but tends to hold its value.' },
+  business: { name: 'Business', cls: 'business', hint: 'What you could sell your share for, and the profit you take out each month.', profit: true },
+  farm: { name: 'Farm or agric investment', cls: 'business', hint: 'Poultry, fish, crops or an agric fund: its value and what it pays you each month.', profit: true },
+  car: { name: 'Car or vehicle', cls: 'car', hint: 'What it would sell for today. Cars lose value every year.' },
 };
-export const TYPE_ORDER = ['current', 'savings', 'stock', 'fundLocal', 'fundGlobal', 'usd', 'bond', 'pension', 'property', 'business', 'crypto'];
-
-export const SPEND_CATEGORIES = ['Housing (rent, repairs)', 'Food and groceries', 'Transport and fuel', 'Children and school', 'Bills, power and data', 'Family support and giving', 'Health and insurance', 'Fun and personal', 'Other'];
+export const TYPE_GROUPS = [
+  ['Cash and safe savings', ['current', 'savings', 'tbill', 'mmf', 'coop', 'loanOut']],
+  ['Shares and funds', ['stock', 'fundLocal', 'fundGlobal', 'reit', 'bond']],
+  ['Dollars and foreign currency', ['usd', 'eurobond']],
+  ['Property and land', ['property', 'land']],
+  ['Business and farming', ['business', 'farm']],
+  ['Gold and crypto', ['gold', 'crypto']],
+  ['Pension', ['pension']],
+  ['Vehicles', ['car']],
+];
+export const TYPE_ORDER = TYPE_GROUPS.flatMap((g) => g[1]);
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 export { uid };
@@ -39,6 +58,7 @@ export function newState(currency = 'NGN') {
     born: null,
     income: [],
     spending: [],
+    household: { kids: [], fees: { ...(SCHOOL[currency] || SCHOOL.USD) }, eduPrem: 0.03, givingPct: 0, car: { every: 0, cost: 0 } },
     accounts: [],
     debts: [],
     goals: [],
@@ -66,12 +86,35 @@ export function upgrade(st) {
   out.plan = { ...base.plan, ...(st.plan || {}) };
   out.assumptions = { ...base.assumptions, ...(st.assumptions || {}) };
   out.settings = { ...base.settings, ...(st.settings || {}) };
+  out.household = { ...base.household, ...(st.household || {}) };
+  out.household.fees = { ...base.household.fees, ...((st.household || {}).fees || {}) };
+  out.household.car = { ...base.household.car, ...((st.household || {}).car || {}) };
+  if (!Array.isArray(out.household.kids)) out.household.kids = [];
+  // Version 1 spending had no category or frequency.
+  out.spending = (out.spending || []).map((x) => ({ cat: catGuess(x.name), freq: 'month', ...x }));
   for (const k of ['income', 'spending', 'accounts', 'debts', 'goals', 'checkins']) if (!Array.isArray(out[k])) out[k] = [];
   out.v = VERSION;
   return out;
 }
 
+function catGuess(name = '') {
+  const n = name.toLowerCase();
+  for (const [k, c] of Object.entries(SPEND_CATS)) if (n.includes(k) || n.includes(c.name.toLowerCase().split(' ')[0])) return k;
+  return 'other';
+}
+
 // ------------------------------------------------------------------ the numbers
+
+// A spending line in monthly terms (rent is often paid once a year).
+export const monthlyOf = (x) => (x.amount || 0) / (x.freq === 'year' ? 12 : 1);
+
+// Which school stage a child is in at a given age, and its yearly fee in today's money.
+export function feeAt(st, kidAge) {
+  for (const [id, , a0, a1] of SCHOOL.stages) if (kidAge >= a0 && kidAge <= a1) return st.household.fees[id] || 0;
+  return 0;
+}
+export const kidAge = (k, year = new Date().getFullYear()) => year - (k.born || year);
+
 
 export function ageOf(st, now = new Date()) {
   if (!st.born) return 30;
@@ -111,9 +154,13 @@ export function totals(st, market) {
   const assets = Object.values(byClass).reduce((s, x) => s + x, 0);
   const debt = st.debts.reduce((s, d) => s + (d.balance || 0), 0);
   const monthlyIncome = st.income.reduce((s, x) => s + (x.amount || 0), 0);
-  const rent = st.accounts.filter((a) => a.type === 'property').reduce((s, a) => s + (a.rent || 0), 0);
-  const profit = st.accounts.filter((a) => a.type === 'business').reduce((s, a) => s + (a.profit || 0), 0);
-  const monthlySpend = st.spending.reduce((s, x) => s + (x.amount || 0), 0);
+  const rent = st.accounts.filter((a) => ACCOUNT_TYPES[a.type] && ACCOUNT_TYPES[a.type].rent).reduce((s, a) => s + (a.rent || 0), 0);
+  const profit = st.accounts.filter((a) => ACCOUNT_TYPES[a.type] && ACCOUNT_TYPES[a.type].profit).reduce((s, a) => s + (a.profit || 0), 0);
+  const H = st.household;
+  const monthlyLiving = st.spending.reduce((s, x) => s + monthlyOf(x), 0);
+  const school = H.kids.reduce((s, k) => s + feeAt(st, kidAge(k)), 0) / 12;
+  const giving = (H.givingPct || 0) * monthlyIncome;
+  const monthlySpend = monthlyLiving + school + giving;
   const debtPay = st.debts.reduce((s, d) => s + (d.payment || 0), 0);
   const allIn = monthlyIncome + rent + profit;
   const surplus = allIn - monthlySpend - debtPay;
@@ -121,12 +168,51 @@ export function totals(st, market) {
   const investable = CLASS_ORDER.filter((c) => ASSET_CLASSES[c].liquid && c !== 'cash').reduce((s, c) => s + byClass[c], 0);
   return {
     byClass, assets, debt, netWorth: assets - debt,
-    monthlyIncome, rent, profit, allIn, monthlySpend, debtPay, surplus,
+    monthlyIncome, rent, profit, allIn, monthlyLiving, school, giving, monthlySpend, debtPay, surplus,
     savingsRate: allIn > 0 ? surplus / allIn : 0,
     emergencyMonths: monthlySpend > 0 ? quick / (monthlySpend + debtPay) : null,
     quick, investable,
-    freedomNumber: ((st.plan.spendRetire ?? monthlySpend) * 12) / st.plan.swr,
+    freedomNumber: ((st.plan.spendRetire ?? monthlyLiving) * 12) / st.plan.swr,
   };
+}
+
+// Interest earned on safe savings: the value-weighted rate across your accounts.
+export function depositRateOf(st, market) {
+  let w = 0; let r = 0;
+  for (const a of st.accounts) {
+    if (classOf(a) !== 'deposit') continue;
+    const v = valueOf(a, st, market).v;
+    w += v; r += v * (a.rate ?? st.assumptions.deposit);
+  }
+  return w > 0 ? r / w : st.assumptions.deposit;
+}
+
+// Your living costs year by year in today's money, each category rising at its
+// own pace above inflation, plus giving tied to your pay.
+export function spendPath(st, years, salaryPath) {
+  const out = new Float64Array(years + 1);
+  for (let t = 0; t <= years; t++) {
+    let y = 0;
+    for (const x of st.spending) y += monthlyOf(x) * 12 * Math.pow(1 + ((SPEND_CATS[x.cat] || SPEND_CATS.other).prem || 0), t);
+    y += (st.household.givingPct || 0) * (salaryPath ? salaryPath(t) : 0);
+    out[t] = y;
+  }
+  return out;
+}
+
+// Costs that come and go on a schedule: school fees by each child's stage,
+// rising faster than inflation, and replacing the car every few years.
+export function extraPath(st, years) {
+  const H = st.household;
+  const out = new Float64Array(years + 1);
+  const y0 = new Date().getFullYear();
+  for (let t = 0; t <= years; t++) {
+    let y = 0;
+    for (const k of H.kids) y += feeAt(st, kidAge(k, y0 + t)) * Math.pow(1 + (H.eduPrem || 0), t);
+    if (H.car && H.car.every > 0 && H.car.cost > 0 && t > 0 && t % H.car.every === 0) y += H.car.cost;
+    out[t] = y;
+  }
+  return out;
 }
 
 // Measured risk of the shares you actually own, blended half-and-half with the
@@ -191,8 +277,10 @@ export function buildInputs(st, market, patch = {}) {
     salary,
     otherIncome: other,
     growth: st.plan.growth,
-    spendNow: T.monthlySpend * 12,
-    spendRetire: (st.plan.spendRetire ?? T.monthlySpend) * 12,
+    spendNow: (T.monthlyLiving + T.giving) * 12,
+    spendPath: spendPath(st, Math.max(1, st.plan.planAge - age), (t) => salary * Math.pow(1 + st.plan.growth, t)),
+    extraPath: extraPath(st, Math.max(1, st.plan.planAge - age)),
+    spendRetire: (st.plan.spendRetire ?? T.monthlyLiving) * 12,
     pensionIncome: (st.plan.pensionIncome || 0) * 12,
     rent: T.rent * 12,
     bizProfit: T.profit * 12,
@@ -203,7 +291,7 @@ export function buildInputs(st, market, patch = {}) {
     cls,
     infl: A.infl,
     inflSd: A.inflSd,
-    depositRate: A.deposit,
+    depositRate: depositRateOf(st, market),
     usdFx: C.usdFx && rate > 0,
     fxDrift: A.fxDrift || 0,
     fxSd: A.fxSd ?? (risk.fx ? risk.fx.sd : 0.1),
