@@ -7,24 +7,26 @@
 >
 > Open it at **https://samebimo10-cpu.github.io/Stock-/farm/**
 
-> **Also here: [Tycoon Rush](tycoon/)**, a roguelite investing game you can play offline on your
-> phone. Start at 22 with a salary, read the headlines, move your money between savings, an index
-> fund, single stocks, property, crypto, a business and dollars, and try to reach financial freedom
-> (passive income covering your living costs) before 60. Classic, Blitz, Daily Market, Eras, Duel
-> codes and a Weekly Challenge. Open it at **https://samebimo10-cpu.github.io/Stock-/tycoon/**, then
-> "Add to Home Screen" and it works without a connection.
+> **Also here: [Tycoon Rush Planner](tycoon/)**, a private wealth planner for your phone. Enter what you
+> earn, spend, own and owe, and it shows when you can be financially free, how likely your plan is to
+> work, and your next steps, ranked by impact. Open it at **https://samebimo10-cpu.github.io/Stock-/tycoon/**,
+> then "Add to Home Screen"; it works offline and your numbers never leave the phone.
 >
-> Its **Wisdom Journey** mode teaches as you play, one year per turn: a probability lens (base
-> rates, then Bayesian updating on headlines), a scored forecast every year, Graham's Mr. Market and
-> margin of safety, Babylon's seven cures, Rich Dad's statement and cashflow quadrant, a written
-> chief aim from Think and Grow Rich, expected value and Kelly sizing on risky choices, and mentor
-> quizzes. The ideas are paraphrased and credited in the in-game Library.
+> * **Live prices.** Shares you own on NGX or NYSE are valued at the latest price from this repository's
+>   daily data job, and dollar holdings at the latest USD/NGN rate. Two years of daily closes measure how
+>   much *your* shares actually swing, so one company counts as riskier than a fund.
+> * **2,000 futures.** A Monte Carlo projection to your planning age in today's money: fat-tailed returns,
+>   world and local market factors, random inflation and exchange-rate moves, salary growth, debt
+>   payments, goals, rent, business profit and pension income. What-ifs reuse the same futures, so the
+>   difference you see comes from your choice, not luck.
+> * **Answers, not just charts.** Chance your plan works, financial-freedom age with its likely range,
+>   safe retirement spending, the earliest you could stop work, the extra saving that closes a gap, a debt
+>   payoff plan (highest rate vs smallest balance), and goal-by-goal odds.
+> * **Track.** Monthly check-ins compare your real net worth with what the plan expected.
+> * **PDF plan** and JSON backup. Assumptions (inflation, deposit rates, returns, risk) are all editable.
 >
-> Everything is shown in pictures first: an avatar you design who ages and reacts, a guide from
-> your region, a recurring cast who bring every event (every scam comes from the same Hype Guy), a
-> home that grows as you get richer, market moods as weather, and plain words with the real finance
-> term a tap away. All art is SVG drawn in code, fonts ship with the game, and there are 17
-> currencies with local number styles across 8 regions.
+> It is an educational planner, not financial advice. No tool can predict markets; this one gets the
+> maths on your own numbers exactly right and is honest about the range for everything else.
 
 > **Also here: [FormFill](formfill/README.md)**, an offline app that fills your own Excel forms from
 > invoices, letters and photos. It finds the form's fields, reads the values from a PDF, Word file or

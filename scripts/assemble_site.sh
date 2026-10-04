@@ -9,7 +9,7 @@
 #
 #   _site/          the stock selector and allocator   -> /Stock-/
 #   _site/farm/     DouValue Farm Manager              -> /Stock-/farm/
-#   _site/tycoon/   Tycoon Rush, the investing game    -> /Stock-/tycoon/
+#   _site/tycoon/   Tycoon Rush, the wealth planner    -> /Stock-/tycoon/
 #   _site/formfill/ FormFill, the form autofill app    -> /Stock-/formfill/
 #
 # All the apps reference their assets with relative paths, so the farm app works
@@ -49,7 +49,8 @@ else
   echo "::warning::douvalue/web is missing, so the farm app was not published."
 fi
 
-# The game is optional in the same way as the farm app.
+# The planner is optional in the same way as the farm app. It reads the stock
+# app's data-pack.json from the site root for live prices.
 if [ -d "$root/tycoon" ]; then
   mkdir -p "$out/tycoon"
   cp "$root/tycoon/index.html" "$root/tycoon/sw.js" "$root/tycoon/manifest.webmanifest" "$root/tycoon/icon.svg" "$out/tycoon/"
@@ -58,8 +59,7 @@ if [ -d "$root/tycoon" ]; then
   cp "$root"/tycoon/*.png "$out/tycoon/" 2>/dev/null || true
   cp -R "$root/tycoon/js" "$out/tycoon/js"
   cp -R "$root/tycoon/fonts" "$out/tycoon/fonts"
-  if [ -d "$root/tycoon/news" ]; then cp -R "$root/tycoon/news" "$out/tycoon/news"; fi
-  echo "Game       -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
+  echo "Planner    -> $(find "$out/tycoon" -type f | wc -l | tr -d ' ') files under /tycoon/"
 fi
 
 # FormFill is optional in the same way. Its tests and the Apps Script proxy

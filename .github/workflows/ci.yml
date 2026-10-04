@@ -30,7 +30,7 @@ jobs:
         run: node --test "douvalue/tests/**/*.test.mjs"
 
   tycoon:
-    name: Tycoon Rush game
+    name: Tycoon Rush planner
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
