@@ -3,7 +3,8 @@
 // the currency code (NGN 2.4M) rather than its symbol.
 
 import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, pct } from './money.js';
-import { ACCOUNT_TYPES, ageOf, valueOf, monthlyOf } from './model.js';
+import { ACCOUNT_TYPES, ageOf, valueOf, monthlyOf, RISK_LEVELS, curOf, curOfItem, toBase } from './model.js';
+import * as World from './world.js';
 import { SPEND_CATS } from './money.js';
 
 const ASCII = { '−': '-', '–': '-', '—': '-', '×': 'x', '‘': "'", '’': "'", '“': '"', '”': '"', '…': '...', '→': '->', '·': '-', '•': '-', '₦': 'NGN ', '£': 'GBP ', '€': 'EUR ', '₹': 'INR ' };
@@ -91,7 +92,7 @@ export function money(n, cur) {
   return `${n < 0 ? '-' : ''}${cur} ${b.replace(/\.0+([KMB])$/, '$1')}`;
 }
 
-export function planPdf(st, market, A, { date = new Date() } = {}) {
+export function planPdf(st, market, A, { date = new Date(), adviser = null } = {}) {
   const cur = st.currency;
   const M = (n) => money(n, cur);
   const pdf = new Pdf();
@@ -100,6 +101,7 @@ export function planPdf(st, market, A, { date = new Date() } = {}) {
   pdf.text(X, pdf.y - 20, 'Your financial plan', { size: 22, bold: true, color: '#0f5e4c' });
   pdf.text(X, pdf.y - 38, `${st.name ? `${st.name} - ` : ''}age ${ageOf(st)} - ${CURRENCIES[cur].name} - ${date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, { size: 10, color: '#4a5a54' });
   pdf.y -= 56;
+  if (adviser && adviser.on && adviser.name) { pdf.text(X, pdf.y + 4, `Prepared by ${adviser.name}${adviser.firm ? `, ${adviser.firm}` : ''}${adviser.contact ? ` - ${adviser.contact}` : ''}`, { size: 9, color: '#4a5a54' }); pdf.y -= 12; }
 
   // Headline boxes.
   const boxes = [
@@ -136,6 +138,14 @@ export function planPdf(st, market, A, { date = new Date() } = {}) {
     pdf.y = y0 - 26;
   }
 
+  const Pn = st.person || {};
+  const facts = [Pn.occupation, Pn.marital, Pn.dependants ? `${Pn.dependants} other dependants` : '', st.household && st.household.kids.length ? `${st.household.kids.length} children` : '', Pn.health && Pn.health !== 'good' ? `health ${Pn.health}` : '', Pn.riskScore ? `risk profile: ${RISK_LEVELS[Pn.riskScore].name.toLowerCase()}` : ''].filter(Boolean);
+  if (facts.length || Pn.goals || Pn.notes) {
+    pdf.heading('About this person');
+    if (facts.length) pdf.para(facts.join(' - '), { size: 10 });
+    if (Pn.goals) pdf.para(`Goals: ${Pn.goals}`, { size: 10 });
+    if (Pn.notes) pdf.para(`Notes: ${Pn.notes}`, { size: 9.5, color: '#33433d' });
+  }
   pdf.heading('Your next steps');
   A.steps.slice(0, 6).forEach((s, i) => { pdf.para(`${i + 1}. ${s.title}`, { bold: true, size: 10, gap: 1 }); pdf.para(s.body, { size: 9.5, color: '#33433d', gap: 6 }); });
 
@@ -170,8 +180,14 @@ export function planPdf(st, market, A, { date = new Date() } = {}) {
   if (A.portfolio) {
     pdf.heading('Your investments');
     const P = A.portfolio;
-    pdf.para(`Expected return after inflation ${pct(P.mu, 1)} a year, typical yearly swing ${pct(P.vol, 0)} (${P.level.toLowerCase()} risk). In a bad year (1 in 20) the whole mix could move about ${pct(P.badYear, 0)}. ${pct(P.usdShare, 0)} is in dollars, gold or crypto; ${pct(P.liquidShare, 0)} can be sold quickly.`, { size: 9.5 });
+    pdf.para(`Expected return after inflation ${pct(P.mu, 1)} a year, typical yearly swing ${pct(P.vol, 0)} (${P.level.toLowerCase()} risk). In a bad year (1 in 20) the whole mix could move about ${pct(P.badYear, 0)}. ${pct(P.usdShare, 0)} is held in other currencies; ${pct(P.liquidShare, 0)} can be sold quickly.`, { size: 9.5 });
     for (const r of P.rows) pdf.row(`${r.name} (${pct(r.weight, 0)})`, `${M(r.value)}  -  real ${pct(r.real, 1)}`);
+  }
+  if (A.exposures && (A.exposures.byCur.length > 1 || A.exposures.byPlace.length)) {
+    pdf.heading('Currencies, places and job risk');
+    for (const x of A.exposures.byCur) pdf.row(x.cur, `own ${M(x.assets)}  -  earn ${M(x.income)}/yr  -  spend ${M(x.spend)}/yr${x.debt ? `  -  owe ${M(x.debt)}` : ''}`);
+    for (const x of A.exposures.byPlace) { const P = World.place(st, x.loc); pdf.row(x.name, `${M(x.value)}  -  land ${pct(P.land.mu, 1)} (swing ${pct(P.land.sd, 0)}), buildings ${pct(P.prop.mu, 1)} (swing ${pct(P.prop.sd, 0)}), title risk ${pct(P.title, 1)}`); }
+    if (A.jobLoss) pdf.para(`Chance of losing a job at least once before stopping work: ${pct(A.jobLoss, 0)}. Each income uses the job market of the country it is earned in.`, { size: 9.5, color: '#33433d' });
   }
   if (A.stress && A.stress.length) {
     pdf.heading('What could go wrong');
@@ -182,9 +198,17 @@ export function planPdf(st, market, A, { date = new Date() } = {}) {
     for (const x of A.sensitivity) pdf.row(x.label, `${x.delta >= 0 ? '+' : '-'}${Math.abs(Math.round(x.delta * 100))} pts`);
   }
 
+  if (A.ventures && A.ventures.length) {
+    pdf.heading('Business and investment plans (2,000 scenarios each)');
+    for (const r of A.ventures) {
+      const v = st.ventures.find((x) => x.id === r.id); if (!v) continue;
+      pdf.para(`${v.name || v.kind}: ${pct(r.success)} chance it ${v.successTest === 'survive' ? `is still running after ${v.years} years` : v.successTest === 'payback' ? 'pays back' : 'beats safe savings'}`, { bold: true, size: 10, gap: 1 });
+      pdf.para(`Makes more than it costs in ${pct(r.profitable)} of scenarios; loses half or more in ${pct(r.lostHalf)}. Typical result ${r.multiple.p50.toFixed(2)}x the money (8 in 10 between ${r.multiple.p10.toFixed(1)}x and ${r.multiple.p90.toFixed(1)}x). Money needed up to ${M(r.peak.p90)}.${r.s5 != null ? ` Five-year survival used: ${pct(r.s5)}.` : ''}${v.include !== false ? ` Whole plan works in ${pct(r.planWith)} of futures with it, ${pct(r.planWithout)} without.` : ''}`, { size: 9.5, color: '#33433d', gap: 6 });
+    }
+  }
   pdf.heading('Your accounts');
-  for (const a of st.accounts) pdf.row(`${a.name || ACCOUNT_TYPES[a.type].name}${a.type === 'stock' ? ` (${a.shares} x ${a.sym})` : ''}`, M(valueOf(a, st, market).v));
-  for (const d of st.debts) pdf.row(`${d.name} at ${pct(d.rate, 1)} (${M(d.payment)}/month)`, `-${M(d.balance)}`);
+  for (const a of st.accounts) { const c = curOf(a, st); pdf.row(`${a.name || ACCOUNT_TYPES[a.type].name}${a.type === 'stock' ? ` (${a.shares} x ${a.sym})` : ''}${a.loc && World.LOCATIONS[a.loc] ? `, ${World.LOCATIONS[a.loc].name}` : ''}${c !== cur && a.type !== 'stock' ? ` (${c} ${Math.round(a.value || 0).toLocaleString()})` : ''}`, M(valueOf(a, st, market).v)); }
+  for (const d of st.debts) { const c = curOfItem(d, st); const B = (n) => M(toBase(st, market, n, c)); pdf.row(`${d.name} at ${pct(d.rate, 1)} (${B(d.payment)}/month)${c !== cur ? ` (${c} ${Math.round(d.balance).toLocaleString()})` : ''}`, `-${B(d.balance)}`); }
 
   pdf.heading('Assumptions');
   const As = st.assumptions;

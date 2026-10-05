@@ -20,9 +20,31 @@
 >   support and more), each rising at its own pace above inflation; children's school fees from nursery to
 >   university; replacing the car every few years; and giving as a share of income.
 > * **Insights.** Your portfolio's real return and risk, whether each savings account beats inflation,
->   what your wealth is made of over the years, a year-by-year cash-flow table, stress tests (currency
+>   what your wealth is made of over the years, a year-by-year cash-flow table, where your money lives by currency and place, stress tests (currency
 >   devaluation, a 2008-style crash, a year without income, an inflation spike, a family emergency) and
 >   which changes matter most. Any figure can be shown in today's money or future money.
+> * **Business and investment plans.** Describe a business (or an expansion), a property to let, land,
+>   a share purchase or a loan to someone, answer a few questions, and it plays the venture out month by
+>   month in 2,000 scenarios: sector survival rates adjusted for the person running it and for where it
+>   operates, uncertain sales with a reality check on optimism, ramp-up, cost overruns, delays,
+>   imported costs that follow the dollar, loans, running out of cash and salvage. It reports the chance
+>   it beats safe savings, pays back or survives, the spread of outcomes, the money it may need,
+>   break-even sales, what would move the odds most, and what it does to the whole life plan.
+> * **The person.** Work, occupation, family, dependants, health, life cover, investing experience, goals,
+>   notes and a five-question risk profile that shapes the suggested investment mix and the advice.
+> * **Many currencies, many places.** Every holding, income, expense, school fee, debt and business plan
+>   can be in its own currency (naira, dollar, pound, euro, cedi, shilling, rand, Canadian dollar, rupee,
+>   dirham). Each currency moves against yours in every future, so dollar income and pound school fees
+>   behave differently when the naira slides. Property and land carry the growth, swings and title risk of
+>   their place: land in Manhattan and land in Port Harcourt are not the same asset. Each country brings
+>   its own inflation, share market, business closure risk and job market. All figures are editable in
+>   Settings → Assumptions.
+> * **Job loss.** Each income has a yearly chance of loss from the country and the kind of employer
+>   (public sector, large firm, small firm, contract work), a realistic search time, and pay that may come
+>   back lower. Wages drift up and down year to year. The plan reports the chance of losing a job at least
+>   once and sizes the emergency fund to the time it takes to find work.
+> * **Several people.** Keep a separate plan for each person (you, family, or clients you advise), switch
+>   between them, copy a plan, and turn on adviser mode to put your name and firm on each PDF report.
 > * **Live prices.** Shares you own on NGX or NYSE are valued at the latest price from this repository's
 >   daily data job, and dollar holdings at the latest USD/NGN rate. Two years of daily closes measure how
 >   much *your* shares actually swing, so one company counts as riskier than a fund.

@@ -4,9 +4,10 @@
 
 import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, SPEND_CATS, SCHOOL, suggestedMix, clamp } from './money.js';
 import { portfolioVol } from './market.js';
+import * as W from './world.js';
 
 export const KEY = 'tycoonplan.v1';
-export const VERSION = 2;
+export const VERSION = 4;
 
 // The kinds of account people add, and the asset class each one is modelled as.
 // usd: the amount is entered in dollars. rate: it earns a stated interest rate.
@@ -65,21 +66,78 @@ export function newState(currency = 'NGN') {
     plan: { retireAge: 55, spendRetire: null, planAge: 95, swr: 0.035, success: 0.85, growth: 0.015, pensionIncome: 0, mix: null, outlook: 'base' },
     assumptions: { infl: C.infl, inflSd: C.inflSd, deposit: C.deposit, usdRate: currency === 'USD' ? 1 : null, fxDrift: 0, fxSd: null, overrides: {} },
     checkins: [],
+    person: { occupation: '', employment: 'salaried', marital: 'single', dependants: 0, health: 'good', riskScore: null, riskAnswers: [], experience: 'some', lifeCover: 'no', goals: '', notes: '', reviewDate: '' },
+    ventures: [],
     baseline: null,
     settings: { theme: 'auto', remind: true },
   };
 }
 
-export function load() {
-  try {
-    const s = localStorage.getItem(KEY);
-    if (!s) return null;
-    return upgrade(JSON.parse(s));
-  } catch { return null; }
+// ------------------------------------------------------------------ several people
+
+// Each person (you, or each client you advise) is kept separately on this
+// phone; a small index lists them. Version 1 kept one plan under KEY.
+export const INDEX = 'tycoonplan.profiles';
+const pKey = (id) => `tycoonplan.p.${id}`;
+const readJSON = (k) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : null; } catch { return null; } };
+const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+
+export function profiles() {
+  let idx = readJSON(INDEX);
+  if (!idx) {
+    idx = { active: null, list: [] };
+    const old = readJSON(KEY);
+    if (old) {
+      const st = upgrade(old);
+      idx.list.push(summaryOf(st)); idx.active = st.id;
+      writeJSON(pKey(st.id), st);
+      try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+    }
+    writeJSON(INDEX, idx);
+  }
+  return idx;
 }
-export function save(st) {
-  try { localStorage.setItem(KEY, JSON.stringify(st)); return true; } catch { return false; }
+const summaryOf = (st, extra = {}) => ({ id: st.id, name: st.name || 'Me', currency: st.currency, updated: new Date().toISOString(), ...extra });
+
+export function load(id) {
+  const idx = profiles();
+  const want = id || idx.active;
+  if (!want) return null;
+  const st = readJSON(pKey(want));
+  return st ? upgrade(st) : null;
 }
+export function save(st, extra = {}) {
+  if (!st.id) st.id = uid();
+  const idx = profiles();
+  const i = idx.list.findIndex((p) => p.id === st.id);
+  const prev = i >= 0 ? idx.list[i] : {};
+  const row = { ...prev, ...summaryOf(st), ...extra };
+  if (i >= 0) idx.list[i] = row; else idx.list.push(row);
+  idx.active = st.id;
+  writeJSON(INDEX, idx);
+  return writeJSON(pKey(st.id), st);
+}
+export function setActive(id) { const idx = profiles(); idx.active = id; writeJSON(INDEX, idx); }
+export function noteSummary(id, extra) { const idx = profiles(); const r = idx.list.find((p) => p.id === id); if (r) { Object.assign(r, extra); writeJSON(INDEX, idx); } }
+export function remove(id) {
+  const idx = profiles();
+  idx.list = idx.list.filter((p) => p.id !== id);
+  if (idx.active === id) idx.active = idx.list.length ? idx.list[0].id : null;
+  writeJSON(INDEX, idx);
+  try { localStorage.removeItem(pKey(id)); localStorage.removeItem(`tycoonplan.analysis.${id}`); } catch { /* ignore */ }
+}
+export function duplicate(st, name) {
+  const copy = upgrade(JSON.parse(JSON.stringify(st)));
+  copy.id = uid(); copy.name = name; copy.checkins = []; copy.baseline = null; copy.created = new Date().toISOString();
+  save(copy);
+  return copy;
+}
+
+// The adviser's own details, shared by every profile on this phone.
+export const ADVISER = 'tycoonplan.adviser';
+export const adviser = () => ({ on: false, name: '', firm: '', contact: '', ...(readJSON(ADVISER) || {}) });
+export const saveAdviser = (a) => writeJSON(ADVISER, a);
+
 export function upgrade(st) {
   const base = newState(st.currency || 'NGN');
   const out = { ...base, ...st };
@@ -93,6 +151,9 @@ export function upgrade(st) {
   // Version 1 spending had no category or frequency.
   out.spending = (out.spending || []).map((x) => ({ cat: catGuess(x.name), freq: 'month', ...x }));
   for (const k of ['income', 'spending', 'accounts', 'debts', 'goals', 'checkins']) if (!Array.isArray(out[k])) out[k] = [];
+  out.person = { ...base.person, ...(st.person || {}) };
+  if (!Array.isArray(out.ventures)) out.ventures = [];
+  if (!out.id) out.id = uid();
   out.v = VERSION;
   return out;
 }
@@ -102,6 +163,28 @@ function catGuess(name = '') {
   for (const [k, c] of Object.entries(SPEND_CATS)) if (n.includes(k) || n.includes(c.name.toLowerCase().split(' ')[0])) return k;
   return 'other';
 }
+
+// ------------------------------------------------------------------ the person
+
+// Five questions about attitude to risk, scored 1 (most careful) to 5.
+export const RISK_QUIZ = [
+  ['If your investments fell 25% in a year, you would…', ['Sell everything to stop the loss', 'Sell some', 'Do nothing and wait', 'Buy a little more', 'Buy a lot more']],
+  ['When will you need most of this money?', ['Within 2 years', 'In 2–5 years', 'In 5–10 years', 'In 10–20 years', 'More than 20 years away']],
+  ['Which would you rather have?', ['A sure 10%', 'Mostly sure, small chance of more', 'A balance', 'More chance of big gains', 'The biggest possible gain, whatever the risk']],
+  ['How steady is your income?', ['Very unsteady', 'Unsteady', 'Fairly steady', 'Steady', 'Very steady, with savings behind it']],
+  ['How much do you know about investing?', ['Nothing', 'A little', 'Some', 'A good deal', 'A lot, I invest actively']],
+];
+export const RISK_LEVELS = {
+  1: { name: 'Very careful', eq: 0.5 }, 2: { name: 'Careful', eq: 0.75 }, 3: { name: 'Balanced', eq: 1 }, 4: { name: 'Growth', eq: 1.12 }, 5: { name: 'Adventurous', eq: 1.25 },
+};
+export function riskScore(answers) {
+  const a = (answers || []).filter((x) => x != null);
+  if (a.length < RISK_QUIZ.length) return null;
+  const avg = a.reduce((s, x) => s + x + 1, 0) / a.length;
+  // The first answer (how you behave in a fall) caps the score: tolerance shows in a crash.
+  return clamp(Math.min(Math.round(avg), a[0] + 2), 1, 5);
+}
+export const EMPLOYMENT = { salaried: 'Employed (salary)', self: 'Self-employed', business: 'Business owner', retired: 'Retired', student: 'Student', none: 'Not working' };
 
 // ------------------------------------------------------------------ the numbers
 
@@ -135,39 +218,73 @@ export function classOf(acc) {
 }
 
 // Value of an account in the user's currency today, and where the number came from.
+// The currency an account is held in: what the person chose, else dollars for
+// dollar-type accounts, else the plan's own currency.
+export function curOf(acc, st) {
+  if (acc.cur) return acc.cur;
+  return ACCOUNT_TYPES[acc.type] && ACCOUNT_TYPES[acc.type].usd ? 'USD' : st.currency;
+}
+// The currency of any other line (income, spending, debt, venture).
+export const curOfItem = (x, st) => x.cur || st.currency;
+// Convert into the plan's currency at today's rates.
+export const toBase = (st, market, amount, cur) => W.convert(st, market, amount, cur, st.currency);
+
+export const homeLoc = (st) => (st.home && W.LOCATIONS[st.home] ? st.home : W.HOME_LOC[W.countryOfCur(st.currency)] || 'US-OTH');
+export const homeCountry = (st) => W.LOCATIONS[homeLoc(st)].c;
+
+// Which country's economy an account rides on.
+export function countryOfAcc(acc, st) {
+  if (acc.type === 'stock') return acc.ex === 'NGX' ? 'NG' : 'US';
+  if (acc.loc && W.LOCATIONS[acc.loc]) return W.LOCATIONS[acc.loc].c;
+  const c = classOf(acc);
+  if (['globalEq', 'gold', 'crypto', 'usdBonds'].includes(c)) return 'US';
+  const cur = curOf(acc, st);
+  return cur === st.currency ? homeCountry(st) : W.countryOfCur(cur);
+}
+// The place a property, land or business sits in.
+export const placeOfAcc = (acc, st) => (acc.loc && W.LOCATIONS[acc.loc] ? acc.loc : homeLoc(st));
+
+// Value of an account in the plan's currency today, and where the number came from.
 export function valueOf(acc, st, market) {
-  const fx = usdRate(st, market) || 0;
   if (acc.type === 'stock') {
     const q = market && market.prices[acc.key];
     const price = q ? q.p : acc.lastPrice || 0;
     const cur = q ? q.c : acc.priceCur || (acc.ex === 'NGX' ? 'NGN' : 'USD');
-    const local = (acc.shares || 0) * price * (cur === st.currency ? 1 : cur === 'USD' ? fx : 0);
-    return { v: local, live: !!q, price, cur };
+    return { v: toBase(st, market, (acc.shares || 0) * price, cur), live: !!q, price, cur };
   }
-  if (ACCOUNT_TYPES[acc.type] && ACCOUNT_TYPES[acc.type].usd && st.currency !== 'USD') return { v: (acc.value || 0) * fx, live: false, usd: acc.value || 0 };
-  return { v: acc.value || 0, live: false };
+  const cur = curOf(acc, st);
+  if (cur !== st.currency) return { v: toBase(st, market, acc.value || 0, cur), live: false, cur, orig: acc.value || 0 };
+  return { v: acc.value || 0, live: false, cur };
 }
 
 export function totals(st, market) {
   const byClass = Object.fromEntries(CLASS_ORDER.map((c) => [c, 0]));
-  for (const a of st.accounts) byClass[classOf(a)] += valueOf(a, st, market).v;
+  const byCur = {};
+  for (const a of st.accounts) {
+    const v = valueOf(a, st, market).v;
+    byClass[classOf(a)] += v;
+    const c = a.type === 'stock' ? (a.ex === 'NGX' ? 'NGN' : 'USD') : curOf(a, st);
+    byCur[c] = (byCur[c] || 0) + v;
+  }
   const assets = Object.values(byClass).reduce((s, x) => s + x, 0);
-  const debt = st.debts.reduce((s, d) => s + (d.balance || 0), 0);
-  const monthlyIncome = st.income.reduce((s, x) => s + (x.amount || 0), 0);
-  const rent = st.accounts.filter((a) => ACCOUNT_TYPES[a.type] && ACCOUNT_TYPES[a.type].rent).reduce((s, a) => s + (a.rent || 0), 0);
-  const profit = st.accounts.filter((a) => ACCOUNT_TYPES[a.type] && ACCOUNT_TYPES[a.type].profit).reduce((s, a) => s + (a.profit || 0), 0);
+  const B = (x, amt) => toBase(st, market, amt || 0, curOfItem(x, st));
+  const debt = st.debts.reduce((s, d) => s + B(d, d.balance), 0);
+  const monthlyIncome = st.income.reduce((s, x) => s + B(x, x.amount), 0);
+  const inAcc = (a, k) => toBase(st, market, a[k] || 0, curOf(a, st));
+  const rent = st.accounts.filter((a) => ACCOUNT_TYPES[a.type] && ACCOUNT_TYPES[a.type].rent).reduce((s, a) => s + inAcc(a, 'rent'), 0);
+  const profit = st.accounts.filter((a) => ACCOUNT_TYPES[a.type] && ACCOUNT_TYPES[a.type].profit).reduce((s, a) => s + inAcc(a, 'profit'), 0);
   const H = st.household;
-  const monthlyLiving = st.spending.reduce((s, x) => s + monthlyOf(x), 0);
-  const school = H.kids.reduce((s, k) => s + feeAt(st, kidAge(k)), 0) / 12;
+  const monthlyLiving = st.spending.reduce((s, x) => s + B(x, monthlyOf(x)), 0);
+  const school = H.kids.reduce((s, k) => s + feeBase(st, market, kidAge(k)), 0) / 12;
   const giving = (H.givingPct || 0) * monthlyIncome;
   const monthlySpend = monthlyLiving + school + giving;
-  const debtPay = st.debts.reduce((s, d) => s + (d.payment || 0), 0);
+  const debtPay = st.debts.reduce((s, d) => s + B(d, d.payment), 0);
   const allIn = monthlyIncome + rent + profit;
   const surplus = allIn - monthlySpend - debtPay;
   const quick = byClass.cash + byClass.deposit + byClass.usdCash;
   const investable = CLASS_ORDER.filter((c) => ASSET_CLASSES[c].liquid && c !== 'cash').reduce((s, c) => s + byClass[c], 0);
   return {
-    byClass, assets, debt, netWorth: assets - debt,
+    byClass, byCur, assets, debt, netWorth: assets - debt,
     monthlyIncome, rent, profit, allIn, monthlyLiving, school, giving, monthlySpend, debtPay, surplus,
     savingsRate: allIn > 0 ? surplus / allIn : 0,
     emergencyMonths: monthlySpend > 0 ? quick / (monthlySpend + debtPay) : null,
@@ -176,11 +293,17 @@ export function totals(st, market) {
   };
 }
 
+// School fee for a child's age, in the plan's currency, from the stage's own currency.
+export function feeBase(st, market, age) {
+  for (const [id, , a0, a1] of SCHOOL.stages) if (age >= a0 && age <= a1) return toBase(st, market, st.household.fees[id] || 0, (st.household.feeCur || {})[id] || st.currency);
+  return 0;
+}
+
 // Interest earned on safe savings: the value-weighted rate across your accounts.
 export function depositRateOf(st, market) {
   let w = 0; let r = 0;
   for (const a of st.accounts) {
-    if (classOf(a) !== 'deposit') continue;
+    if (classOf(a) !== 'deposit' || curOf(a, st) !== st.currency) continue;
     const v = valueOf(a, st, market).v;
     w += v; r += v * (a.rate ?? st.assumptions.deposit);
   }
@@ -189,12 +312,18 @@ export function depositRateOf(st, market) {
 
 // Your living costs year by year in today's money, each category rising at its
 // own pace above inflation, plus giving tied to your pay.
-export function spendPath(st, years, salaryPath) {
+// With cur, only lines in that currency, in that currency's units converted at
+// today's rate; without it, everything in the plan's currency.
+export function spendPath(st, years, salaryPath, cur, market) {
   const out = new Float64Array(years + 1);
+  const conv = (x, amt) => (market ? toBase(st, market, amt, curOfItem(x, st)) : amt);
   for (let t = 0; t <= years; t++) {
     let y = 0;
-    for (const x of st.spending) y += monthlyOf(x) * 12 * Math.pow(1 + ((SPEND_CATS[x.cat] || SPEND_CATS.other).prem || 0), t);
-    y += (st.household.givingPct || 0) * (salaryPath ? salaryPath(t) : 0);
+    for (const x of st.spending) {
+      if (cur && curOfItem(x, st) !== cur) continue;
+      y += conv(x, monthlyOf(x) * 12) * Math.pow(1 + ((SPEND_CATS[x.cat] || SPEND_CATS.other).prem || 0), t);
+    }
+    if (!cur || cur === st.currency) y += (st.household.givingPct || 0) * (salaryPath ? salaryPath(t) : 0);
     out[t] = y;
   }
   return out;
@@ -202,14 +331,22 @@ export function spendPath(st, years, salaryPath) {
 
 // Costs that come and go on a schedule: school fees by each child's stage,
 // rising faster than inflation, and replacing the car every few years.
-export function extraPath(st, years) {
+export function extraPath(st, years, cur, market) {
   const H = st.household;
   const out = new Float64Array(years + 1);
   const y0 = new Date().getFullYear();
+  const feeCur = (id) => (H.feeCur || {})[id] || st.currency;
   for (let t = 0; t <= years; t++) {
     let y = 0;
-    for (const k of H.kids) y += feeAt(st, kidAge(k, y0 + t)) * Math.pow(1 + (H.eduPrem || 0), t);
-    if (H.car && H.car.every > 0 && H.car.cost > 0 && t > 0 && t % H.car.every === 0) y += H.car.cost;
+    for (const k of H.kids) {
+      const age = kidAge(k, y0 + t);
+      const stage = SCHOOL.stages.find(([, , a0, a1]) => age >= a0 && age <= a1);
+      if (!stage) continue;
+      if (cur && feeCur(stage[0]) !== cur) continue;
+      const fee = market ? feeBase(st, market, age) : feeAt(st, age);
+      y += fee * Math.pow(1 + (H.eduPrem || 0), t);
+    }
+    if ((!cur || cur === st.currency) && H.car && H.car.every > 0 && H.car.cost > 0 && t > 0 && t % H.car.every === 0) y += H.car.cost;
     out[t] = y;
   }
   return out;
@@ -245,58 +382,150 @@ export const OUTLOOKS = {
 export function mixOf(st) {
   const age = ageOf(st);
   const C = CURRENCIES[st.currency];
-  const m = st.plan.mix || suggestedMix(Math.max(0, st.plan.retireAge - age), C.usdFx);
+  let m = st.plan.mix;
+  if (!m) {
+    m = suggestedMix(Math.max(0, st.plan.retireAge - age), C.usdFx);
+    // The person's attitude to risk moves the share in shares up or down.
+    const k = RISK_LEVELS[st.person && st.person.riskScore] ? RISK_LEVELS[st.person.riskScore].eq : 1;
+    if (k !== 1) {
+      const eq = ['localEq', 'globalEq'];
+      const eqSum = eq.reduce((a, c) => a + (m[c] || 0), 0);
+      const target = clamp(eqSum * k, 0.05, 0.95);
+      const safeKeys = Object.keys(m).filter((c) => !eq.includes(c));
+      const safeSum = safeKeys.reduce((a, c) => a + (m[c] || 0), 0) || 1;
+      m = { ...m };
+      for (const c of eq) m[c] = (m[c] || 0) * (target / (eqSum || 1));
+      for (const c of safeKeys) m[c] = (m[c] || 0) * ((1 - target) / safeSum);
+    }
+  }
   const s = Object.values(m).reduce((a, b) => a + b, 0) || 1;
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v / s]));
 }
 
-// Everything the simulation needs, in yearly amounts of today's money.
+// Everything the simulation needs, in yearly amounts of today's money (in the
+// plan's currency at today's rates). Each holding becomes a position with its
+// own asset class, currency, country and place; each income its own job risk;
+// spending, school fees and debts are kept by currency so exchange rates move them.
+const EMP_DEFAULT = { salaried: 'large', self: 'contract', business: 'contract', retired: 'large', student: 'sme', none: 'sme' };
+const USD_CLASSES = ['globalEq', 'usdCash', 'usdBonds', 'gold', 'crypto'];
+
 export function buildInputs(st, market, patch = {}) {
   const T = totals(st, market);
   const age = ageOf(st);
   const C = CURRENCIES[st.currency];
   const A = st.assumptions;
+  const base = st.currency;
+  const home = homeCountry(st);
   const risk = measuredRisk(st, market);
   const shift = (OUTLOOKS[st.plan.outlook] || OUTLOOKS.base).shift;
+  const years = Math.max(1, st.plan.planAge - age);
+  const riskier = (c) => !['cash', 'deposit', 'usdCash', 'car'].includes(c);
   const cls = {};
   for (const c of CLASS_ORDER) {
-    const base = ASSET_CLASSES[c];
+    const b = ASSET_CLASSES[c];
     const o = A.overrides[c] || {};
-    const riskier = !['cash', 'deposit', 'usdCash'].includes(c);
-    cls[c] = { mu: (o.mu ?? base.mu ?? 0) + (riskier ? shift : 0), sd: o.sd ?? (risk[c] ? risk[c].sd : base.sd) };
+    cls[c] = { mu: (o.mu ?? b.mu ?? 0) + (riskier(c) ? shift : 0), sd: o.sd ?? (risk[c] ? risk[c].sd : b.sd) };
   }
-  const salary = st.income.filter((x) => x.kind !== 'other').reduce((s, x) => s + (x.amount || 0), 0) * 12;
-  const other = st.income.filter((x) => x.kind === 'other').reduce((s, x) => s + (x.amount || 0), 0) * 12;
-  const rate = usdRate(st, market) || 0;
-  const inp = {
-    age,
-    years: Math.max(1, st.plan.planAge - age),
+  // A position's return and swing: by place for property and land, by country
+  // for local shares, by class otherwise; your overrides win.
+  const params = (c, country, loc) => {
+    const o = A.overrides[c] || {};
+    if (c === 'property' || c === 'land') {
+      const P = W.place(st, loc)[c === 'property' ? 'prop' : 'land'];
+      return { mu: (o.mu ?? P.mu) + shift, sd: o.sd ?? P.sd };
+    }
+    if (c === 'localEq') {
+      const E = W.country(st, country).eq;
+      return { mu: (o.mu ?? E.mu) + shift, sd: o.sd ?? (risk.localEq && country === 'NG' ? risk.localEq.sd : E.sd) };
+    }
+    return { ...cls[c] };
+  };
+  const pos = [];
+  const find = (c, cur, country, loc, fixed) => pos.find((p) => p.cls === c && p.cur === cur && p.country === country && (p.loc || null) === (loc || null) && (p.realFixed ?? null) === (fixed ?? null));
+  for (const a of st.accounts) {
+    const c = classOf(a);
+    const cur = a.type === 'stock' ? (a.ex === 'NGX' ? 'NGN' : 'USD') : curOf(a, st);
+    const country = countryOfAcc(a, st);
+    const loc = c === 'property' || c === 'land' ? placeOfAcc(a, st) : null;
+    let realFixed = null;
+    if (cur !== base && (c === 'cash' || c === 'deposit')) {
+      const ci = W.country(st, W.countryOfCur(cur)).infl;
+      realFixed = +(c === 'cash' ? 1 / (1 + ci) - 1 : (1 + (a.rate ?? W.DEPOSIT[cur] ?? 0.03)) / (1 + ci) - 1).toFixed(5);
+    }
+    const value = valueOf(a, st, market).v;
+    const income = toBase(st, market, (a.rent || 0) + (a.profit || 0), curOf(a, st)) * 12;
+    const hit = find(c, cur, country, loc, realFixed);
+    if (hit) { hit.value += value; hit.income += income; continue; }
+    pos.push({ cls: c, cur, country, loc, ...params(c, country, loc), realFixed, value, income, mix: 0 });
+  }
+  // New savings go to the mix, held where each kind of asset naturally lives.
+  const mix = mixOf(st);
+  for (const [c, m] of Object.entries(mix)) {
+    if (!m) continue;
+    const cur = USD_CLASSES.includes(c) && base !== 'USD' ? 'USD' : base;
+    const country = USD_CLASSES.includes(c) ? 'US' : home;
+    const hit = find(c, cur, country, null, null);
+    if (hit) hit.mix += m; else pos.push({ cls: c, cur, country, loc: null, ...params(c, country, null), realFixed: null, value: 0, income: 0, mix: m });
+  }
+  // Incomes, each with the job market of the country it is earned in.
+  const emp = EMP_DEFAULT[st.person && st.person.employment] || 'large';
+  const incomes = st.income.map((x) => {
+    const cur = curOfItem(x, st);
+    const cc = x.country || (cur === base ? home : W.countryOfCur(cur));
+    const K = W.country(st, cc);
+    const work = x.kind !== 'other';
+    return { amount: toBase(st, market, (x.amount || 0) * 12, cur), cur, country: cc, work, growth: x.growth ?? st.plan.growth, sd: work ? K.wage.sd : 0, pLoss: work ? (x.pLoss ?? K.job[x.employer || emp] ?? 0.07) : 0, search: K.job.search, next: K.job.next, employer: x.employer || emp };
+  });
+  const salary = incomes.filter((x) => x.work).reduce((s, x) => s + x.amount, 0);
+  const otherIncome = incomes.filter((x) => !x.work).reduce((s, x) => s + x.amount, 0);
+  // Every currency in play.
+  const curSet = new Set([base, 'USD', ...pos.map((p) => p.cur), ...incomes.map((x) => x.cur), ...st.spending.map((x) => curOfItem(x, st)), ...st.debts.map((d) => curOfItem(d, st)), ...Object.values(st.household.feeCur || {}), ...st.ventures.map((v) => v.cur || base)]);
+  const currencies = {};
+  for (const c of curSet) {
+    const cc = c === base ? home : W.countryOfCur(c);
+    const K = W.country(st, cc);
+    const o = (A.fx || {})[c] || {};
+    currencies[c] = {
+      sd: c === 'USD' ? 0 : c === base ? A.fxSd ?? (risk.fx ? risk.fx.sd : K.fxSd) : o.sd ?? K.fxSd,
+      drift: c === base ? -(A.fxDrift || 0) : o.drift ?? 0,
+      local: K.fxLocal, country: cc, infl: c === base ? A.infl : K.infl,
+    };
+  }
+  const countries = [...new Set([home, ...pos.map((p) => p.country), ...Object.values(currencies).map((c) => c.country), ...incomes.map((x) => x.country)])];
+  // Spending and scheduled costs by currency.
+  const spendBy = {}; const extraBy = {};
+  for (const c of curSet) {
+    const sp = spendPath(st, years, (t) => salary * Math.pow(1 + st.plan.growth, t), c, market);
+    if (sp.some((x) => x)) spendBy[c] = sp;
+    const ex = extraPath(st, years, c, market);
+    if (ex.some((x) => x)) extraBy[c] = ex;
+  }
+  if (!spendBy[base]) spendBy[base] = new Float64Array(years + 1);
+  if (!extraBy[base]) extraBy[base] = new Float64Array(years + 1);
+  const debts = st.debts.filter((d) => d.balance > 0).map((d) => { const cur = curOfItem(d, st); return { bal: toBase(st, market, d.balance, cur), rate: d.rate || 0, payment: toBase(st, market, d.payment || 0, cur), cur }; });
+  const spendNow = Object.values(spendBy).reduce((s, p) => s + p[0], 0);
+  return {
+    age, years,
     retireAge: st.plan.retireAge,
     planAge: st.plan.planAge,
     pensionAge: C.pensionAge,
-    salary,
-    otherIncome: other,
-    growth: st.plan.growth,
-    spendNow: (T.monthlyLiving + T.giving) * 12,
-    spendPath: spendPath(st, Math.max(1, st.plan.planAge - age), (t) => salary * Math.pow(1 + st.plan.growth, t)),
-    extraPath: extraPath(st, Math.max(1, st.plan.planAge - age)),
+    base, home, countries, currencies, positions: pos, incomes, spendBy, extraBy, debts,
+    salary, otherIncome, growth: st.plan.growth,
+    spendNow,
     spendRetire: (st.plan.spendRetire ?? T.monthlyLiving) * 12,
     pensionIncome: (st.plan.pensionIncome || 0) * 12,
     rent: T.rent * 12,
     bizProfit: T.profit * 12,
     start: { ...T.byClass },
-    debts: st.debts.filter((d) => d.balance > 0).map((d) => ({ bal: d.balance, rate: d.rate || 0, payment: d.payment || 0 })),
     goals: st.goals.map((g) => ({ id: g.id, age: g.age, amount: g.amount || 0 })),
-    mix: mixOf(st),
-    cls,
+    mix, cls,
     infl: A.infl,
     inflSd: A.inflSd,
     depositRate: depositRateOf(st, market),
-    usdFx: C.usdFx && rate > 0,
+    usdFx: base !== 'USD',
     fxDrift: A.fxDrift || 0,
-    fxSd: A.fxSd ?? (risk.fx ? risk.fx.sd : 0.1),
+    fxSd: currencies[base].sd,
     swr: st.plan.swr,
     ...patch,
   };
-  return inp;
 }

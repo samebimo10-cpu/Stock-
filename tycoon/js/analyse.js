@@ -2,22 +2,61 @@
 // take?", and your next steps ranked by how much they matter. Pure and plain
 // data in and out, so it can run in a background worker and in tests.
 
-import { simulate, makeShocks, zeroShocks, safeSpending, extraSavingNeeded, earliestRetirement } from './sim.js';
-import { totals, buildInputs, measuredRisk, ageOf, classOf, valueOf, mixOf, ACCOUNT_TYPES, feeAt, kidAge } from './model.js';
+import { simulate, makeShocks, zeroShocks, safeSpending, extraSavingNeeded, earliestRetirement, needK, scalePositions, scaleIncomes, shiftReturns, addCost, scaleJobRisk, scaleForeign } from './sim.js';
+import * as W from './world.js';
+import { totals, buildInputs, measuredRisk, ageOf, classOf, valueOf, mixOf, ACCOUNT_TYPES, feeAt, kidAge, curOf, curOfItem, toBase, homeCountry, placeOfAcc, feeBase } from './model.js';
 import { compare } from './debt.js';
 import { fmt, pct, CURRENCIES, ASSET_CLASSES, CLASS_ORDER, savingFor } from './money.js';
+import { simulateVenture, ventureLevers, planFlows, breakEven, END_CLASS } from './venture.js';
+import { portfolioVol } from './market.js';
 
 let cache = { key: null, main: null, quick: null, mini: null };
-function shocksFor(years, paths, quick) {
-  const key = `${years}|${paths}|${quick}`;
-  if (cache.key !== key) cache = { key, main: makeShocks(paths, years, 'plan-main'), quick: makeShocks(quick, years, 'plan-quick'), mini: makeShocks(Math.max(100, Math.round(quick / 2)), years, 'plan-mini') };
+function shocksFor(years, paths, quick, K = 18) {
+  const key = `${years}|${paths}|${quick}|${K}`;
+  if (cache.key !== key) cache = { key, main: makeShocks(paths, years, 'plan-main', K), quick: makeShocks(quick, years, 'plan-quick', K), mini: makeShocks(Math.max(100, Math.round(quick / 2)), years, 'plan-mini', K) };
   return cache;
 }
 
+// The context a venture needs from the rest of the plan.
+export function ventureCtx(st, market, inp, v) {
+  const cur = (v && v.cur) || st.currency;
+  const loc = (v && v.loc) || null;
+  const ctx = { safeReal: Math.max(0, (1 + inp.depositRate) / (1 + inp.infl) - 1), fxSd: inp.currencies && inp.currencies[cur] ? inp.currencies[cur].sd : inp.usdFx ? inp.fxSd : 0 };
+  // Rentals and land take the growth and swing of their own place.
+  if (v && (v.kind === 'rental' || v.kind === 'land')) ctx.place = W.place(st, loc || W.HOME_LOC[W.countryOfCur(st.currency)]);
+  if (v && v.kind === 'shares' && v.key && market) {
+    const pv = portfolioVol(market, [{ key: v.key, value: 1 }]);
+    if (pv) { const d = (ASSET_CLASSES[v.cls] || ASSET_CLASSES.localEq).sd; ctx.measuredSd = Math.sqrt(0.5 * d * d + 0.5 * pv.vol * pv.vol); ctx.measured = pv.vol; }
+  }
+  return ctx;
+}
+
+// Every planned venture: its own 2,000 scenarios, what moves its odds, and
+// its effect on your whole plan.
+export function ventureReports(st, market, inp, { paths = 2000, levers = true } = {}) {
+  return st.ventures.map((v) => {
+    const ctx = ventureCtx(st, market, inp, v);
+    const res = simulateVenture(v, ctx, { paths, keep: true });
+    const L = levers ? ventureLevers(v, ctx, { paths: 400 }) : null;
+    return { id: v.id, res, levers: L ? L.levers : [], breakEven: breakEven(v), measured: ctx.measured || null };
+  });
+}
+const toPlan = (reports, st, inp, paths, market) => reports.filter((r) => (st.ventures.find((v) => v.id === r.id) || {}).include !== false).map((r) => {
+  const v = st.ventures.find((x) => x.id === r.id);
+  const pf = planFlows(r.res, inp.years, r.res.paths);
+  const cur = v.cur || st.currency;
+  const k = toBase(st, market, 1, cur);
+  if (k !== 1) { for (let i = 0; i < pf.flows.length; i++) pf.flows[i] *= k; for (let i = 0; i < pf.terminal.length; i++) pf.terminal[i] *= k; }
+  return { ...pf, id: v.id, Y: inp.years + 1, paths: r.res.paths, cur, country: v.loc && W.LOCATIONS[v.loc] ? W.LOCATIONS[v.loc].c : W.countryOfCur(cur), cls: v.kind === 'shares' ? v.cls : END_CLASS[v.kind] || 'business' };
+});
+
 export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
   const T = totals(st, market);
-  const inp = buildInputs(st, market);
-  const S = shocksFor(inp.years, paths, quick);
+  const inp0 = buildInputs(st, market);
+  const reports = ventureReports(st, market, inp0, { paths });
+  const vflows = toPlan(reports, st, inp0, paths, market);
+  const inp = vflows.length ? { ...inp0, ventures: vflows } : inp0;
+  const S = shocksFor(inp.years, paths, quick, needK(inp));
   const main = simulate(inp, S.main);
   const q = (patch) => simulate({ ...inp, ...patch }, S.quick, { keepPaths: false });
   const base = q({});
@@ -53,9 +92,19 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
     middle: simulate(inp, zeroShocks(inp.years), { keepPaths: false, trace: true }).rows,
     infl: inp.infl,
     portfolio: portfolioStats(st, market, inp),
+    exposures: exposures(st, market, inp),
+    jobLoss: main.jobLoss,
+    currencies: inp.currencies ? Object.fromEntries(Object.entries(inp.currencies).map(([c, x]) => [c, { sd: x.sd, infl: x.infl, rate: W.rate(st, market, c) }])) : {},
     stress: stressTests(inp, qm, baseMini),
     sensitivity: sensitivity(st, inp, qm, baseMini),
     steps: [],
+    ventures: reports.map((r) => {
+      const { yearly, terminals, cum, ...rest } = r.res;
+      // The whole plan without this one venture, on the same futures.
+      const others = vflows.filter((x) => x.id !== r.id);
+      const w = simulate({ ...inp0, ventures: others.length ? others : undefined }, S.quick, { keepPaths: false });
+      return { id: r.id, ...rest, cum, levers: r.levers, breakEven: r.breakEven, measured: r.measured, planWithout: w.success, planWith: base.success, retireWithout: w.liquidAtRetire.p50, retireWith: base.liquidAtRetire.p50, freeWithout: w.freeAge.p50, freeWith: base.freeAge.p50 };
+    }),
   };
 
   // ------------------------------------------------------------ next steps, most important first
@@ -86,8 +135,10 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
     steps.push({ id: 'debtstuck', level: 'urgent', title: 'A debt payment does not cover its interest', body: 'That debt will never shrink at this payment. Raise the payment or talk to the lender.', go: 'debts' });
   }
 
-  const selfEmployed = !st.income.some((x) => x.kind !== 'other') || T.profit > T.monthlyIncome;
-  const wantMonths = selfEmployed ? 6 : 3;
+  const selfEmployed = ['self', 'business'].includes(st.person.employment) || !st.income.some((x) => x.kind !== 'other') || T.profit > T.monthlyIncome;
+  const mainInc = (inp.incomes || []).filter((x) => x.work).sort((a, b) => b.amount - a.amount)[0];
+  const searchM = mainInc ? Math.round(mainInc.search || 6) : 3;
+  const wantMonths = Math.max(selfEmployed ? 6 : 3, Math.min(12, searchM));
   if (spendM > 0 && T.emergencyMonths != null && T.emergencyMonths >= 1 && T.emergencyMonths < wantMonths) {
     const gap = wantMonths * spendM - T.quick;
     const per = Math.max(0, T.surplus * 0.5);
@@ -111,10 +162,13 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
 
   const yearsLeft = st.plan.retireAge - age;
   if (C.usdFx && inp.usdFx && yearsLeft >= 5 && inv > 0) {
-    const usdShare = (T.byClass.globalEq + T.byClass.usdCash) / inv;
+    // Anything held in another currency counts, wherever it is: dollar funds, a flat in London, land in New York.
+    const held = (inp.positions || []).filter((p) => p.cls !== 'car' && p.value > 0);
+    const all = held.reduce((s, p) => s + p.value, 0);
+    const usdShare = all > 0 ? held.filter((p) => p.cur !== inp.base && p.cur !== 'BASE').reduce((s, p) => s + p.value, 0) / all : 0;
     if (usdShare < 0.2) {
       const slide = market && market.fxDrift != null && st.currency === 'NGN' ? ` The naira moved ${pct(Math.abs(market.fxDrift), 0)} a year against the dollar over the last two years of data.` : '';
-      steps.push({ id: 'currency', level: 'important', title: `Only ${pct(usdShare, 0)} of your investments are in dollars`, body: `Long-term money held only in your own currency rises and falls with it.${slide} Holding a share in dollar funds or dollar savings protects what it can buy.`, go: 'plan' });
+      steps.push({ id: 'currency', level: 'important', title: `Only ${pct(usdShare, 0)} of what you own is in dollars or another currency`, body: `Long-term money held only in your own currency rises and falls with it.${slide} Holding a share in dollar funds or dollar savings protects what it can buy.`, go: 'plan' });
     }
   }
 
@@ -149,8 +203,35 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
     steps.push({ id: 'realrate', level: 'good', title: `${a.name}: earning less than inflation`, body: `It pays ${pct(a.rate, 1)} while prices rise ${pct(A.infl, 1)}, so it loses about ${pct(-a.real, 1)} of buying power a year (${f(-a.real * a.value)}). Compare T-bill, money market and fixed-deposit rates, or move long-term money to assets that beat inflation.`, go: 'money' });
   }
   if (st.household.kids.length) {
-    const fees = schoolTotal(st, inp.years);
+    const fees = schoolTotal(st, inp.years, market);
     if (fees > 0) steps.push({ id: 'school', level: 'good', title: `School fees ahead: about ${f(fees)} in today's money`, body: `That is the total for ${st.household.kids.length === 1 ? 'your child' : `your ${st.household.kids.length} children`} through university, with fees rising ${pct(st.household.eduPrem, 0)} a year faster than prices. It is already in your plan; check the fees under Money → Household.`, go: 'money' });
+  }
+  const deps = (st.person.dependants || 0) + st.household.kids.length;
+  if (deps > 0 && st.person.lifeCover !== 'yes' && T.monthlyIncome > 0) {
+    steps.push({ id: 'cover', level: 'important', title: `Protect ${deps === 1 ? 'the person who depends' : `the ${deps} people who depend`} on you`, body: `If your income stopped for good, your family would need about ${f(10 * 12 * T.monthlySpend)} to keep going for ten years. Term life insurance and health cover are usually the cheapest way to protect them.`, go: 'home' });
+  }
+  for (const r of out.ventures) {
+    const v = st.ventures.find((x) => x.id === r.id);
+    if (!v || v.include === false) continue;
+    const have = T.quick + T.investable;
+    if (r.peak.p50 > have) steps.push({ id: `fund-${v.id}`, level: 'urgent', title: `${v.name || 'Your venture'} needs more money than you have`, body: `It typically needs ${f(r.peak.p50)} (up to ${f(r.peak.p90)}), but your cash, savings and investments come to ${f(have)}. Plan where the rest comes from (a loan, a partner, a smaller start) before you begin.`, go: 'plan' });
+    else if (r.planWith < r.planWithout - 0.05) steps.push({ id: `venture-${v.id}`, level: 'important', title: `${v.name || 'Your venture'} lowers your plan's odds`, body: `With it your plan works in ${pct(r.planWith)} of futures; without it, ${pct(r.planWithout)}. Look at what would improve it before committing the money.`, go: 'plan' });
+  }
+  // Money you will pay in a currency you hold little of.
+  for (const x of out.exposures.byCur) {
+    if (x.cur === st.currency) continue;
+    const need = x.spend + x.debt / 5;
+    if (need > 0 && x.assets + x.income * 0.5 < need * 2) {
+      steps.push({ id: `fx-${x.cur}`, level: 'important', title: `You pay in ${x.cur} but hold little in ${x.cur}`, body: `About ${f(x.spend)} a year of your spending${x.debt ? ` and ${f(x.debt)} of debt` : ''} is in ${x.cur}, but you hold ${f(x.assets)} in it. If your currency weakens, these costs grow in your money. Building savings in ${x.cur} matches money to the bills.`, go: 'insights' });
+    }
+  }
+  // Too much of your wealth in one place.
+  const topPlace = out.exposures.byPlace[0];
+  if (topPlace && T.netWorth > 0 && topPlace.value > 0.6 * T.netWorth && out.exposures.byPlace.length >= 1 && topPlace.value > 0) {
+    steps.push({ id: 'place', level: 'good', title: `${Math.round((topPlace.value / T.netWorth) * 100)}% of your wealth is property or land in ${topPlace.name.split(':')[0]}`, body: 'One city\'s property market, title system and economy decide most of your future. Spreading new money across other assets and places lowers that risk.', go: 'insights' });
+  }
+  if (out.jobLoss > 0.3 && T.emergencyMonths != null && T.emergencyMonths < wantMonths) {
+    steps.push({ id: 'jobrisk', level: 'important', title: `${pct(out.jobLoss)} chance of losing a job at least once before you stop work`, body: `Finding new work typically takes about ${searchM} months where you earn. An emergency fund of ${wantMonths} months of spending covers it without new debt.`, go: 'money' });
   }
   const order = { urgent: 0, important: 1, good: 2 };
   steps.sort((a, b) => order[a.level] - order[b.level]);
@@ -161,7 +242,7 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
 // What changes if you do X? Same random futures, so the difference is real.
 export function whatIf(st, market, patch, { quick = 600 } = {}) {
   const inp = buildInputs(st, market);
-  const S = shocksFor(inp.years, 2000, quick);
+  const S = shocksFor(inp.years, 2000, quick, needK(inp));
   const a = simulate(inp, S.quick, { keepPaths: false });
   const b = simulate({ ...inp, ...patch }, S.quick, { keepPaths: false });
   return { before: { success: a.success, free: a.freeAge.p50 }, after: { success: b.success, free: b.freeAge.p50 } };
@@ -172,95 +253,122 @@ export { classOf };
 // ------------------------------------------------------------------ portfolio
 
 // Expected real return and yearly swing of everything you own, from the same
-// factor model the projection uses, plus the real return of each savings account.
+// factors the projection uses: the world, each country, each currency, and
+// each holding's own risk. Plus the real return of each savings account.
 const FACTORS = {
-  bonds: [0.1, 0.35, 0], localEq: [0.35, 0.55, 0], globalEq: [0.95, 0, 0], usdCash: [0, 0, 0], usdBonds: [0.3, 0, 0], gold: [-0.15, 0, 0],
-  crypto: [0.5, 0, 0], pension: [0.5, 0.4, 0], property: [0.2, 0.5, 0], land: [0.1, 0.5, 0], business: [0.3, 0.5, 0], reit: [0.3, 0.5, 0], deposit: [0, 0.2, 0], car: [0, 0, 0], cash: [0, 0, 0],
+  bonds: [0.1, 0.35], localEq: [0.35, 0.55], globalEq: [0.95, 0], usdCash: [0, 0], usdBonds: [0.3, 0], gold: [-0.15, 0],
+  crypto: [0.5, 0], pension: [0.5, 0.4], property: [0.2, 0.5], land: [0.1, 0.5], business: [0.3, 0.5], reit: [0.3, 0.5], deposit: [0, 0.2], car: [0, 0], cash: [0, 0],
 };
 export function portfolioStats(st, market, inp) {
-  const T = totals(st, market);
   const infl = inp.infl;
-  const total = CLASS_ORDER.filter((c) => !ASSET_CLASSES[c].consumer).reduce((s, c) => s + T.byClass[c], 0);
-  const real = (c) => (c === 'cash' ? 1 / (1 + infl) - 1 : c === 'deposit' ? (1 + inp.depositRate) / (1 + infl) - 1 : inp.cls[c].mu);
-  let mu = 0; const f = [0, 0, 0]; let idio = 0; let usd = 0; let liquid = 0;
-  const rows = [];
-  for (const c of CLASS_ORDER) {
-    const v = T.byClass[c];
-    if (!v || ASSET_CLASSES[c].consumer) continue;
-    const w = v / total;
-    const sd = c === 'deposit' ? inp.cls[c].sd * 0.3 : c === 'cash' ? 0 : inp.cls[c].sd;
-    const L = FACTORS[c] || [0, 0, 0];
-    const own = Math.sqrt(Math.max(0, 1 - L[0] ** 2 - L[1] ** 2));
-    f[0] += w * sd * L[0]; f[1] += w * sd * L[1];
-    idio += (w * sd * own) ** 2;
-    if (ASSET_CLASSES[c].usd && inp.usdFx) { f[1] += -0.5 * w * inp.fxSd; f[2] += 0.87 * w * inp.fxSd; usd += w; }
-    if (ASSET_CLASSES[c].liquid) liquid += w;
-    mu += w * real(c);
-    rows.push({ cls: c, name: ASSET_CLASSES[c].short, value: v, weight: w, real: real(c), sd });
+  const P = (inp.positions || []).filter((p) => p.cls !== 'car' && p.value > 0);
+  const total = P.reduce((s, p) => s + p.value, 0) || 1;
+  const realOf = (p) => (p.realFixed != null ? p.realFixed : p.cls === 'cash' ? 1 / (1 + infl) - 1 : p.cls === 'deposit' ? (1 + inp.depositRate) / (1 + infl) - 1 : p.mu);
+  const sdOf = (p) => (p.realFixed != null || p.cls === 'cash' ? 0 : p.cls === 'deposit' ? p.sd * 0.3 : p.sd);
+  let mu = 0; let world = 0; let idio = 0; const byCountry = {}; const byCur = {};
+  const rowsByCls = {};
+  for (const p of P) {
+    const w = p.value / total;
+    const sd = sdOf(p);
+    const L = FACTORS[p.cls] || [0, 0];
+    world += w * sd * L[0];
+    byCountry[p.country] = (byCountry[p.country] || 0) + w * sd * L[1];
+    idio += (w * sd * Math.sqrt(Math.max(0, 1 - L[0] ** 2 - L[1] ** 2))) ** 2;
+    byCur[p.cur] = (byCur[p.cur] || 0) + w;
+    mu += w * realOf(p);
+    const r = rowsByCls[p.cls] || (rowsByCls[p.cls] = { cls: p.cls, name: ASSET_CLASSES[p.cls].short, value: 0, weight: 0, realW: 0 });
+    r.value += p.value; r.weight += w; r.realW += w * realOf(p);
   }
-  const vol = Math.sqrt(f[0] ** 2 + f[1] ** 2 + f[2] ** 2 + idio);
+  // Currency risk: each foreign holding moves with its currency against yours.
+  const C = inp.currencies || {};
+  const baseSd = C[inp.base] ? C[inp.base].sd : inp.fxSd || 0;
+  let fxVar = 0; let foreign = 0;
+  for (const [c, w] of Object.entries(byCur)) if (c !== inp.base) { foreign += w; fxVar += (w * ((C[c] && C[c].sd) || 0)) ** 2; }
+  fxVar += (foreign * baseSd) ** 2;
+  const vol = Math.sqrt(world ** 2 + Object.values(byCountry).reduce((s, x) => s + x * x, 0) + idio + fxVar);
   const accounts = st.accounts.filter((a) => classOf(a) === 'deposit' || classOf(a) === 'cash').map((a) => {
-    const rate = classOf(a) === 'cash' ? 0 : (a.rate ?? st.assumptions.deposit);
-    return { id: a.id, name: a.name || ACCOUNT_TYPES[a.type].name, rate, real: (1 + rate) / (1 + infl) - 1, value: valueOf(a, st, market).v };
+    const cur = curOf(a, st);
+    const ci = cur === st.currency ? infl : W.country(st, W.countryOfCur(cur)).infl;
+    const rate = classOf(a) === 'cash' ? 0 : (a.rate ?? (cur === st.currency ? st.assumptions.deposit : W.DEPOSIT[cur] ?? 0.03));
+    return { id: a.id, name: a.name || ACCOUNT_TYPES[a.type].name, cur, rate, infl: ci, real: (1 + rate) / (1 + ci) - 1, value: valueOf(a, st, market).v };
   });
   const level = vol < 0.05 ? 'Low' : vol < 0.1 ? 'Moderate' : vol < 0.18 ? 'Medium-high' : 'High';
-  return { total, mu, vol, level, usdShare: usd, liquidShare: liquid, rows: rows.sort((a, b) => b.value - a.value), accounts, badYear: Math.exp(Math.log(1 + mu) - vol * vol / 2 - 1.645 * vol) - 1 };
+  const liquid = P.filter((p) => ASSET_CLASSES[p.cls].liquid).reduce((s, p) => s + p.value, 0) / total;
+  return {
+    total, mu, vol, level, usdShare: foreign, foreignShare: foreign, liquidShare: liquid,
+    rows: Object.values(rowsByCls).map((r) => ({ ...r, real: r.weight ? r.realW / r.weight : 0 })).sort((a, b) => b.value - a.value),
+    accounts, badYear: Math.exp(Math.log(1 + mu) - vol * vol / 2 - 1.645 * vol) - 1,
+  };
+}
+
+// Where the person's money, income, spending and debts sit, by currency and by place.
+export function exposures(st, market, inp) {
+  const cur = {};
+  const add = (c, k, v) => { const r = cur[c] || (cur[c] = { cur: c, assets: 0, income: 0, spend: 0, debt: 0 }); r[k] += v; };
+  for (const p of inp.positions || []) if (p.value > 0) add(p.cur, 'assets', p.value);
+  for (const x of inp.incomes || []) add(x.cur, 'income', x.amount);
+  for (const [c, arr] of Object.entries(inp.spendBy || {})) add(c, 'spend', arr[0] || 0);
+  for (const [c, arr] of Object.entries(inp.extraBy || {})) { let s = 0; for (const x of arr) s += x; if (s) add(c, 'spend', s / Math.max(1, arr.length)); }
+  for (const d of inp.debts || []) add(d.cur, 'debt', d.bal);
+  const places = {};
+  for (const a of st.accounts) {
+    const c = classOf(a);
+    if (c !== 'property' && c !== 'land') continue;
+    const loc = placeOfAcc(a, st);
+    places[loc] = (places[loc] || 0) + valueOf(a, st, market).v;
+  }
+  return { byCur: Object.values(cur).sort((a, b) => b.assets + b.income - a.assets - a.income), byPlace: Object.entries(places).map(([loc, v]) => ({ loc, name: W.LOCATIONS[loc] ? W.LOCATIONS[loc].name : loc, value: v })).sort((a, b) => b.value - a.value) };
 }
 
 // ------------------------------------------------------------------ stress tests
 
-function scaleStart(inp, k) {
-  const start = { ...inp.start };
-  for (const [c, x] of Object.entries(k)) start[c] = (start[c] || 0) * x;
-  return start;
-}
+const CRASH = { localEq: 0.6, globalEq: 0.6, reit: 0.65, crypto: 0.3, property: 0.85, land: 0.9, business: 0.8, pension: 0.82, usdBonds: 0.95, gold: 1.1 };
 export function stressTests(inp, q, base) {
   const tests = [];
   const add = (id, name, what, patch) => {
     const r = q(patch);
     tests.push({ id, name, what, success: r.success, delta: r.success - base.success, free: r.freeAge.p50 });
   };
+  const curName = (CURRENCIES[inp.base] || {}).name || 'Your currency';
   if (inp.usdFx) {
-    add('deval', 'Your currency halves against the dollar', 'Prices jump 25%, dollar assets double in your currency, pay lags behind.', {
-      start: scaleStart(inp, { cash: 0.8, deposit: 0.8, bonds: 0.8, localEq: 0.8, reit: 0.8, pension: 0.85, globalEq: 1.6, usdCash: 1.6, usdBonds: 1.6, gold: 1.6, crypto: 1.6 }),
-      debts: inp.debts.map((d) => ({ ...d, bal: d.bal * 0.8 })), salary: inp.salary * 0.85,
+    // Prices jump 25%; anything in another currency is worth 1.6 times as much
+    // in yours, and so is anything you owe or pay in it.
+    add('deval', `The ${curName.split(' ').pop()} halves against the dollar`, 'Prices jump 25%. Holdings, income, school fees and debts in other currencies are worth more in yours; pay in your currency lags.', {
+      ...scalePositions(inp, (p) => (p.cur !== inp.base && p.cur !== 'BASE' ? 1.6 : ['cash', 'deposit', 'bonds', 'localEq', 'reit'].includes(p.cls) ? 0.8 : p.cls === 'pension' ? 0.85 : 1)),
+      ...scaleIncomes(inp, (x) => (x.cur !== inp.base && x.cur !== 'BASE' ? 1.6 : x.work ? 0.85 : 1)),
+      ...scaleForeign(inp, 1.6),
     });
   }
-  add('crash', 'A market crash like 2008', 'Shares fall 40%, crypto 70%, property 15%, then markets carry on.', {
-    start: scaleStart(inp, { localEq: 0.6, globalEq: 0.6, reit: 0.65, crypto: 0.3, property: 0.85, land: 0.9, business: 0.8, pension: 0.82, usdBonds: 0.95, gold: 1.1 }),
-  });
-  const ex = Float64Array.from(inp.extraPath || new Float64Array(inp.years + 1));
-  ex[0] += inp.salary;
-  add('job', 'You lose your income for a year', 'No pay for twelve months; spending carries on.', { extraPath: ex });
-  add('infl', 'Inflation stays 10 points higher', 'Prices rise much faster for good; pay and savings rates only partly keep up.', { infl: inp.infl + 0.1, depositRate: inp.depositRate + 0.07, salary: inp.salary * 0.9, growth: inp.growth - 0.01 });
-  const ex2 = Float64Array.from(inp.extraPath || new Float64Array(inp.years + 1));
-  ex2[1] += inp.spendNow * 0.5;
-  add('emergency', 'A family emergency next year', 'A one-off cost of six months of spending.', { extraPath: ex2 });
+  add('crash', 'A market crash like 2008', 'Shares fall 40%, crypto 70%, property 15%, then markets carry on.', scalePositions(inp, (p) => CRASH[p.cls] ?? 1));
+  add('job', 'You lose your income for a year', 'No pay for twelve months; spending carries on.', addCost(inp, 0, inp.salary || 0));
+  add('infl', 'Inflation stays 10 points higher', 'Prices rise much faster for good; pay and savings rates only partly keep up.', { infl: inp.infl + 0.1, depositRate: inp.depositRate + 0.07, ...scaleIncomes(inp, (x) => (x.cur === inp.base || x.cur === 'BASE' ? 0.9 : 1)) });
+  add('emergency', 'A family emergency next year', 'A one-off cost of six months of spending.', addCost(inp, 1, (inp.spendNow || 0) * 0.5));
   return tests;
 }
 
 // ------------------------------------------------------------------ what matters most
 
 export function sensitivity(st, inp, q, base) {
-  const T = Math.max(0, inp.salary + inp.otherIncome + inp.rent + inp.bizProfit - inp.spendNow);
-  const risky = (d) => Object.fromEntries(Object.entries(inp.cls).map(([c, a]) => [c, ['cash', 'deposit', 'usdCash', 'car'].includes(c) ? a : { ...a, mu: a.mu + d }]));
+  const T = Math.max(0, (inp.salary || 0) + (inp.otherIncome || 0) + (inp.rent || 0) + (inp.bizProfit || 0) - (inp.spendNow || 0));
   const list = [
     ['Save 20% more each month', { spendCut: 0.2 * T }],
     ['Save 20% less each month', { spendCut: -0.2 * T }],
     ['Stop work 3 years later', { retireAge: inp.retireAge + 3 }],
     ['Stop work 3 years sooner', { retireAge: inp.retireAge - 3 }],
     ['Spend 20% less once you stop', { spendRetire: inp.spendRetire * 0.8 }],
-    ['Returns 1.5% a year lower', { cls: risky(-0.015) }],
-    ['Inflation 5 points higher', { infl: inp.infl + 0.05, depositRate: inp.depositRate + 0.035, salary: inp.salary * 0.95, growth: inp.growth - 0.005 }],
+    ['Returns 1.5% a year lower', shiftReturns(inp, -0.015)],
+    ['Inflation 5 points higher', { infl: inp.infl + 0.05, depositRate: inp.depositRate + 0.035, ...scaleIncomes(inp, (x) => (x.cur === inp.base || x.cur === 'BASE' ? 0.95 : 1)) }],
   ];
+  if (inp.incomes && inp.incomes.some((x) => x.work)) list.push(['Job loss twice as likely', scaleJobRisk(inp, 2)]);
+  if (inp.usdFx && inp.currencies) list.push([`Your currency 3% weaker every year`, { currencies: { ...inp.currencies, [inp.base]: { ...inp.currencies[inp.base], drift: inp.currencies[inp.base].drift - 0.03 } } }]);
   return list.map(([label, patch]) => { const r = q(patch); return { label, success: r.success, delta: r.success - base.success }; })
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 }
 
 // School fees still to pay for all children, in today's money, with fees rising faster than prices.
-export function schoolTotal(st, years) {
+export function schoolTotal(st, years, market) {
   const y0 = new Date().getFullYear();
   let sum = 0;
-  for (let t = 0; t <= years; t++) for (const k of st.household.kids) sum += feeAt(st, kidAge(k, y0 + t)) * Math.pow(1 + (st.household.eduPrem || 0), t);
+  for (let t = 0; t <= years; t++) for (const k of st.household.kids) sum += (market ? feeBase(st, market, kidAge(k, y0 + t)) : feeAt(st, kidAge(k, y0 + t))) * Math.pow(1 + (st.household.eduPrem || 0), t);
   return sum;
 }

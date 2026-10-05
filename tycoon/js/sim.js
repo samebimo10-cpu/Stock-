@@ -22,8 +22,6 @@
 
 import { ASSET_CLASSES, CLASS_ORDER, CURRENCIES, clamp } from './money.js';
 
-// When money runs short, it comes from the safest, most liquid places first.
-const LIQUID_DRAW = ['cash', 'deposit', 'usdCash', 'bonds', 'usdBonds', 'gold', 'reit', 'localEq', 'globalEq', 'crypto'];
 const MIX_SD = Math.sqrt(0.9 + 0.1 * 2.2 * 2.2);
 const CALM = 1 / MIX_SD;
 const STORM = 2.2 / MIX_SD;
@@ -63,183 +61,290 @@ function hashStr(s) {
 }
 
 // The random draws for every path and year, made once and reused by every
-// scenario so comparisons are fair.
-export function makeShocks(paths, years, seed = 'plan') {
-  const r = rng(seed);
-  const K = 18;
-  const z = new Float64Array(paths * years * K);
+// scenario so comparisons are fair. K is the number of draws per year; the
+// plan says how many it needs (needK).
+export function makeShocks(paths, years, seed = 'plan', K = 18) {
+  const r = rng(`${seed}:${K}`);
+  const z = new Float32Array(paths * years * K);
   for (let i = 0; i < z.length; i++) z[i] = r.t();
   return { paths, years, K, z };
 }
 
-// Factor loadings: [world, local, own]. Each row's squares sum to about 1.
-const LOAD = {
-  bonds: [0.1, 0.35, 0.93],
-  localEq: [0.35, 0.55, 0.76],
-  globalEq: [0.95, 0, 0.31],
-  usdCash: [0, 0, 1],
-  crypto: [0.5, 0, 0.87],
-  pension: [0.5, 0.4, 0.77],
-  property: [0.2, 0.5, 0.84],
-  business: [0.3, 0.5, 0.81],
-  deposit: [0, 0.2, 0.98],
-  reit: [0.3, 0.5, 0.81],
-  usdBonds: [0.3, 0, 0.95],
-  gold: [-0.15, 0, 0.99],
-  land: [0.1, 0.5, 0.86],
-  car: [0, 0, 1],
-};
-// Slots 0-3 are the world, local, inflation and currency factors; the rest are each class's own.
-const OWN_SLOT = { bonds: 4, localEq: 5, globalEq: 6, usdCash: 7, crypto: 8, pension: 9, property: 10, business: 11, deposit: 12, reit: 13, usdBonds: 14, gold: 15, land: 16, car: 17 };
+// All draws at zero: the middle path, used for the year-by-year table.
+export function zeroShocks(years, K = 96) { return { paths: 1, years, K, z: new Float32Array(years * K) }; }
 
-// All shocks at zero: the middle path, used for the year-by-year table.
-export function zeroShocks(years) { return { paths: 1, years, K: 18, z: new Float64Array(years * 18) }; }
+// Factor loadings by asset class: [world, the position's own country].
+// The rest of each class's swing is its own.
+const LOAD = {
+  bonds: [0.1, 0.35], localEq: [0.35, 0.55], globalEq: [0.95, 0], usdCash: [0, 0], usdBonds: [0.3, 0], gold: [-0.15, 0],
+  crypto: [0.5, 0], pension: [0.5, 0.4], property: [0.2, 0.5], land: [0.1, 0.5], business: [0.3, 0.5], reit: [0.3, 0.5], deposit: [0, 0.2], car: [0, 0], cash: [0, 0],
+};
+// When money runs short, it comes from the safest, most liquid places first.
+const RANK = { cash: 0, deposit: 1, usdCash: 2, bonds: 3, usdBonds: 4, gold: 5, reit: 6, localEq: 7, globalEq: 8, crypto: 9 };
+
+// Normal quantile (Acklam's approximation), for turning a chance into a threshold.
+export function probit(p) {
+  if (p <= 0) return -Infinity; if (p >= 1) return Infinity;
+  const a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924];
+  const b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857];
+  const c = [-0.00778489400243029, -0.322396458041136, -2.40075827716184, -2.54973253934373, 4.37466414146497, 2.93816398269878];
+  const d = [0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742];
+  const lo = 0.02425;
+  if (p < lo) { const q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+  if (p > 1 - lo) { const q = Math.sqrt(-2 * Math.log(1 - p)); return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+  const q = p - 0.5; const r = q * q;
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+const phi = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
+function erf(x) { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; }
+
+// ------------------------------------------------------------------ the plan, in one shape
+
+// Plans come in two shapes: the full one built by model.buildInputs, with every
+// holding as a position (asset class x currency x place), every income with its
+// own job risk, and spending by currency; and a simple one (used by tests and
+// older callers) with totals by asset class in one currency. Both become this.
+const NORM = new WeakMap();
+export function normalise(inp) {
+  if (NORM.has(inp)) return NORM.get(inp);
+  const n = inp.positions ? normaliseFull(inp) : normaliseSimple(inp);
+  NORM.set(inp, n);
+  return n;
+}
+
+function normaliseSimple(inp) {
+  const base = 'BASE';
+  const FLAT = { mu: 0, sd: 0 };
+  const positions = [];
+  const mix = inp.mix || {};
+  for (const c of CLASS_ORDER) {
+    const v0 = (inp.start && inp.start[c]) || 0;
+    const income = c === 'property' ? inp.rent || 0 : c === 'business' ? inp.bizProfit || 0 : 0;
+    if (!v0 && !mix[c] && !income) continue;
+    const a = (inp.cls && inp.cls[c]) || FLAT;
+    const cur = ASSET_CLASSES[c].usd && inp.usdFx ? 'USD' : base;
+    positions.push({ cls: c, cur, country: 'HOME', mu: a.mu ?? 0, sd: a.sd ?? 0, value: v0, income, mix: mix[c] || 0 });
+  }
+  const Y = inp.years + 1;
+  const spend = inp.spendPath ? Float64Array.from(inp.spendPath) : new Float64Array(Y).fill(inp.spendNow || 0);
+  const extra = inp.extraPath ? Float64Array.from(inp.extraPath) : new Float64Array(Y);
+  return finish(inp, {
+    base,
+    countries: ['HOME'],
+    currencies: { [base]: { sd: inp.usdFx ? inp.fxSd || 0 : 0, drift: -(inp.fxDrift || 0), local: 0.5, country: 'HOME', infl: inp.infl } },
+    positions,
+    incomes: [
+      ...(inp.salary ? [{ amount: inp.salary, cur: base, country: 'HOME', work: true, growth: inp.growth || 0, sd: 0, pLoss: 0, search: 0, next: 1 }] : []),
+      ...(inp.otherIncome ? [{ amount: inp.otherIncome, cur: base, country: 'HOME', work: false, growth: 0, sd: 0, pLoss: 0 }] : []),
+    ],
+    spendBy: { [base]: spend },
+    extraBy: { [base]: extra },
+    debts: (inp.debts || []).map((d) => ({ ...d, cur: base })),
+  });
+}
+
+function normaliseFull(inp) {
+  return finish(inp, {
+    base: inp.base, countries: inp.countries, currencies: inp.currencies,
+    positions: inp.positions.map((p) => ({ ...p })), incomes: inp.incomes, spendBy: inp.spendBy, extraBy: inp.extraBy,
+    debts: (inp.debts || []).map((d) => ({ ...d })),
+  });
+}
+
+function finish(inp, n) {
+  // Ventures bring their own positions for what you hold at the end.
+  n.ventures = (inp.ventures || []).map((V) => {
+    let i = n.positions.findIndex((p) => p.cls === V.cls && p.cur === (V.cur || n.base));
+    if (i < 0) { n.positions.push({ cls: V.cls, cur: V.cur || n.base, country: V.country || n.countries[0], mu: (inp.cls && inp.cls[V.cls] ? inp.cls[V.cls].mu : 0) ?? 0, sd: (inp.cls && inp.cls[V.cls] ? inp.cls[V.cls].sd : 0) ?? 0, value: 0, income: 0, mix: 0 }); i = n.positions.length - 1; }
+    return { ...V, pos: i, cur: V.cur || n.base };
+  });
+  const curList = Object.keys(n.currencies).filter((c) => c !== 'USD');
+  if (!n.currencies[n.base]) n.currencies[n.base] = { sd: 0, drift: 0, local: 0, country: n.countries[0], infl: inp.infl };
+  if (!n.currencies.USD) n.currencies.USD = { sd: 0, drift: 0, local: 0, country: 'US', infl: 0.025 };
+  // Slot layout per year: world, inflation, countries, currencies, positions, incomes (2 each).
+  n.slot = { country: {}, cur: {} };
+  let k = 2;
+  for (const c of n.countries) n.slot.country[c] = k++;
+  for (const c of curList) n.slot.cur[c] = k++;
+  n.posSlot = k; k += n.positions.length;
+  n.incSlot = k; k += 2 * n.incomes.length;
+  n.K = k;
+  n.order = n.positions.map((p, i) => i).filter((i) => RANK[n.positions[i].cls] != null).sort((a, b) => RANK[n.positions[a].cls] - RANK[n.positions[b].cls] || (n.positions[a].cur === n.base ? -1 : 1));
+  n.mixIdx = n.positions.map((p, i) => [i, p.mix || 0]).filter(([, m]) => m > 0);
+  const ms = n.mixIdx.reduce((s, [, m]) => s + m, 0) || 1;
+  n.mixIdx = n.mixIdx.map(([i, m]) => [i, m / ms]);
+  for (const inc of n.incomes) inc.q = inc.pLoss > 0 ? probit(inc.pLoss) : -Infinity;
+  return n;
+}
+
+export const needK = (inp) => normalise(inp).K;
 
 // ------------------------------------------------------------------ the simulation
 
-// inp is built by model.buildInputs(); see there for the fields.
 export function simulate(inp, shocks, { keepPaths = true, trace = false } = {}) {
-  const { paths, years } = { paths: shocks.paths, years: Math.min(shocks.years, inp.years) };
+  const n = normalise(inp);
+  const paths = shocks.paths;
+  const years = Math.min(shocks.years, inp.years);
   const Y = years + 1;
-  const nw = keepPaths ? new Float64Array(paths * Y) : null;
+  const K = shocks.K;
+  const Z = shocks.z;
+  const at = (base, slot) => Z[base + (slot % K)];
+  const nwArr = keepPaths ? new Float64Array(paths * Y) : null;
   const liquidAtRetire = new Float64Array(paths);
   const freeAge = new Float64Array(paths).fill(Infinity);
   const failAge = new Float64Array(paths).fill(Infinity);
   const goalHit = inp.goals.map(() => 0);
-  const classes = CLASS_ORDER;
-  const mix = inp.mix;
-  const mixKeys = Object.keys(mix).filter((k) => mix[k] > 0);
-  const muLog = {};
-  const FLAT = { mu: 0, sd: 0 };
-  const cls = Object.fromEntries(classes.map((c) => [c, inp.cls[c] || FLAT]));
-  for (const c of classes) {
-    const a = cls[c];
-    muLog[c] = Math.log(1 + a.mu) - (a.sd * a.sd) / 2;
-  }
-  const fxOn = inp.usdFx;
+  const P = n.positions;
+  const NP = P.length;
+  const muLog = P.map((p) => Math.log(1 + p.mu) - (p.sd * p.sd) / 2);
+  const own = P.map((p) => { const L = LOAD[p.cls] || [0, 0]; return Math.sqrt(Math.max(0, 1 - L[0] * L[0] - L[1] * L[1])); });
+  const curs = Object.keys(n.currencies);
   const rows = trace ? [] : null;
+  let jobLossPaths = 0; let monthsOut = 0;
   for (let p = 0; p < paths; p++) {
-    const v = {};
-    for (const c of classes) v[c] = inp.start[c] || 0;
-    const debts = inp.debts.map((d) => ({ ...d }));
-    let price = 1;
-    let infl = inp.infl;
-    let rentBase = inp.rent;
-    const prop0 = Math.max(1, inp.start.property || 0);
-    const biz0 = Math.max(1, inp.start.business || 0);
-    let failed = false;
-    if (nw) nw[p * Y] = netOf(v, debts, price);
+    const v = new Float64Array(NP);
+    for (let i = 0; i < NP; i++) v[i] = P[i].value || 0;
+    const v0 = Float64Array.from(v);
+    const debts = n.debts.map((d) => ({ ...d }));
+    const L = Object.fromEntries(curs.map((c) => [c, 0]));
+    let rel = Object.fromEntries(curs.map((c) => [c, 1]));
+    const inc = n.incomes.map(() => ({ level: 1, out: 0 }));
+    let price = 1; let infl = inp.infl; let failed = false; let lostJob = false;
+    const pensionOpen = (age) => age >= inp.pensionAge;
+    const liquid = (pens) => { let s = 0; for (let i = 0; i < NP; i++) if (RANK[P[i].cls] != null || (pens && P[i].cls === 'pension')) s += Math.max(0, v[i]); return s; };
+    const debtReal = (t) => debts.reduce((s, d) => s + Math.max(0, d.bal) / (d.cur === n.base ? price : Math.pow(1 + (n.currencies[d.cur] || {}).infl || 0, t + 1)) * rel[d.cur], 0);
+    if (nwArr) { let s = 0; for (let i = 0; i < NP; i++) s += v[i]; nwArr[p * Y] = s - debts.reduce((a, d) => a + Math.max(0, d.bal), 0); }
     for (let t = 0; t < years; t++) {
       const age = inp.age + t;
-      const base = (p * shocks.years + t) * shocks.K;
-      const zW = shocks.z[base];
-      const zL = shocks.z[base + 1];
-      const zI = shocks.z[base + 2];
-      // Inflation: sticky around its mean, higher in bad local years.
-      infl = inp.infl + 0.5 * (infl - inp.infl) + inp.inflSd * 0.87 * (-0.3 * zL + 0.95 * zI);
+      const base = (p * shocks.years + t) * K;
+      const zW = at(base, 0);
+      // Home inflation: sticky, higher in bad home years.
+      const zHome = at(base, n.slot.country[n.countries[0]]);
+      infl = inp.infl + 0.5 * (infl - inp.infl) + inp.inflSd * 0.87 * (-0.3 * zHome + 0.95 * at(base, 1));
       infl = Math.max(-0.02, infl);
       price *= 1 + infl;
+      // Exchange rates: each currency's real value against the dollar drifts and
+      // swings, and weak currencies fall in their own country's bad years.
+      const prevRel = rel;
+      for (const c of curs) {
+        if (c === 'USD') continue;
+        const C = n.currencies[c];
+        const zc = n.slot.cur[c] != null ? at(base, n.slot.cur[c]) : 0;
+        const zl = C.country != null && n.slot.country[C.country] != null ? at(base, n.slot.country[C.country]) : 0;
+        L[c] += C.drift + C.sd * ((C.local || 0) * zl + Math.sqrt(1 - (C.local || 0) ** 2) * zc);
+      }
+      rel = Object.fromEntries(curs.map((c) => [c, Math.exp(L[c] - L[n.base])]));
       const working = age < inp.retireAge;
-      // ---- money in and out this year (today's money)
-      let income = working ? inp.salary * Math.pow(1 + inp.growth, t) : 0;
-      if (age >= inp.pensionAge) income += inp.pensionIncome;
-      income += inp.otherIncome;
-      income += rentBase * (v.property / prop0);
-      income += inp.bizProfit * (inp.start.business > 0 ? Math.max(0, v.business / biz0) : 1);
-      // Living costs follow your budget while you work (each category rising at
-      // its own pace), then your retirement target; scheduled costs such as
-      // school fees and car replacements come on top in either phase.
-      const living = working ? (inp.spendPath ? inp.spendPath[Math.min(t, inp.spendPath.length - 1)] : inp.spendNow) - (inp.spendCut || 0) : inp.spendRetire;
-      const extra = inp.extraPath ? inp.extraPath[t] || 0 : 0;
-      let spend = living + extra;
+      // ---- income
+      let income = 0; let jobless = 0;
+      n.incomes.forEach((x, i) => {
+        const s = inc[i];
+        if (!x.work) { income += x.amount * rel[x.cur]; return; }
+        if (!working) return;
+        const zWage = at(base, n.incSlot + 2 * i + 1);
+        s.level *= Math.exp((x.growth || 0) - ((x.sd || 0) ** 2) / 2 + (x.sd || 0) * zWage);
+        let months = 12;
+        if (s.out > 0) { const m = Math.min(12, s.out); months -= m; s.out -= m; jobless += m; }
+        else {
+          const zLoss = at(base, n.incSlot + 2 * i);
+          if (zLoss < x.q) {
+            // Lost the job this year: how long the search takes is uncertain.
+            // The search length is exponential around the country's typical search;
+            // the loss falls at a random point in the year.
+            const u = Math.max(1e-6, Math.min(1, phi(zLoss) / x.pLoss));
+            const search = Math.max(1, -Math.log(u) * (x.search || 6));
+            const left = 12 * (1 - phi(zWage));
+            const m = Math.min(search, left);
+            s.out = search - m; months -= m; jobless += m;
+            s.level *= x.next ?? 1;
+            lostJob = true;
+          }
+        }
+        income += x.amount * s.level * (months / 12) * rel[x.cur];
+      });
+      if (pensionOpen(age)) income += inp.pensionIncome || 0;
+      for (let i = 0; i < NP; i++) if (P[i].income) income += P[i].income * (v0[i] > 0 ? Math.max(0, v[i] / v0[i]) : 1);
+      // ---- spending: by currency, each converted at this year's rates
+      let living = 0;
+      if (working) { for (const c in n.spendBy) living += (n.spendBy[c][Math.min(t, n.spendBy[c].length - 1)] || 0) * rel[c]; living -= inp.spendCut || 0; } else living = inp.spendRetire;
+      let extra = 0;
+      for (const c in n.extraBy) extra += (n.extraBy[c][t] || 0) * rel[c];
       let debtCost = 0;
       for (const d of debts) {
         if (d.bal <= 0) continue;
         const interest = d.bal * d.rate;
         const pay = Math.min(d.payment * 12, d.bal + interest);
         d.bal = d.bal + interest - pay;
-        debtCost += pay / price;
+        const pc = d.cur === n.base ? price : Math.pow(1 + (n.currencies[d.cur] || {}).infl || 0, t + 1);
+        debtCost += (pay / pc) * rel[d.cur];
       }
-      // When a debt is cleared, its payment stays in the budget as saving.
-      let net = income - spend - debtCost;
-      // Goals: a lump sum at the goal's age.
+      let net = income - living - extra - debtCost;
+      for (const V of n.ventures) {
+        net += (V.flows[(p % V.paths) * V.Y + t] || 0) * rel[V.cur];
+        if (t === V.endYear) v[V.pos] += Math.max(0, V.terminal[p % V.paths]) * rel[V.cur];
+      }
       for (let g = 0; g < inp.goals.length; g++) {
         const G = inp.goals[g];
         if (G.age !== age) continue;
-        const have = liquidOf(v, age >= inp.pensionAge);
-        if (have + Math.max(0, net) >= G.amount) goalHit[g] += 1;
+        if (liquid(pensionOpen(age)) + Math.max(0, net) >= G.amount) goalHit[g] += 1;
         net -= G.amount;
       }
-      if (net >= 0) {
-        for (const k of mixKeys) v[k] += net * mix[k];
-      } else {
+      if (net >= 0) { for (const [i, m] of n.mixIdx) v[i] += net * m; } else {
         let need = -net;
-        need = draw(v, need, LIQUID_DRAW);
-        if (need > 0 && age >= inp.pensionAge) need = draw(v, need, ['pension']);
+        for (const i of n.order) { if (need <= 0) break; const take = Math.min(Math.max(0, v[i]), need); v[i] -= take; need -= take; }
+        if (need > 0 && pensionOpen(age)) for (let i = 0; i < NP; i++) if (P[i].cls === 'pension' && need > 0) { const take = Math.min(v[i], need); v[i] -= take; need -= take; }
         // Last resort: sell land, then property, at a discount.
-        if (need > 0 && v.land > 0) { v.cash += v.land * 0.9; v.land = 0; need = draw(v, need, ['cash']); }
-        if (need > 0 && v.property > 0) { const sale = v.property * 0.94; rentBase = 0; v.property = 0; v.cash += sale; need = draw(v, need, ['cash']); }
-        if (need > 0) { failed = true; if (failAge[p] === Infinity) failAge[p] = age; v.cash -= need; }
+        for (const cls of ['land', 'property']) for (let i = 0; i < NP; i++) if (need > 0 && P[i].cls === cls && v[i] > 0) { const got = v[i] * (cls === 'land' ? 0.9 : 0.94); v[i] = 0; const take = Math.min(got, need); need -= take; const left = got - take; if (left > 0 && n.order.length) v[n.order[0]] += left; }
+        if (need > 0) { failed = true; if (failAge[p] === Infinity) failAge[p] = age; if (n.order.length) v[n.order[0]] -= need; }
       }
-      // ---- one year of returns, in real terms
-      // The real exchange rate: no drift unless you set one, weaker in bad local years.
-      const fxReal = fxOn ? inp.fxDrift + inp.fxSd * (-0.5 * zL + 0.87 * shocks.z[base + 3]) : 0;
-      const before = rows ? { ...v } : null;
-      for (const c of classes) {
-        if (!v[c]) continue;
-        const a = cls[c];
+      // ---- a year of returns, in real terms of each position's own currency,
+      // then the move in its exchange rate.
+      const before = rows && p === 0 ? Float64Array.from(v) : null;
+      for (let i = 0; i < NP; i++) {
+        if (!v[i]) continue;
+        const pos = P[i];
         let r;
-        if (c === 'cash') r = 1 / (1 + infl) - 1;
-        else if (c === 'deposit') {
-          const nominal = inp.depositRate + 0.7 * (infl - inp.infl);
-          r = (1 + nominal) / (1 + infl) - 1 + a.sd * 0.3 * shocks.z[base + OWN_SLOT.deposit];
-        } else {
-          const L = LOAD[c];
-          const shock = L[0] * zW + L[1] * zL + L[2] * shocks.z[base + OWN_SLOT[c]];
-          r = Math.exp(muLog[c] + a.sd * shock) - 1;
+        if (pos.cls === 'cash' && pos.cur === n.base) r = 1 / (1 + infl) - 1;
+        else if (pos.cls === 'deposit' && pos.cur === n.base) {
+          const nominal = (inp.depositRate ?? 0) + 0.7 * (infl - inp.infl);
+          r = (1 + nominal) / (1 + infl) - 1 + pos.sd * 0.3 * at(base, n.posSlot + i);
+        } else if (pos.realFixed != null) r = pos.realFixed;
+        else {
+          const Ld = LOAD[pos.cls] || [0, 0];
+          const zc = n.slot.country[pos.country] != null ? at(base, n.slot.country[pos.country]) : 0;
+          r = Math.exp(muLog[i] + pos.sd * (Ld[0] * zW + Ld[1] * zc + own[i] * at(base, n.posSlot + i))) - 1;
         }
-        if (fxOn && ASSET_CLASSES[c].usd) r = (1 + r) * (1 + fxReal) - 1;
-        v[c] *= 1 + r;
-        if (v[c] < 0 && c !== 'cash') v[c] = 0;
+        if (pos.cur !== n.base) r = (1 + r) * (rel[pos.cur] / prevRel[pos.cur]) - 1;
+        v[i] *= 1 + r;
+        if (v[i] < 0 && pos.cls !== 'cash' && RANK[pos.cls] !== 0) v[i] = Math.max(v[i], 0);
       }
-      const N = netOf(v, debts, price);
-      if (nw) nw[p * Y + t + 1] = N;
+      let sum = 0; for (let i = 0; i < NP; i++) sum += v[i];
+      const N = sum - debtReal(t);
+      if (nwArr) nwArr[p * Y + t + 1] = N;
       if (rows && p === 0) {
-        rows.push({
-          age: age + 1, income, living, extra, debtCost, saved: net, infl, price,
-          growth: classes.reduce((s, c) => s + (v[c] - before[c]), 0),
-          classes: Object.fromEntries(classes.map((c) => [c, v[c]])),
-          debt: debts.reduce((s, d) => s + Math.max(0, d.bal), 0) / price,
-          nw: N, liquid: liquidOf(v, age + 1 >= inp.pensionAge), short: failed,
-        });
+        const classes = Object.fromEntries(CLASS_ORDER.map((c) => [c, 0]));
+        const byCur = {};
+        for (let i = 0; i < NP; i++) { classes[P[i].cls] = (classes[P[i].cls] || 0) + v[i]; byCur[P[i].cur] = (byCur[P[i].cur] || 0) + v[i]; }
+        let g = 0; for (let i = 0; i < NP; i++) g += v[i] - before[i];
+        rows.push({ age: age + 1, income, living, extra, debtCost, saved: net, infl, price, growth: g, classes, byCur, jobless, debt: debtReal(t), nw: N, liquid: liquid(pensionOpen(age + 1)), short: failed });
       }
-      if (age + 1 === inp.retireAge) liquidAtRetire[p] = liquidOf(v, false);
-      // Free: what your money can safely pay each year covers your retirement spending.
+      if (age + 1 === inp.retireAge) liquidAtRetire[p] = liquid(false);
       if (freeAge[p] === Infinity && !failed) {
-        const pens = age + 1 >= inp.pensionAge;
-        const can = inp.swr * (liquidOf(v, pens)) + rentBase * (v.property / prop0) + inp.bizProfit * (inp.start.business > 0 ? Math.max(0, v.business / biz0) : 1) + (pens ? inp.pensionIncome : 0) + inp.otherIncome;
-        const owed = debts.reduce((s, d) => s + d.bal, 0) / price;
-        if (can >= inp.spendRetire && liquidOf(v, pens) > owed) freeAge[p] = age + 1;
+        const pens = pensionOpen(age + 1);
+        let can = inp.swr * liquid(pens) + (pens ? inp.pensionIncome || 0 : 0);
+        for (const x of n.incomes) if (!x.work) can += x.amount * rel[x.cur];
+        for (let i = 0; i < NP; i++) if (P[i].income) can += P[i].income * (v0[i] > 0 ? Math.max(0, v[i] / v0[i]) : 1);
+        if (can >= inp.spendRetire && liquid(pens) > debtReal(t)) freeAge[p] = age + 1;
       }
     }
-    if (inp.retireAge >= inp.age + years) liquidAtRetire[p] = liquidOf(v, false);
+    if (lostJob) jobLossPaths += 1;
+    if (inp.retireAge >= inp.age + years) liquidAtRetire[p] = liquid(false);
   }
-  const out = summarise(inp, { paths, Y, nw, liquidAtRetire, freeAge, failAge, goalHit });
+  const out = summarise(inp, { paths, Y, nw: nwArr, liquidAtRetire, freeAge, failAge, goalHit });
+  out.jobLoss = jobLossPaths / paths;
   if (rows) out.rows = rows;
   return out;
 }
-
-function draw(v, need, order) {
-  for (const k of order) {
-    if (need <= 0) break;
-    const take = Math.min(v[k] || 0, need);
-    if (take > 0) { v[k] -= take; need -= take; }
-  }
-  return need;
-}
-
-const liquidOf = (v, pensionOpen) => LIQUID_DRAW.reduce((s, k) => s + Math.max(0, v[k] || 0), 0) + (pensionOpen ? v.pension : 0);
-const netOf = (v, debts, price) => CLASS_ORDER.reduce((s, k) => s + (v[k] || 0), 0) - debts.reduce((s, d) => s + Math.max(0, d.bal), 0) / price;
 
 export function quantile(sorted, q) {
   if (!sorted.length) return NaN;
@@ -296,13 +401,13 @@ export function bisect(lo, hi, test, { iters = 13, want = 'max' } = {}) {
 
 // The most you can spend each year in retirement and still succeed often enough.
 export function safeSpending(inp, shocks, target) {
-  const top = Math.max(inp.spendRetire * 4, inp.salary * 2, 1);
+  const top = Math.max(inp.spendRetire * 4, (inp.salary || 0) * 2, 1);
   return bisect(0, top, (s) => simulate({ ...inp, spendRetire: s }, shocks, { keepPaths: false }).success >= target);
 }
 
 // The extra saving a year needed to reach the success target.
 export function extraSavingNeeded(inp, shocks, target) {
-  const top = Math.max(inp.salary, inp.spendNow, 1) * 2;
+  const top = Math.max(inp.salary || 0, inp.spendNow || 0, 1) * 2;
   return bisect(0, top, (x) => simulate({ ...inp, spendCut: (inp.spendCut || 0) + x }, shocks, { keepPaths: false }).success >= target, { want: 'min' });
 }
 
@@ -318,3 +423,40 @@ export function earliestRetirement(inp, shocks, target) {
 
 export const DEFAULTS = { paths: 2000, quickPaths: 600 };
 export { CURRENCIES, clamp };
+
+// ------------------------------------------------------------------ changing a plan for a what-if
+
+// Each helper returns a patch that works on either shape of plan.
+const RISKY_EXCLUDE = ['cash', 'deposit', 'usdCash', 'car'];
+export function scalePositions(inp, f) {
+  if (inp.positions) return { positions: inp.positions.map((p) => ({ ...p, value: p.value * f(p) })) };
+  return { start: Object.fromEntries(Object.entries(inp.start || {}).map(([c, v]) => [c, v * f({ cls: c, cur: ASSET_CLASSES[c] && ASSET_CLASSES[c].usd && inp.usdFx ? 'USD' : 'BASE' })])) };
+}
+export function scaleIncomes(inp, f) {
+  if (inp.incomes) return { incomes: inp.incomes.map((x) => ({ ...x, amount: x.amount * f(x) })) };
+  return { salary: (inp.salary || 0) * f({ work: true, cur: 'BASE' }) };
+}
+export function shiftReturns(inp, d) {
+  if (inp.positions) return { positions: inp.positions.map((p) => (RISKY_EXCLUDE.includes(p.cls) || p.realFixed != null ? p : { ...p, mu: p.mu + d })) };
+  return { cls: Object.fromEntries(Object.entries(inp.cls).map(([c, a]) => [c, RISKY_EXCLUDE.includes(c) ? a : { ...a, mu: a.mu + d }])) };
+}
+export function addCost(inp, t, amount) {
+  if (inp.extraBy) {
+    const b = Float64Array.from(inp.extraBy[inp.base] || new Float64Array(inp.years + 1));
+    b[t] += amount;
+    return { extraBy: { ...inp.extraBy, [inp.base]: b } };
+  }
+  const ex = Float64Array.from(inp.extraPath || new Float64Array(inp.years + 1));
+  ex[t] += amount;
+  return { extraPath: ex };
+}
+export function scaleJobRisk(inp, k) {
+  if (!inp.incomes) return {};
+  return { incomes: inp.incomes.map((x) => (x.work ? { ...x, pLoss: Math.min(0.9, x.pLoss * k) } : x)) };
+}
+// Spending, school fees and debts held in other currencies, scaled (for a devaluation).
+export function scaleForeign(inp, k) {
+  if (!inp.spendBy) return {};
+  const sc = (by) => Object.fromEntries(Object.entries(by).map(([c, arr]) => [c, c === inp.base ? arr : arr.map((x) => x * k)]));
+  return { spendBy: sc(inp.spendBy), extraBy: sc(inp.extraBy), debts: inp.debts.map((d) => ({ ...d, bal: d.bal * (d.cur === inp.base ? 0.8 : k), payment: d.payment * (d.cur === inp.base ? 1 : k) })) };
+}
