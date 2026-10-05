@@ -12,6 +12,7 @@ import { compare, payoff } from './debt.js';
 import { planPdf } from './pdf.js';
 import { analyse, whatIf } from './analyse.js';
 import * as V from './venture.js';
+import * as W from './world.js';
 
 const app = document.getElementById('app');
 const layer = document.getElementById('layer');
@@ -31,7 +32,12 @@ let nominal = false;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f = (n, o) => fmt(n, st ? st.currency : 'NGN', o);
-const sym = () => CURRENCIES[st ? st.currency : (ob && ob.currency) || 'NGN'].symbol;
+let formCur = null; // the currency the open form's amounts are in
+const sym = () => CURRENCIES[formCur || (st ? st.currency : (ob && ob.currency) || 'NGN')].symbol;
+const curSel = (val, name = 'cur', label = 'Currency') => `<label class="field"><span>${label}</span><select name="${name}" class="cur-pick" data-sym-scope="${name === 'cur' ? 'form' : 'pair'}">${CURRENCY_ORDER.map((c) => `<option value="${c}" ${c === val ? 'selected' : ''}>${c} · ${esc(CURRENCIES[c].name)}</option>`).join('')}</select></label>`;
+const placeSel = (val, label = 'Where is it?', name = 'loc') => `<label class="field"><span>${label}</span><select name="${name}">${Object.entries(W.COUNTRIES).map(([cc, C]) => { const locs = W.LOCATION_ORDER.filter((l) => W.LOCATIONS[l].c === cc); return locs.length ? `<optgroup label="${esc(C.name)}">${locs.map((l) => `<option value="${l}" ${l === val ? 'selected' : ''}>${esc(W.LOCATIONS[l].name)}</option>`).join('')}</optgroup>` : ''; }).join('')}</select><small>Each place has its own price growth, swings and title risk (Settings → Assumptions).</small></label>`;
+const countrySel = (val, label = 'Country', name = 'country') => `<label class="field"><span>${label}</span><select name="${name}">${Object.entries(W.COUNTRIES).map(([cc, C]) => `<option value="${cc}" ${cc === val ? 'selected' : ''}>${esc(C.name)}</option>`).join('')}</select></label>`;
+const fc = (n, cur) => fmt(n, cur || st.currency);
 
 const parsePct = (s) => { const n = parseFloat(String(s).replace('%', '')); return Number.isFinite(n) ? n / 100 : 0; };
 const moneyIn = (name, val, label, hint = '') => `<label class="field"><span>${label}</span><span class="money-in"><i>${esc(sym())}</i><input name="${name}" inputmode="decimal" autocomplete="off" value="${val ? esc(Math.round(val)) : ''}" placeholder="0"></span>${hint ? `<small>${hint}</small>` : ''}</label>`;
@@ -117,7 +123,7 @@ function sheet(html, { wide = false } = {}) {
   if (first) setTimeout(() => first.focus(), 30);
   attachCharts(layer);
 }
-function closeSheet() { layer.hidden = true; layer.innerHTML = ''; }
+function closeSheet() { layer.hidden = true; layer.innerHTML = ''; formCur = null; }
 const sheetHead = (title, sub = '') => `<header class="sheet-h"><div><h2>${esc(title)}</h2>${sub ? `<p class="muted">${sub}</p>` : ''}</div><button class="icon-btn" data-act="close" aria-label="Close">✕</button></header>`;
 
 function topbar() {
@@ -203,7 +209,7 @@ function moneyTab() {
   const rows = CLASS_ORDER.filter((c) => T.byClass[c] > 0).map((c) => ({ label: ASSET_CLASSES[c].short, v: T.byClass[c] }));
   const accRow = (a) => {
     const v = M.valueOf(a, st, market);
-    const sub = a.type === 'stock' ? `${a.shares} × ${a.sym} @ ${fmt(v.price, v.cur)}${v.live ? ' · live' : ''}` : M.ACCOUNT_TYPES[a.type].usd && st.currency !== 'USD' ? `$${Math.round(a.value || 0).toLocaleString()}` : a.type === 'savings' && a.rate ? `${pct(a.rate, 1)} a year` : a.type === 'property' && a.rent ? `Rent ${f(a.rent)}/month` : a.type === 'business' && a.profit ? `Profit ${f(a.profit)}/month` : M.ACCOUNT_TYPES[a.type].name;
+    const sub = a.type === 'stock' ? `${a.shares} × ${a.sym} @ ${fmt(v.price, v.cur)}${v.live ? ' · live' : ''}` : v.cur && v.cur !== st.currency && a.type !== 'stock' ? `${fc(a.value || 0, v.cur)}${a.loc && W.LOCATIONS[a.loc] ? ` · ${W.LOCATIONS[a.loc].name}` : ''}` : a.loc && W.LOCATIONS[a.loc] ? W.LOCATIONS[a.loc].name : a.type === 'savings' && a.rate ? `${pct(a.rate, 1)} a year` : a.type === 'property' && a.rent ? `Rent ${f(a.rent)}/month` : a.type === 'business' && a.profit ? `Profit ${f(a.profit)}/month` : M.ACCOUNT_TYPES[a.type].name;
     return `<button class="row" data-act="edit-acc" data-id="${a.id}"><span><b>${esc(a.name || M.ACCOUNT_TYPES[a.type].name)}</b><small>${esc(sub)}</small></span><span class="amt">${f(v.v)}${v.live ? `<i class="live-dot" title="Live price"></i>` : ''}</span></button>`;
   };
   return `
@@ -217,18 +223,18 @@ function moneyTab() {
     </section>
     <section id="debts">
       <div class="sec-h"><h2 class="sec">What you owe</h2><button class="btn small" data-act="add-debt">${icon('plus')} Add</button></div>
-      <div class="list">${st.debts.length ? st.debts.map((d) => `<button class="row" data-act="edit-debt" data-id="${d.id}"><span><b>${esc(d.name)}</b><small>${pct(d.rate, 1)} · ${f(d.payment)}/month</small></span><span class="amt neg">${f(-d.balance)}</span></button>`).join('') : '<p class="muted pad">No debts. Add loans, cards, mortgages or money owed to people.</p>'}</div>
+      <div class="list">${st.debts.length ? st.debts.map((d) => `<button class="row" data-act="edit-debt" data-id="${d.id}"><span><b>${esc(d.name)}</b><small>${pct(d.rate, 1)} · ${fc(d.payment, M.curOfItem(d, st))}/month${M.curOfItem(d, st) !== st.currency ? ` · ${f(M.toBase(st, market, d.balance, M.curOfItem(d, st)))}` : ''}</small></span><span class="amt neg">${fc(-d.balance, M.curOfItem(d, st))}</span></button>`).join('') : '<p class="muted pad">No debts. Add loans, cards, mortgages or money owed to people.</p>'}</div>
       ${st.debts.some((d) => d.balance > 0) ? debtPlanner() : ''}
     </section>
     <section>
       <div class="sec-h"><h2 class="sec">Money coming in (monthly)</h2><button class="btn small" data-act="add-inc">${icon('plus')} Add</button></div>
-      <div class="list">${st.income.map((x) => `<button class="row" data-act="edit-inc" data-id="${x.id}"><span><b>${esc(x.name)}</b><small>${x.kind === 'other' ? 'Continues after you stop work' : 'Stops when you stop work'}</small></span><span class="amt">${f(x.amount)}</span></button>`).join('')}
+      <div class="list">${st.income.map((x) => `<button class="row" data-act="edit-inc" data-id="${x.id}"><span><b>${esc(x.name)}</b><small>${M.curOfItem(x, st) !== st.currency ? `${fc(x.amount, M.curOfItem(x, st))} a month · ` : ''}${x.kind === 'other' ? 'Continues after you stop work' : 'Stops when you stop work'}${x.employer && x.kind !== 'other' ? ` · ${({ public: 'public-sector job', large: 'large-firm job', sme: 'small-firm job', contract: 'contract work' })[x.employer] || ''}` : ''}</small></span><span class="amt">${f(M.toBase(st, market, x.amount, M.curOfItem(x, st)))}</span></button>`).join('')}
       ${T.rent ? `<div class="row static"><span><b>Rent from property</b><small>From your property accounts</small></span><span class="amt">${f(T.rent)}</span></div>` : ''}
       ${T.profit ? `<div class="row static"><span><b>Business profit</b><small>From your business accounts</small></span><span class="amt">${f(T.profit)}</span></div>` : ''}</div>
     </section>
     <section>
       <div class="sec-h"><h2 class="sec">Household spending</h2><button class="btn small" data-act="add-sp">${icon('plus')} Add</button></div>
-      <div class="list">${st.spending.map((x) => { const C = SPEND_CATS[x.cat] || SPEND_CATS.other; return `<button class="row" data-act="edit-sp" data-id="${x.id}"><span><b>${esc(x.name || C.name)}</b><small>${x.freq === 'year' ? `${f(x.amount)} a year · ` : ''}${C.prem ? `rises ${pct(C.prem, 0)} faster than prices` : 'rises with prices'}</small></span><span class="amt">${f(M.monthlyOf(x))}<small>a month</small></span></button>`; }).join('')}
+      <div class="list">${st.spending.map((x) => { const C = SPEND_CATS[x.cat] || SPEND_CATS.other; const xc = M.curOfItem(x, st); return `<button class="row" data-act="edit-sp" data-id="${x.id}"><span><b>${esc(x.name || C.name)}</b><small>${xc !== st.currency ? `${fc(x.amount, xc)} ${x.freq === 'year' ? 'a year' : 'a month'} · ` : x.freq === 'year' ? `${f(x.amount)} a year · ` : ''}${C.prem ? `rises ${pct(C.prem, 0)} faster than prices` : 'rises with prices'}</small></span><span class="amt">${f(M.toBase(st, market, M.monthlyOf(x), xc))}<small>a month</small></span></button>`; }).join('')}
       ${T.school ? `<div class="row static"><span><b>School fees</b><small>From your children below</small></span><span class="amt">${f(T.school)}<small>a month</small></span></div>` : ''}
       ${T.giving ? `<div class="row static"><span><b>Giving</b><small>${pct(st.household.givingPct, 0)} of income</small></span><span class="amt">${f(T.giving)}<small>a month</small></span></div>` : ''}
       <div class="row static total"><span><b>Total spending</b></span><span class="amt">${f(T.monthlySpend)}<small>a month</small></span></div>
@@ -283,6 +289,18 @@ function insightsTab() {
     ${P.accounts.length ? `<section class="card"><h2 class="sec">Is your safe money beating inflation?</h2><div class="table-wrap"><table><thead><tr><th>Account</th><th>Rate</th><th>Real</th></tr></thead><tbody>
       ${P.accounts.map((a) => `<tr><td>${esc(a.name)}</td><td>${pct(a.rate, 1)}</td><td><span class="status ${a.real >= 0 ? 'good' : a.real > -0.02 ? 'warn' : 'bad'}">${icon(a.real >= 0 ? 'ok' : 'warn')} ${pct(a.real, 1)}</span></td></tr>`).join('')}
     </tbody></table></div></section>` : ''}
+    ${A.exposures && (A.exposures.byCur.length > 1 || A.exposures.byPlace.length) ? `<section class="card">
+      <h2 class="sec">Where your money lives</h2>
+      <p class="muted">By currency, at today's rates, in ${st.currency}. Growth below is after local inflation; ± is a typical yearly swing. A currency you pay in but do not hold is a risk if yours weakens.</p>
+      <div class="table-wrap"><table><thead><tr><th>Currency</th><th>Own</th><th>Earn a year</th><th>Spend a year</th><th>Owe</th></tr></thead><tbody>
+        ${A.exposures.byCur.map((x) => `<tr><td><b>${x.cur}</b>${A.currencies && A.currencies[x.cur] && x.cur !== st.currency ? `<br><small class="muted">swings about ${pct(Math.sqrt(A.currencies[x.cur].sd ** 2 + ((A.currencies[st.currency] || {}).sd || 0) ** 2), 0)} a year against ${st.currency}</small>` : ''}</td><td>${f(x.assets)}</td><td>${f(x.income)}</td><td class="${x.spend > x.assets * 0.1 + x.income && x.cur !== st.currency ? 'neg' : ''}">${f(x.spend)}</td><td class="${x.debt ? 'neg' : ''}">${f(x.debt)}</td></tr>`).join('')}
+      </tbody></table></div>
+      ${A.exposures.byPlace.length ? `<h3 class="sub">Property and land by place</h3><div class="table-wrap"><table><thead><tr><th>Place</th><th>Value</th><th>Land a year</th><th>Buildings a year</th></tr></thead><tbody>
+        ${A.exposures.byPlace.map((x) => { const P = W.place(st, x.loc); const g = (q) => `<span class="${q.mu < 0 ? 'neg' : ''}">${pct(q.mu, 1)}</span> <small class="muted">± ${pct(q.sd, 0)}</small>`; return `<tr><td>${esc(x.name)}</td><td>${f(x.value)}</td><td>${g(P.land)}</td><td>${g(P.prop)}</td></tr>`; }).join('')}
+      </tbody></table></div>` : ''}
+      ${A.jobLoss ? `<div class="stat-row">${stat('Chance of losing a job at least once before you stop work', pct(A.jobLoss, 0), A.jobLoss > 0.3 ? 'bad' : '')}</div>` : ''}
+    </section>` : ''}
+
     <section class="card">
       <h2 class="sec">What your wealth is made of</h2>
       <p class="muted">The middle path, in ${money}. Hover or tap for the numbers.</p>
@@ -309,7 +327,7 @@ function insightsTab() {
 }
 
 function debtPlanner() {
-  const c = compare(st.debts, debtExtra);
+  const c = compare(st.debts.map((d) => { const k = M.curOfItem(d, st); return { ...d, balance: M.toBase(st, market, d.balance, k), payment: M.toBase(st, market, d.payment || 0, k) }; }), debtExtra);
   const mo = (n) => (n == null ? 'never at this payment' : n < 24 ? `${n} months` : `${(n / 12).toFixed(1)} years`);
   return `<div class="card debt-plan">
     <h3>Your payoff plan</h3>
@@ -432,7 +450,7 @@ function planAt(b, t) {
 function checkinSheet() {
   sheet(`${sheetHead('Monthly check-in', 'Type today\'s balances. Shares use live prices; just update the number of shares if it changed.')}
     <form id="ci">
-      ${st.accounts.map((a) => a.type === 'stock' ? numIn(`s_${a.id}`, a.shares, `${esc(a.name || a.sym)} (shares)`) : M.ACCOUNT_TYPES[a.type].usd && st.currency !== 'USD' ? `<label class="field"><span>${esc(a.name)} (dollars)</span><span class="money-in"><i>$</i><input name="a_${a.id}" inputmode="decimal" value="${Math.round(a.value || 0)}"></span></label>` : moneyIn(`a_${a.id}`, a.value, esc(a.name || M.ACCOUNT_TYPES[a.type].name))).join('')}
+      ${st.accounts.map((a) => a.type === 'stock' ? numIn(`s_${a.id}`, a.shares, `${esc(a.name || a.sym)} (shares)`) : M.curOf(a, st) !== st.currency ? `<label class="field"><span>${esc(a.name || M.ACCOUNT_TYPES[a.type].name)} (${M.curOf(a, st)})</span><span class="money-in"><i>${esc(CURRENCIES[M.curOf(a, st)].symbol)}</i><input name="a_${a.id}" inputmode="decimal" value="${Math.round(a.value || 0)}"></span></label>` : moneyIn(`a_${a.id}`, a.value, esc(a.name || M.ACCOUNT_TYPES[a.type].name))).join('')}
       ${st.debts.map((d) => moneyIn(`d_${d.id}`, d.balance, `${esc(d.name)} (still owed)`)).join('')}
       <label class="field"><span>Note (optional)</span><input name="note" placeholder="e.g. bonus paid, bought land"></label>
       <button class="btn primary wide" data-act="save-checkin">Save check-in</button>
@@ -448,7 +466,9 @@ function accountSheet(acc) {
     return;
   }
   const T = M.ACCOUNT_TYPES[acc.type];
-  const usd = T.usd && st.currency !== 'USD';
+  const cur = M.curOf(acc, st);
+  formCur = T.stock ? null : cur;
+  const placed = ['property', 'land', 'business', 'farm'].includes(acc.type);
   sheet(`${sheetHead(acc.id ? 'Edit' : T.name, T.hint)}
     <form id="acc" data-id="${acc.id || ''}" data-type="${acc.type}">
       <label class="field"><span>Name</span><input name="name" value="${esc(acc.name || '')}" placeholder="${esc(T.name)}"></label>
@@ -458,8 +478,8 @@ function accountSheet(acc) {
         <input type="hidden" name="key" value="${esc(acc.key || '')}">
         ${numIn('shares', acc.shares, 'Number of shares')}
         <p class="muted" id="stock-px">${acc.key && market.prices[acc.key] ? `Latest price ${fmt(market.prices[acc.key].p, market.prices[acc.key].c)}` : ''}</p>`
-      : usd ? `<label class="field"><span>Value in dollars</span><span class="money-in"><i>$</i><input name="value" inputmode="decimal" value="${acc.value ? Math.round(acc.value) : ''}"></span><small>${M.usdRate(st, market) ? `At ${sym()}${Math.round(M.usdRate(st, market)).toLocaleString()} per dollar.` : 'Set the dollar rate in Settings → Assumptions.'}</small></label>`
-        : moneyIn('value', acc.value, 'What it is worth today')}
+      : `${curSel(cur, 'cur', 'Currency it is held in')}${moneyIn('value', acc.value, 'What it is worth today', cur !== st.currency ? `About ${f(M.toBase(st, market, acc.value || 0, cur))} at today's rate.` : '')}`}
+      ${placed ? placeSel(M.placeOfAcc(acc, st)) : ''}
       ${T.rate ? pctIn('rate', acc.rate ?? (T.rate0 ?? st.assumptions.deposit), 'Interest or yield a year', `Prices are rising about ${pct(st.assumptions.infl, 0)} a year.`) : ''}
       ${T.rent ? moneyIn('rent', acc.rent, 'Rent you receive each month (after costs)') : ''}
       ${T.profit ? moneyIn('profit', acc.profit, 'Profit you take out each month') : ''}
@@ -476,9 +496,11 @@ function accountSheet(acc) {
 }
 
 function debtSheet(d = {}) {
+  formCur = d.cur || st.currency;
   sheet(`${sheetHead(d.id ? 'Edit debt' : 'Add a debt', 'Loans, cards, mortgages, or money owed to family.')}
     <form id="debt" data-id="${d.id || ''}">
       <label class="field"><span>Name</span><input name="name" value="${esc(d.name || '')}" placeholder="e.g. Car loan"></label>
+      ${curSel(formCur, 'cur', 'Currency you owe it in')}
       ${moneyIn('balance', d.balance, 'Still owed')}
       ${pctIn('rate', d.rate, 'Interest rate a year', 'Use 0 for an interest-free loan.')}
       ${moneyIn('payment', d.payment, 'Monthly payment')}
@@ -486,20 +508,32 @@ function debtSheet(d = {}) {
     </form>`);
 }
 function incomeSheet(x = {}) {
+  formCur = x.cur || st.currency;
+  const emp = x.employer || ({ salaried: 'large', self: 'contract', business: 'contract', retired: 'large', student: 'sme', none: 'sme' })[st.person && st.person.employment] || 'large';
+  const cc = x.country || M.homeCountry(st);
+  const K = W.country(st, cc);
   sheet(`${sheetHead(x.id ? 'Edit income' : 'Add income', 'Take-home, after tax and pension deductions.')}
     <form id="inc" data-id="${x.id || ''}">
-      <label class="field"><span>Name</span><input name="name" value="${esc(x.name || '')}" placeholder="e.g. Salary, side business"></label>
+      <label class="field"><span>Name</span><input name="name" value="${esc(x.name || '')}" placeholder="e.g. Salary, side business, remote contract"></label>
+      ${curSel(formCur, 'cur', 'Paid in')}
       ${moneyIn('amount', x.amount, 'Each month')}
       <div class="seg-row"><span>When you stop work</span><div class="seg"><label><input type="radio" name="kind" value="work" ${x.kind !== 'other' ? 'checked' : ''}> It stops</label><label><input type="radio" name="kind" value="other" ${x.kind === 'other' ? 'checked' : ''}> It continues</label></div></div>
+      <details ${x.employer || x.pLoss != null || x.country ? 'open' : ''}><summary>Job security</summary>
+        ${countrySel(cc, 'Job market it depends on')}
+        <label class="field"><span>Who pays it</span><select name="employer">${Object.entries(W.EMPLOYERS).map(([k, n]) => `<option value="${k}" ${k === emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><small>In ${esc(K.name)} about ${pct(K.job[emp], 0)} of people in this kind of job lose it in a year; finding new work takes about ${K.job.search} months.</small></label>
+        ${pctIn('pLoss', x.pLoss, 'Your own chance of losing it in a year (optional)', 'Leave empty to use the figure above.')}
+      </details>
       <div class="btn-row"><button class="btn primary" data-act="save-inc">Save</button>${x.id ? '<button class="btn danger" data-act="del-inc">Delete</button>' : ''}</div>
     </form>`);
 }
 function spendSheet(x = {}) {
   const cat = x.cat || 'food';
+  formCur = x.cur || st.currency;
   const freq = x.freq || (cat === 'rent' ? 'year' : 'month');
   sheet(`${sheetHead(x.id ? 'Edit spending' : 'Add spending', 'Leave out debt payments and school fees: they are counted under debts and children.')}
     <form id="sp" data-id="${x.id || ''}">
       <label class="field"><span>Category</span><select name="cat" id="sp-cat">${SPEND_ORDER.map((c) => `<option value="${c}" ${c === cat ? 'selected' : ''}>${esc(SPEND_CATS[c].name)}${SPEND_CATS[c].prem ? ` (rises ${pct(SPEND_CATS[c].prem, 0)} faster than prices)` : ''}</option>`).join('')}</select></label>
+      ${curSel(formCur, 'cur', 'Paid in')}
       <label class="field"><span>Name (optional)</span><input name="name" id="sp-name" value="${esc(x.name || '')}" placeholder="e.g. Flat rent, Diesel, Groceries"></label>
       ${moneyIn('amount', x.amount, 'Amount')}
       <div class="seg-row"><span>How often</span><div class="seg"><label><input type="radio" name="freq" value="month" ${freq === 'month' ? 'checked' : ''}> Each month</label><label><input type="radio" name="freq" value="year" ${freq === 'year' ? 'checked' : ''}> Each year</label></div></div>
@@ -522,7 +556,7 @@ function householdSheet() {
   sheet(`${sheetHead('School fees, car and giving', 'In today\'s money. The plan adds inflation for you.')}
     <form id="hh">
       <h3 class="group-t">School fees a year, per child</h3>
-      ${SCHOOL.stages.map(([id, n, a0, a1]) => moneyIn(`fee_${id}`, H.fees[id], `${n} (ages ${a0}–${a1})`)).join('')}
+      ${SCHOOL.stages.map(([id, n, a0, a1]) => { const c = (H.feeCur || {})[id] || st.currency; formCur = c; const html = `<div class="pair2">${curSel(c, `feecur_${id}`, `${n} (ages ${a0}–${a1}): paid in`)}${moneyIn(`fee_${id}`, H.fees[id], 'Fee a year')}</div>`; formCur = null; return html; }).join('')}
       ${pctIn('eduPrem', H.eduPrem, 'How much faster than prices school fees rise, a year')}
       <h3 class="group-t">Car</h3>
       ${numIn('carEvery', H.car.every || '', 'Replace your car every how many years? (empty for never)')}
@@ -588,6 +622,7 @@ function assumptionsSheet() {
       ${pctIn('deposit', As.deposit, 'Savings, fixed deposit and T-bill rate a year', `Default: ${pct(C.deposit, 1)}.`)}
       ${C.usdFx ? `<label class="field"><span>${esc(sym())} per US dollar</span><input name="usdRate" inputmode="decimal" value="${As.usdRate || ''}" placeholder="${live ? Math.round(market.fx) : ''}"><small>${live ? `Leave empty to use the live rate (${Math.round(market.fx).toLocaleString()}).` : 'Needed to value dollar holdings.'}</small></label>
         ${pctIn('fxDrift', As.fxDrift, 'Extra yearly weakening of your currency beyond inflation', 'Leave at 0 for no view (the honest default).')}` : ''}
+      ${worldAssumptions()}
       <details><summary>Returns and risk by asset (advanced)</summary>
         <p class="muted">Long-run real returns after inflation, and yearly swings. Defaults follow a century of global market history.</p>
         ${['bonds', 'localEq', 'globalEq', 'usdCash', 'crypto', 'pension', 'property', 'business'].map((k) => `<div class="pair"><b>${ASSET_CLASSES[k].short}</b>${pctIn(`mu_${k}`, (As.overrides[k] || {}).mu ?? ASSET_CLASSES[k].mu, 'Return')}${pctIn(`sd_${k}`, (As.overrides[k] || {}).sd ?? ASSET_CLASSES[k].sd, 'Swing')}</div>`).join('')}
@@ -596,12 +631,65 @@ function assumptionsSheet() {
     </form>`);
 }
 
+// What the plan touches: currencies, places and job markets in use.
+function worldInUse() {
+  const inp = M.buildInputs(st, market);
+  const curs = Object.keys(inp.currencies).filter((c) => c !== st.currency && c !== 'USD');
+  const locs = new Set([M.homeLoc(st)]);
+  for (const a of st.accounts) if (['property', 'land'].includes(M.classOf(a))) locs.add(M.placeOfAcc(a, st));
+  for (const v of st.ventures) if (v.loc) locs.add(v.loc);
+  return { curs, locs: [...locs].filter((l) => W.LOCATIONS[l]), countries: inp.countries.filter((c) => W.COUNTRIES[c]) };
+}
+function worldAssumptions() {
+  const U = worldInUse();
+  const As = st.assumptions;
+  return `<details><summary>Exchange rates (${U.curs.length} other currencies)</summary>
+      <p class="muted">Units of each currency per US dollar today, and how much it swings against the dollar in a year.</p>
+      ${U.curs.map((c) => { const C = W.country(st, W.countryOfCur(c)); const o = (As.fx || {})[c] || {}; return `<div class="pair"><b>${c}</b><label class="field"><span>Per dollar</span><input name="rate_${c}" inputmode="decimal" value="${(As.rates || {})[c] || ''}" placeholder="${W.rate(st, market, c)}"></label>${pctIn(`fxsd_${c}`, o.sd ?? C.fxSd, 'Swing')}</div>`; }).join('') || '<p class="muted">Only your currency and the dollar are in use; set the dollar rate above.</p>'}
+    </details>
+    <details><summary>Places (${U.locs.length})</summary>
+      <p class="muted">Real price growth after local inflation, yearly swing, and the chance of a title dispute. Your estimates win.</p>
+      ${U.locs.map((l) => { const P = W.place(st, l); return `<div class="place-edit"><b>${esc(W.LOCATIONS[l].name)}</b><div class="pair">${pctIn(`pmu_${l}`, P.prop.mu, 'Buildings: growth')}${pctIn(`psd_${l}`, P.prop.sd, 'Swing')}</div><div class="pair">${pctIn(`lmu_${l}`, P.land.mu, 'Land: growth')}${pctIn(`lsd_${l}`, P.land.sd, 'Swing')}</div>${pctIn(`title_${l}`, P.title, 'Chance of a title dispute')}</div>`; }).join('')}
+    </details>
+    <details><summary>Job markets (${U.countries.length})</summary>
+      <p class="muted">Chance of losing a job in a year, by employer, and months to find new work.</p>
+      ${U.countries.map((cc) => { const K = W.country(st, cc); return `<div class="place-edit"><b>${esc(K.name)}</b><div class="pair">${Object.keys(W.EMPLOYERS).map((e) => pctIn(`job_${cc}_${e}`, K.job[e], { public: 'Public', large: 'Large firm', sme: 'Small firm', contract: 'Contract' }[e])).join('')}</div>${numIn(`search_${cc}`, K.job.search, 'Months to find new work', '', 'min="0" max="60"')}</div>`; }).join('')}
+    </details>`;
+}
+// Keep only what differs from the built-in figures.
+function readWorldAssumptions(v, As) {
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  As.rates = { ...(As.rates || {}) }; As.fx = { ...(As.fx || {}) }; As.places = { ...(As.places || {}) }; As.countries = { ...(As.countries || {}) };
+  for (const c of CURRENCY_ORDER) {
+    if (v[`rate_${c}`] != null) { const r = parseMoney(v[`rate_${c}`]); if (r > 0) As.rates[c] = r; else delete As.rates[c]; }
+    if (v[`fxsd_${c}`] != null) { const sd = parsePct(v[`fxsd_${c}`]); if (near(sd, W.COUNTRIES[W.countryOfCur(c)].fxSd)) delete As.fx[c]; else As.fx[c] = { ...(As.fx[c] || {}), sd }; }
+  }
+  for (const l of W.LOCATION_ORDER) {
+    if (v[`pmu_${l}`] == null) continue;
+    const B = W.LOCATIONS[l];
+    const o = { prop: { mu: parsePct(v[`pmu_${l}`]), sd: parsePct(v[`psd_${l}`]) }, land: { mu: parsePct(v[`lmu_${l}`]), sd: parsePct(v[`lsd_${l}`]) }, title: parsePct(v[`title_${l}`]) };
+    const same = near(o.prop.mu, B.prop.mu) && near(o.prop.sd, B.prop.sd) && near(o.land.mu, B.land.mu) && near(o.land.sd, B.land.sd) && near(o.title, B.title);
+    if (same) delete As.places[l]; else As.places[l] = { ...(As.places[l] || {}), ...o };
+  }
+  for (const cc of Object.keys(W.COUNTRIES)) {
+    if (v[`search_${cc}`] == null) continue;
+    const B = W.COUNTRIES[cc].job;
+    const job = { search: Math.max(0, +v[`search_${cc}`] || B.search) };
+    for (const e of Object.keys(W.EMPLOYERS)) job[e] = parsePct(v[`job_${cc}_${e}`]);
+    const same = Object.keys(job).every((k) => near(job[k], B[k]));
+    const o = { ...(As.countries[cc] || {}) };
+    if (same) delete o.job; else o.job = job;
+    if (Object.keys(o).length) As.countries[cc] = o; else delete As.countries[cc];
+  }
+}
+
 function aboutSheet() {
   sheet(`${sheetHead('How it works')}
     <div class="prose">
       <p><b>No app can know what markets will do.</b> This one gets right what can be right: the maths on your real numbers (interest, debts, inflation, compounding), and an honest range for the rest.</p>
       <p><b>2,000 futures.</b> Each one plays your life forward year by year to your planning age: your pay, spending, debt payments, goals and savings, with random market returns, random inflation${CURRENCIES[st.currency].usdFx ? ' and a random exchange rate' : ''}. Returns have fat tails, so crashes happen about as often as history says, and bad years hit local shares, property and the currency together.</p>
       <p><b>Your own shares.</b> When you hold NGX or NYSE shares, the plan measures how much they have actually swung over about two years of daily prices and blends that with the long-run figure, so one company counts as riskier than a fund.</p>
+      <p><b>Where things are.</b> Each item keeps its own currency, and each currency moves against yours in every future. Property and land follow their place (growth, swings, title disputes); shares, businesses and wages follow their country. Each job can be lost: the chance depends on the country and the employer, finding work takes months, and the new job may pay less.</p>
       <p><b>In today's money.</b> Every number is after inflation, so ${sym()}1M in 20 years means what ${sym()}1M buys today.</p>
       <p><b>"Free"</b> means your investments could pay ${pct(st.plan.swr, 1)} a year, plus rent, profit and pension, enough to cover your retirement spending.</p>
       <p><b>Fair comparisons.</b> What-ifs replay the same 2,000 futures, so a difference comes from your choice, not luck.</p>
@@ -747,6 +835,7 @@ function personSheet() {
     <form id="person">
       <label class="field"><span>Name</span><input name="name" id="p-name" value="${esc(st.name)}"></label>
       <label class="field"><span>Born (year and month)</span><input name="born" id="p-born" type="month" value="${esc(st.born || '')}"></label>
+      ${placeSel(M.homeLoc(st), 'Where they live', 'home')}
       <label class="field"><span>Work</span>${opt('employment', Object.entries(M.EMPLOYMENT), P.employment)}<small>Self-employed and business owners need a bigger emergency fund.</small></label>
       <label class="field"><span>Occupation</span><input name="occupation" id="p-occupation" value="${esc(P.occupation)}" placeholder="e.g. Pharmacist, trader, engineer"></label>
       <label class="field"><span>Family</span>${opt('marital', [['single', 'Single'], ['married', 'Married'], ['partner', 'Living with a partner'], ['widowed', 'Widowed'], ['divorced', 'Divorced']], P.marital)}</label>
@@ -785,10 +874,13 @@ function ventureKindSheet() {
 
 function ventureSheet(v) {
   const isBiz = v.kind === 'business' || v.kind === 'expand';
+  formCur = v.cur || st.currency;
   const fx = CURRENCIES[st.currency].usdFx;
   const sel = (name, opts, val, id = name) => `<select name="${name}" id="v-${id}">${opts.map(([k, n]) => `<option value="${k}" ${String(k) === String(val) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
   const common = `
     <label class="field"><span>Name</span><input name="name" id="v-name" value="${esc(v.name)}" placeholder="e.g. Bakery in Yaba, 4 flats in Lugbe"></label>
+    ${curSel(formCur, 'cur', 'Currency it runs in')}
+    ${['business', 'expand', 'rental', 'land'].includes(v.kind) ? placeSel(v.loc || M.homeLoc(st), 'Where it is') : ''}
     ${numIn('startMonth', v.startMonth, 'Starts in how many months?', '', 'min="0" max="120"')}
     ${numIn('years', v.years, 'Judge it over how many years?', '', 'min="1" max="25"')}`;
   let body = '';
@@ -875,6 +967,7 @@ function ventureResultSheet(id) {
   const yrs = (m) => (m == null || !Number.isFinite(m) ? `not within ${v.years} years` : m < 24 ? `${Math.round(m)} months` : `${(m / 12).toFixed(1)} years`);
   const cum = (r.cum || []).filter((x, i) => i % 12 === 0).map((b, y) => ({ age: y, ...b, p25: b.p10 + (b.p50 - b.p10) / 2, p75: b.p50 + (b.p90 - b.p50) / 2 }));
   const SE = V.SECTORS[v.sector] || V.SECTORS.other;
+  const f = (n) => fmt(n, v.cur || st.currency);
   sheet(`${sheetHead(v.name || V.KINDS[v.kind].name, `${esc(V.KINDS[v.kind].name)} · judged over ${v.years} years · 2,000 scenarios`)}
     <section class="card verdict ${cls}"><span class="status ${cls}">${icon(cls === 'good' ? 'ok' : cls === 'warn' ? 'warn' : 'stop')} ${word}</span><b class="pc">${pct(r.success)}</b><span>chance it ${esc(successWord(v))}.</span></section>
     <div class="stat-row">
@@ -916,6 +1009,7 @@ const ACT = {
   'save-person': (d, el) => {
     const v = form(el.closest('form'));
     st.name = v.name.trim(); if (v.born) st.born = v.born;
+    if (v.home) st.home = v.home;
     Object.assign(st.person, { employment: v.employment, occupation: v.occupation.trim(), marital: v.marital, dependants: Math.max(0, +v.dependants || 0), health: v.health, lifeCover: v.lifeCover, experience: v.experience, goals: v.goals.trim(), notes: v.notes.trim(), reviewDate: v.reviewDate });
     closeSheet(); commit();
   },
@@ -943,11 +1037,18 @@ const ACT = {
     const pcts = ['loanRate', 'varCost', 'imported', 'reality', 'overrun', 'growth', 'salvage', 's5', 'buyCosts', 'occupancy', 'upkeep', 'titleRisk', 'rate', 'defaultRisk', 'recovery'];
     const ints = ['startMonth', 'years', 'loanMonths', 'rampMonths', 'delay', 'months', 'exitMultiple'];
     v.name = (x.name || '').trim();
+    v.cur = x.cur || st.currency;
+    if (x.loc && x.loc !== v.loc) {
+      const cc = W.LOCATIONS[x.loc].c;
+      if (v.kind === 'business' || v.kind === 'expand') { const before = v.countryRisk; v.countryRisk = W.country(st, cc).bizRisk; if (x.countryRisk != null && Math.abs(1 + parsePct(x.countryRisk) - (before ?? 1)) > 1e-9) v.countryRisk = 1 + parsePct(x.countryRisk); }
+      if (v.kind === 'land' && x.titleRisk != null && Math.abs(parsePct(x.titleRisk) - (v.titleRisk ?? 0)) < 1e-9) v.titleRisk = W.place(st, x.loc).title;
+      v.loc = x.loc;
+    }
     for (const k of money) if (x[k] != null) v[k] = parseMoney(x[k]);
     if (x.maxTopUp != null && !String(x.maxTopUp).trim()) v.maxTopUp = null;
     for (const k of pcts) if (x[k] != null) v[k] = parsePct(x[k]);
     for (const k of ints) if (x[k] != null && x[k] !== '') v[k] = Math.max(0, +x[k]);
-    if (x.countryRisk != null) v.countryRisk = 1 + parsePct(x.countryRisk);
+    if (x.countryRisk != null && !(x.loc && x.loc !== v.loc)) v.countryRisk = 1 + parsePct(x.countryRisk);
     if (x.sector) { if (old && old.sector !== x.sector && x.s5 != null && Math.abs(parsePct(x.s5) - (V.SECTORS[old.sector] || V.SECTORS.other).s5) < 1e-9) v.s5 = null; v.sector = x.sector; }
     if (x.s5 != null && v.s5 != null && Math.abs(v.s5 - (V.SECTORS[v.sector] || V.SECTORS.other).s5) < 1e-9) v.s5 = null;
     if (x.cls) v.cls = x.cls;
@@ -993,7 +1094,8 @@ const ACT = {
       const [ex, s] = v.key.split(':'); const q = market.prices[v.key];
       Object.assign(o, { key: v.key, ex, sym: s, shares: +v.shares || 0, lastPrice: q ? q.p : 0, priceCur: q ? q.c : null });
       if (!o.name) o.name = s;
-    } else o.value = parseMoney(v.value);
+    } else { o.value = parseMoney(v.value); o.cur = v.cur || st.currency; }
+    if (v.loc) o.loc = v.loc;
     if (T.rate) o.rate = parsePct(v.rate);
     if (T.rent) o.rent = parseMoney(v.rent);
     if (T.profit) o.profit = parseMoney(v.profit);
@@ -1004,18 +1106,18 @@ const ACT = {
   'edit-debt': (d) => debtSheet(byId(st.debts, d.id)),
   'save-debt': (d, el) => {
     const fm = el.closest('form'); const v = form(fm);
-    const o = { name: v.name.trim() || 'Debt', balance: parseMoney(v.balance), rate: parsePct(v.rate), payment: parseMoney(v.payment) };
+    const o = { name: v.name.trim() || 'Debt', balance: parseMoney(v.balance), rate: parsePct(v.rate), payment: parseMoney(v.payment), cur: v.cur || st.currency };
     if (o.payment > 0 && o.balance * o.rate / 12 >= o.payment) toast('Warning: this payment does not cover the interest, so the debt will grow.');
     upsert(st.debts, fm.dataset.id, o); closeSheet(); commit();
   },
   'del-debt': (d, el) => { const id = el.closest('form').dataset.id; st.debts = st.debts.filter((x) => x.id !== id); closeSheet(); commit(); },
   'add-inc': () => incomeSheet(),
   'edit-inc': (d) => incomeSheet(byId(st.income, d.id)),
-  'save-inc': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.income, fm.dataset.id, { name: v.name.trim() || 'Income', amount: parseMoney(v.amount), kind: v.kind }); closeSheet(); commit(); },
+  'save-inc': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.income, fm.dataset.id, { name: v.name.trim() || 'Income', amount: parseMoney(v.amount), kind: v.kind, cur: v.cur || st.currency, country: v.country, employer: v.employer, pLoss: v.pLoss && String(v.pLoss).trim() !== '' ? parsePct(v.pLoss) : undefined }); closeSheet(); commit(); },
   'del-inc': (d, el) => { const id = el.closest('form').dataset.id; st.income = st.income.filter((x) => x.id !== id); closeSheet(); commit(); },
   'add-sp': () => spendSheet(),
   'edit-sp': (d) => spendSheet(byId(st.spending, d.id)),
-  'save-sp': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.spending, fm.dataset.id, { cat: v.cat, name: v.name.trim() || SPEND_CATS[v.cat].name, amount: parseMoney(v.amount), freq: v.freq || 'month' }); closeSheet(); commit(); },
+  'save-sp': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.spending, fm.dataset.id, { cat: v.cat, name: v.name.trim() || SPEND_CATS[v.cat].name, amount: parseMoney(v.amount), freq: v.freq || 'month', cur: v.cur || st.currency }); closeSheet(); commit(); },
   'add-kid': () => kidSheet(),
   'edit-kid': (d) => kidSheet(byId(st.household.kids, d.id)),
   'save-kid': (d, el) => { const fm = el.closest('form'); const v = form(fm); upsert(st.household.kids, fm.dataset.id, { name: v.name.trim() || 'Child', born: +v.born || new Date().getFullYear() }); closeSheet(); commit(); },
@@ -1023,7 +1125,7 @@ const ACT = {
   household: householdSheet,
   'save-hh': (d, el) => {
     const v = form(el.closest('form')); const H = st.household;
-    for (const [id] of SCHOOL.stages) H.fees[id] = parseMoney(v[`fee_${id}`]);
+    for (const [id] of SCHOOL.stages) { H.fees[id] = parseMoney(v[`fee_${id}`]); H.feeCur = { ...(H.feeCur || {}), [id]: v[`feecur_${id}`] || st.currency }; }
     H.eduPrem = parsePct(v.eduPrem); H.givingPct = parsePct(v.givingPct);
     H.car = { every: Math.max(0, Math.round(+v.carEvery || 0)), cost: parseMoney(v.carCost) };
     closeSheet(); commit();
@@ -1071,6 +1173,7 @@ const ACT = {
     As.infl = parsePct(v.infl); As.inflSd = parsePct(v.inflSd); As.deposit = parsePct(v.deposit);
     if (v.usdRate != null) As.usdRate = v.usdRate ? parseMoney(v.usdRate) : null;
     if (v.fxDrift != null) As.fxDrift = parsePct(v.fxDrift);
+    readWorldAssumptions(v, As);
     for (const k of Object.keys(ASSET_CLASSES)) {
       if (v[`mu_${k}`] == null) continue;
       const mu = parsePct(v[`mu_${k}`]); const sd = parsePct(v[`sd_${k}`]);
@@ -1079,7 +1182,7 @@ const ACT = {
     }
     closeSheet(); commit();
   },
-  'reset-asm': () => { const C = CURRENCIES[st.currency]; st.assumptions = { ...st.assumptions, infl: C.infl, inflSd: C.inflSd, deposit: C.deposit, usdRate: st.currency === 'USD' ? 1 : null, fxDrift: 0, fxSd: null, overrides: {} }; closeSheet(); commit(); },
+  'reset-asm': () => { const C = CURRENCIES[st.currency]; st.assumptions = { ...st.assumptions, infl: C.infl, inflSd: C.inflSd, deposit: C.deposit, usdRate: st.currency === 'USD' ? 1 : null, fxDrift: 0, fxSd: null, overrides: {}, rates: {}, fx: {}, places: {}, countries: {} }; closeSheet(); commit(); },
   refresh: async () => { toast('Loading prices…'); try { market = await refreshMarket(); toast('Prices updated.'); closeSheet(); commit(); } catch (e) { toast(e.message); } },
   pdf: () => { if (!A) return toast('The plan is still being worked out.'); download(new Blob([planPdf(st, market, A, { adviser: M.adviser() })], { type: 'application/pdf' }), `${(st.name || 'my').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-financial-plan.pdf`); },
   export: () => download(new Blob([JSON.stringify(st, null, 2)], { type: 'application/json' }), `${(st.name || 'plan').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-backup-${new Date().toISOString().slice(0, 10)}.json`),
@@ -1120,6 +1223,14 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !layer.h
 document.addEventListener('submit', (e) => e.preventDefault());
 
 let wiTimer = 0;
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (!t.classList || !t.classList.contains('cur-pick')) return;
+  const symb = CURRENCIES[t.value].symbol;
+  const scope = t.dataset.symScope === 'pair' ? t.closest('.pair2') : t.closest('form');
+  if (t.dataset.symScope !== 'pair') formCur = t.value;
+  if (scope) scope.querySelectorAll('.money-in > i:first-child').forEach((i) => { i.textContent = symb; });
+});
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.act === 'retire') document.getElementById('ra').textContent = t.value;

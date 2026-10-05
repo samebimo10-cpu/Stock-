@@ -3,7 +3,8 @@
 // the currency code (NGN 2.4M) rather than its symbol.
 
 import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, pct } from './money.js';
-import { ACCOUNT_TYPES, ageOf, valueOf, monthlyOf, RISK_LEVELS } from './model.js';
+import { ACCOUNT_TYPES, ageOf, valueOf, monthlyOf, RISK_LEVELS, curOf, curOfItem, toBase } from './model.js';
+import * as World from './world.js';
 import { SPEND_CATS } from './money.js';
 
 const ASCII = { '−': '-', '–': '-', '—': '-', '×': 'x', '‘': "'", '’': "'", '“': '"', '”': '"', '…': '...', '→': '->', '·': '-', '•': '-', '₦': 'NGN ', '£': 'GBP ', '€': 'EUR ', '₹': 'INR ' };
@@ -179,8 +180,14 @@ export function planPdf(st, market, A, { date = new Date(), adviser = null } = {
   if (A.portfolio) {
     pdf.heading('Your investments');
     const P = A.portfolio;
-    pdf.para(`Expected return after inflation ${pct(P.mu, 1)} a year, typical yearly swing ${pct(P.vol, 0)} (${P.level.toLowerCase()} risk). In a bad year (1 in 20) the whole mix could move about ${pct(P.badYear, 0)}. ${pct(P.usdShare, 0)} is in dollars, gold or crypto; ${pct(P.liquidShare, 0)} can be sold quickly.`, { size: 9.5 });
+    pdf.para(`Expected return after inflation ${pct(P.mu, 1)} a year, typical yearly swing ${pct(P.vol, 0)} (${P.level.toLowerCase()} risk). In a bad year (1 in 20) the whole mix could move about ${pct(P.badYear, 0)}. ${pct(P.usdShare, 0)} is held in other currencies; ${pct(P.liquidShare, 0)} can be sold quickly.`, { size: 9.5 });
     for (const r of P.rows) pdf.row(`${r.name} (${pct(r.weight, 0)})`, `${M(r.value)}  -  real ${pct(r.real, 1)}`);
+  }
+  if (A.exposures && (A.exposures.byCur.length > 1 || A.exposures.byPlace.length)) {
+    pdf.heading('Currencies, places and job risk');
+    for (const x of A.exposures.byCur) pdf.row(x.cur, `own ${M(x.assets)}  -  earn ${M(x.income)}/yr  -  spend ${M(x.spend)}/yr${x.debt ? `  -  owe ${M(x.debt)}` : ''}`);
+    for (const x of A.exposures.byPlace) { const P = World.place(st, x.loc); pdf.row(x.name, `${M(x.value)}  -  land ${pct(P.land.mu, 1)} (swing ${pct(P.land.sd, 0)}), buildings ${pct(P.prop.mu, 1)} (swing ${pct(P.prop.sd, 0)}), title risk ${pct(P.title, 1)}`); }
+    if (A.jobLoss) pdf.para(`Chance of losing a job at least once before stopping work: ${pct(A.jobLoss, 0)}. Each income uses the job market of the country it is earned in.`, { size: 9.5, color: '#33433d' });
   }
   if (A.stress && A.stress.length) {
     pdf.heading('What could go wrong');
@@ -200,8 +207,8 @@ export function planPdf(st, market, A, { date = new Date(), adviser = null } = {
     }
   }
   pdf.heading('Your accounts');
-  for (const a of st.accounts) pdf.row(`${a.name || ACCOUNT_TYPES[a.type].name}${a.type === 'stock' ? ` (${a.shares} x ${a.sym})` : ''}`, M(valueOf(a, st, market).v));
-  for (const d of st.debts) pdf.row(`${d.name} at ${pct(d.rate, 1)} (${M(d.payment)}/month)`, `-${M(d.balance)}`);
+  for (const a of st.accounts) { const c = curOf(a, st); pdf.row(`${a.name || ACCOUNT_TYPES[a.type].name}${a.type === 'stock' ? ` (${a.shares} x ${a.sym})` : ''}${a.loc && World.LOCATIONS[a.loc] ? `, ${World.LOCATIONS[a.loc].name}` : ''}${c !== cur && a.type !== 'stock' ? ` (${c} ${Math.round(a.value || 0).toLocaleString()})` : ''}`, M(valueOf(a, st, market).v)); }
+  for (const d of st.debts) { const c = curOfItem(d, st); const B = (n) => M(toBase(st, market, n, c)); pdf.row(`${d.name} at ${pct(d.rate, 1)} (${B(d.payment)}/month)${c !== cur ? ` (${c} ${Math.round(d.balance).toLocaleString()})` : ''}`, `-${B(d.balance)}`); }
 
   pdf.heading('Assumptions');
   const As = st.assumptions;

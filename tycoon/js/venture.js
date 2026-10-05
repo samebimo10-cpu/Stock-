@@ -60,7 +60,7 @@ export const HUMAN = {
 
 export function newVenture(kind = 'business', currency = 'NGN') {
   const base = {
-    id: Math.random().toString(36).slice(2, 10), kind, name: '', startMonth: 0, years: 5, include: true,
+    id: Math.random().toString(36).slice(2, 10), kind, name: '', startMonth: 0, years: 5, include: true, cur: currency, loc: null,
     reality: 0.15, successTest: 'beat',
   };
   if (kind === 'business' || kind === 'expand') {
@@ -168,7 +168,7 @@ function runRental(v, r, ctx) {
   let bal = loan;
   flows[0] = -(cost - loan);
   const open = Math.round(r() * (v.delay || 0));
-  const P = ASSET_CLASSES.property;
+  const P = (ctx.place && ctx.place.prop) || ASSET_CLASSES.property;
   let value = (v.price || 0) + (v.renovation || 0);
   let occ = v.occupancy;
   const rentLevel = (v.rent || 0) * (1 - (v.reality || 0) * 0.5) * Math.exp(0.15 * r.normal() - 0.01125);
@@ -185,11 +185,11 @@ function runRental(v, r, ctx) {
   return { flows, terminal: value * (1 - (v.sellCost || 0)) - bal, alive: true, closedAt: null, monthlyProfit: rentLevel * v.occupancy * (1 - (v.upkeep || 0)) - pay };
 }
 
-function runLand(v, r) {
+function runLand(v, r, ctx = {}) {
   const M = v.years * 12;
   const flows = new Float64Array(M + 1);
   flows[0] = -(v.price || 0) * (1 + (v.buyCosts || 0));
-  const L = ASSET_CLASSES.land;
+  const L = (ctx.place && ctx.place.land) || ASSET_CLASSES.land;
   let value = v.price || 0;
   for (let y = 0; y < v.years; y++) value *= Math.exp(Math.log(1 + L.mu) - L.sd * L.sd / 2 + L.sd * r.normal());
   for (let m = 1; m <= M; m++) flows[m] = -(v.holdCost || 0) / 12;
