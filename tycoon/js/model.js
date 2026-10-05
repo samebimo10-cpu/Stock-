@@ -6,7 +6,7 @@ import { CURRENCIES, ASSET_CLASSES, CLASS_ORDER, SPEND_CATS, SCHOOL, suggestedMi
 import { portfolioVol } from './market.js';
 
 export const KEY = 'tycoonplan.v1';
-export const VERSION = 2;
+export const VERSION = 3;
 
 // The kinds of account people add, and the asset class each one is modelled as.
 // usd: the amount is entered in dollars. rate: it earns a stated interest rate.
@@ -65,21 +65,78 @@ export function newState(currency = 'NGN') {
     plan: { retireAge: 55, spendRetire: null, planAge: 95, swr: 0.035, success: 0.85, growth: 0.015, pensionIncome: 0, mix: null, outlook: 'base' },
     assumptions: { infl: C.infl, inflSd: C.inflSd, deposit: C.deposit, usdRate: currency === 'USD' ? 1 : null, fxDrift: 0, fxSd: null, overrides: {} },
     checkins: [],
+    person: { occupation: '', employment: 'salaried', marital: 'single', dependants: 0, health: 'good', riskScore: null, riskAnswers: [], experience: 'some', lifeCover: 'no', goals: '', notes: '', reviewDate: '' },
+    ventures: [],
     baseline: null,
     settings: { theme: 'auto', remind: true },
   };
 }
 
-export function load() {
-  try {
-    const s = localStorage.getItem(KEY);
-    if (!s) return null;
-    return upgrade(JSON.parse(s));
-  } catch { return null; }
+// ------------------------------------------------------------------ several people
+
+// Each person (you, or each client you advise) is kept separately on this
+// phone; a small index lists them. Version 1 kept one plan under KEY.
+export const INDEX = 'tycoonplan.profiles';
+const pKey = (id) => `tycoonplan.p.${id}`;
+const readJSON = (k) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : null; } catch { return null; } };
+const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+
+export function profiles() {
+  let idx = readJSON(INDEX);
+  if (!idx) {
+    idx = { active: null, list: [] };
+    const old = readJSON(KEY);
+    if (old) {
+      const st = upgrade(old);
+      idx.list.push(summaryOf(st)); idx.active = st.id;
+      writeJSON(pKey(st.id), st);
+      try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+    }
+    writeJSON(INDEX, idx);
+  }
+  return idx;
 }
-export function save(st) {
-  try { localStorage.setItem(KEY, JSON.stringify(st)); return true; } catch { return false; }
+const summaryOf = (st, extra = {}) => ({ id: st.id, name: st.name || 'Me', currency: st.currency, updated: new Date().toISOString(), ...extra });
+
+export function load(id) {
+  const idx = profiles();
+  const want = id || idx.active;
+  if (!want) return null;
+  const st = readJSON(pKey(want));
+  return st ? upgrade(st) : null;
 }
+export function save(st, extra = {}) {
+  if (!st.id) st.id = uid();
+  const idx = profiles();
+  const i = idx.list.findIndex((p) => p.id === st.id);
+  const prev = i >= 0 ? idx.list[i] : {};
+  const row = { ...prev, ...summaryOf(st), ...extra };
+  if (i >= 0) idx.list[i] = row; else idx.list.push(row);
+  idx.active = st.id;
+  writeJSON(INDEX, idx);
+  return writeJSON(pKey(st.id), st);
+}
+export function setActive(id) { const idx = profiles(); idx.active = id; writeJSON(INDEX, idx); }
+export function noteSummary(id, extra) { const idx = profiles(); const r = idx.list.find((p) => p.id === id); if (r) { Object.assign(r, extra); writeJSON(INDEX, idx); } }
+export function remove(id) {
+  const idx = profiles();
+  idx.list = idx.list.filter((p) => p.id !== id);
+  if (idx.active === id) idx.active = idx.list.length ? idx.list[0].id : null;
+  writeJSON(INDEX, idx);
+  try { localStorage.removeItem(pKey(id)); localStorage.removeItem(`tycoonplan.analysis.${id}`); } catch { /* ignore */ }
+}
+export function duplicate(st, name) {
+  const copy = upgrade(JSON.parse(JSON.stringify(st)));
+  copy.id = uid(); copy.name = name; copy.checkins = []; copy.baseline = null; copy.created = new Date().toISOString();
+  save(copy);
+  return copy;
+}
+
+// The adviser's own details, shared by every profile on this phone.
+export const ADVISER = 'tycoonplan.adviser';
+export const adviser = () => ({ on: false, name: '', firm: '', contact: '', ...(readJSON(ADVISER) || {}) });
+export const saveAdviser = (a) => writeJSON(ADVISER, a);
+
 export function upgrade(st) {
   const base = newState(st.currency || 'NGN');
   const out = { ...base, ...st };
@@ -93,6 +150,9 @@ export function upgrade(st) {
   // Version 1 spending had no category or frequency.
   out.spending = (out.spending || []).map((x) => ({ cat: catGuess(x.name), freq: 'month', ...x }));
   for (const k of ['income', 'spending', 'accounts', 'debts', 'goals', 'checkins']) if (!Array.isArray(out[k])) out[k] = [];
+  out.person = { ...base.person, ...(st.person || {}) };
+  if (!Array.isArray(out.ventures)) out.ventures = [];
+  if (!out.id) out.id = uid();
   out.v = VERSION;
   return out;
 }
@@ -102,6 +162,28 @@ function catGuess(name = '') {
   for (const [k, c] of Object.entries(SPEND_CATS)) if (n.includes(k) || n.includes(c.name.toLowerCase().split(' ')[0])) return k;
   return 'other';
 }
+
+// ------------------------------------------------------------------ the person
+
+// Five questions about attitude to risk, scored 1 (most careful) to 5.
+export const RISK_QUIZ = [
+  ['If your investments fell 25% in a year, you would…', ['Sell everything to stop the loss', 'Sell some', 'Do nothing and wait', 'Buy a little more', 'Buy a lot more']],
+  ['When will you need most of this money?', ['Within 2 years', 'In 2–5 years', 'In 5–10 years', 'In 10–20 years', 'More than 20 years away']],
+  ['Which would you rather have?', ['A sure 10%', 'Mostly sure, small chance of more', 'A balance', 'More chance of big gains', 'The biggest possible gain, whatever the risk']],
+  ['How steady is your income?', ['Very unsteady', 'Unsteady', 'Fairly steady', 'Steady', 'Very steady, with savings behind it']],
+  ['How much do you know about investing?', ['Nothing', 'A little', 'Some', 'A good deal', 'A lot, I invest actively']],
+];
+export const RISK_LEVELS = {
+  1: { name: 'Very careful', eq: 0.5 }, 2: { name: 'Careful', eq: 0.75 }, 3: { name: 'Balanced', eq: 1 }, 4: { name: 'Growth', eq: 1.12 }, 5: { name: 'Adventurous', eq: 1.25 },
+};
+export function riskScore(answers) {
+  const a = (answers || []).filter((x) => x != null);
+  if (a.length < RISK_QUIZ.length) return null;
+  const avg = a.reduce((s, x) => s + x + 1, 0) / a.length;
+  // The first answer (how you behave in a fall) caps the score: tolerance shows in a crash.
+  return clamp(Math.min(Math.round(avg), a[0] + 2), 1, 5);
+}
+export const EMPLOYMENT = { salaried: 'Employed (salary)', self: 'Self-employed', business: 'Business owner', retired: 'Retired', student: 'Student', none: 'Not working' };
 
 // ------------------------------------------------------------------ the numbers
 
@@ -245,7 +327,22 @@ export const OUTLOOKS = {
 export function mixOf(st) {
   const age = ageOf(st);
   const C = CURRENCIES[st.currency];
-  const m = st.plan.mix || suggestedMix(Math.max(0, st.plan.retireAge - age), C.usdFx);
+  let m = st.plan.mix;
+  if (!m) {
+    m = suggestedMix(Math.max(0, st.plan.retireAge - age), C.usdFx);
+    // The person's attitude to risk moves the share in shares up or down.
+    const k = RISK_LEVELS[st.person && st.person.riskScore] ? RISK_LEVELS[st.person.riskScore].eq : 1;
+    if (k !== 1) {
+      const eq = ['localEq', 'globalEq'];
+      const eqSum = eq.reduce((a, c) => a + (m[c] || 0), 0);
+      const target = clamp(eqSum * k, 0.05, 0.95);
+      const safeKeys = Object.keys(m).filter((c) => !eq.includes(c));
+      const safeSum = safeKeys.reduce((a, c) => a + (m[c] || 0), 0) || 1;
+      m = { ...m };
+      for (const c of eq) m[c] = (m[c] || 0) * (target / (eqSum || 1));
+      for (const c of safeKeys) m[c] = (m[c] || 0) * ((1 - target) / safeSum);
+    }
+  }
   const s = Object.values(m).reduce((a, b) => a + b, 0) || 1;
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v / s]));
 }

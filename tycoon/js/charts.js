@@ -21,7 +21,7 @@ export function niceTicks(lo, hi, n = 4) {
 }
 
 // Net worth over your life: the middle outcome as a line, the likely range as washes.
-export function fanChart(bands, { cur, retireAge, height = 240, id = 'fan', mark = null } = {}) {
+export function fanChart(bands, { cur, retireAge, height = 240, id = 'fan', mark = null, tick = (a) => a % 10 === 0, xName = 'Age' } = {}) {
   if (!bands || bands.length < 2) return '<p class="muted">Add your numbers to see your projection.</p>';
   const W = 640; const H = height; const L = 56; const R = 16; const Tp = 14; const B = 28;
   const xs = bands.map((b) => b.age);
@@ -35,12 +35,12 @@ export function fanChart(bands, { cur, retireAge, height = 240, id = 'fan', mark
   const Y = (v) => Tp + (1 - (v - y0) / (y1 - y0)) * (H - Tp - B);
   const path = (k) => bands.map((b, i) => `${i ? 'L' : 'M'}${X(b.age).toFixed(1)},${Y(b[k]).toFixed(1)}`).join('');
   const area = (a, b) => `${path(a)}${bands.slice().reverse().map((x) => `L${X(x.age).toFixed(1)},${Y(x[b]).toFixed(1)}`).join('')}Z`;
-  const decade = xs.filter((a) => a % 10 === 0);
+  const decade = xs.filter(tick);
   const last = bands[bands.length - 1];
   const rx = retireAge && retireAge > xs[0] && retireAge < xs[xs.length - 1] ? X(retireAge) : null;
   const data = esc(JSON.stringify(bands.map((b) => [b.age, Math.round(b.p10), Math.round(b.p50), Math.round(b.p90)])));
-  return `<figure class="chart" id="${id}" data-kind="fan" data-cur="${cur}" data-pts="${data}" data-l="${L}" data-r="${R}" data-w="${W}">
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Projected net worth from age ${xs[0]} to ${last.age}. Middle outcome at ${last.age}: ${fmt(last.p50, cur)}.">
+  return `<figure class="chart" id="${id}" data-kind="fan" data-xname="${esc(xName)}" data-cur="${cur}" data-pts="${data}" data-l="${L}" data-r="${R}" data-w="${W}">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Projection from ${xName.toLowerCase()} ${xs[0]} to ${last.age}. Middle outcome at ${last.age}: ${fmt(last.p50, cur)}.">
       ${ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/><text class="tick" x="${L - 8}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${esc(fmt(t, cur))}</text>`).join('')}
       ${decade.map((a) => `<text class="tick" x="${X(a).toFixed(1)}" y="${H - 8}" text-anchor="middle">${a}</text>`).join('')}
       ${lo < 0 ? `<line class="zero" x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>` : ''}
@@ -130,7 +130,7 @@ export function attachCharts(root) {
         const i = Math.round(frac * (pts.length - 1));
         const [age, p10, p50, p90] = pts[i];
         x = L + (i / (pts.length - 1)) * (W - L - R);
-        html = `<b>Age ${age}</b><span><i class="sw s1"></i>Middle ${fmt(p50, cur)}</span><span class="muted">Range ${fmt(p10, cur)} to ${fmt(p90, cur)}</span>`;
+        html = `<b>${fig.dataset.xname || 'Age'} ${age}</b><span><i class="sw s1"></i>Middle ${fmt(p50, cur)}</span><span class="muted">Range ${fmt(p10, cur)} to ${fmt(p90, cur)}</span>`;
       } else {
         const series = JSON.parse(fig.dataset.series);
         const t0 = +fig.dataset.t0; const t1 = +fig.dataset.t1;

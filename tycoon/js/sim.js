@@ -162,6 +162,14 @@ export function simulate(inp, shocks, { keepPaths = true, trace = false } = {}) 
       }
       // When a debt is cleared, its payment stays in the budget as saving.
       let net = income - spend - debtCost;
+      // Planned ventures: money put in, profits taken out, and at the end what
+      // you still own (a business, a building, land) joins your assets.
+      if (inp.ventures) {
+        for (const V of inp.ventures) {
+          net += V.flows[(p % V.paths) * V.Y + t] || 0;
+          if (t === V.endYear) v[V.cls] = (v[V.cls] || 0) + Math.max(0, V.terminal[p % V.paths]);
+        }
+      }
       // Goals: a lump sum at the goal's age.
       for (let g = 0; g < inp.goals.length; g++) {
         const G = inp.goals[g];

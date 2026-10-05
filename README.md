@@ -23,6 +23,17 @@
 >   what your wealth is made of over the years, a year-by-year cash-flow table, stress tests (currency
 >   devaluation, a 2008-style crash, a year without income, an inflation spike, a family emergency) and
 >   which changes matter most. Any figure can be shown in today's money or future money.
+> * **Business and investment plans.** Describe a business (or an expansion), a property to let, land,
+>   a share purchase or a loan to someone, answer a few questions, and it plays the venture out month by
+>   month in 2,000 scenarios: sector survival rates adjusted for the person running it and for where it
+>   operates, uncertain sales with a reality check on optimism, ramp-up, cost overruns, delays,
+>   imported costs that follow the dollar, loans, running out of cash and salvage. It reports the chance
+>   it beats safe savings, pays back or survives, the spread of outcomes, the money it may need,
+>   break-even sales, what would move the odds most, and what it does to the whole life plan.
+> * **The person.** Work, occupation, family, dependants, health, life cover, investing experience, goals,
+>   notes and a five-question risk profile that shapes the suggested investment mix and the advice.
+> * **Several people.** Keep a separate plan for each person (you, family, or clients you advise), switch
+>   between them, copy a plan, and turn on adviser mode to put your name and firm on each PDF report.
 > * **Live prices.** Shares you own on NGX or NYSE are valued at the latest price from this repository's
 >   daily data job, and dollar holdings at the latest USD/NGN rate. Two years of daily closes measure how
 >   much *your* shares actually swing, so one company counts as riskier than a fund.

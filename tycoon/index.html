@@ -294,6 +294,32 @@ td.neg { color: var(--bad); }
 .dv { font-weight: 800; text-align: right; }
 @media (min-width: 640px) { .stat-row { grid-template-columns: repeat(3, 1fr); } }
 
+/* v3: people, ventures */
+.who-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); font-weight: 700; font-size: 14px; max-width: 40vw; }
+.who-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); font-style: normal; font-weight: 800; font-size: 12px; flex: none; }
+.avatar.big { width: 44px; height: 44px; font-size: 16px; }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.who > span { display: grid; min-width: 0; }
+.row > span.who { display: flex; }
+.row.current { background: var(--brand-soft); }
+.card.person { text-align: left; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); resize: vertical; }
+fieldset.quiz { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: grid; gap: 6px; margin: 0; }
+fieldset.quiz legend { font-weight: 800; padding: 0 4px; }
+fieldset.quiz label { display: flex; gap: 8px; align-items: flex-start; }
+.verdict { text-align: left; }
+.verdict .pc { font-size: 44px; font-weight: 900; line-height: 1; }
+.verdict.good { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.verdict.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.verdict.bad { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.btn.danger-solid { background: var(--bad); color: #fff; border-color: var(--bad); }
+.sheet.wide { max-width: 760px; }
+.sheet .stat-row { margin: 0; }
+
 @media (min-width: 640px) { .tiles { grid-template-columns: repeat(4, 1fr); } .answers { grid-template-columns: repeat(3, 1fr); } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 </style>

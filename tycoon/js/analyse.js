@@ -6,6 +6,8 @@ import { simulate, makeShocks, zeroShocks, safeSpending, extraSavingNeeded, earl
 import { totals, buildInputs, measuredRisk, ageOf, classOf, valueOf, mixOf, ACCOUNT_TYPES, feeAt, kidAge } from './model.js';
 import { compare } from './debt.js';
 import { fmt, pct, CURRENCIES, ASSET_CLASSES, CLASS_ORDER, savingFor } from './money.js';
+import { simulateVenture, ventureLevers, planFlows, breakEven, END_CLASS } from './venture.js';
+import { portfolioVol } from './market.js';
 
 let cache = { key: null, main: null, quick: null, mini: null };
 function shocksFor(years, paths, quick) {
@@ -14,9 +16,38 @@ function shocksFor(years, paths, quick) {
   return cache;
 }
 
+// The context a venture needs from the rest of the plan.
+export function ventureCtx(st, market, inp, v) {
+  const ctx = { safeReal: Math.max(0, (1 + inp.depositRate) / (1 + inp.infl) - 1), fxSd: inp.usdFx ? inp.fxSd : 0 };
+  if (v && v.kind === 'shares' && v.key && market) {
+    const pv = portfolioVol(market, [{ key: v.key, value: 1 }]);
+    if (pv) { const d = (ASSET_CLASSES[v.cls] || ASSET_CLASSES.localEq).sd; ctx.measuredSd = Math.sqrt(0.5 * d * d + 0.5 * pv.vol * pv.vol); ctx.measured = pv.vol; }
+  }
+  return ctx;
+}
+
+// Every planned venture: its own 2,000 scenarios, what moves its odds, and
+// its effect on your whole plan.
+export function ventureReports(st, market, inp, { paths = 2000, levers = true } = {}) {
+  return st.ventures.map((v) => {
+    const ctx = ventureCtx(st, market, inp, v);
+    const res = simulateVenture(v, ctx, { paths, keep: true });
+    const L = levers ? ventureLevers(v, ctx, { paths: 400 }) : null;
+    return { id: v.id, res, levers: L ? L.levers : [], breakEven: breakEven(v), measured: ctx.measured || null };
+  });
+}
+const toPlan = (reports, st, inp, paths) => reports.filter((r) => (st.ventures.find((v) => v.id === r.id) || {}).include !== false).map((r) => {
+  const v = st.ventures.find((x) => x.id === r.id);
+  const pf = planFlows(r.res, inp.years, r.res.paths);
+  return { ...pf, id: v.id, Y: inp.years + 1, paths: r.res.paths, cls: v.kind === 'shares' ? v.cls : END_CLASS[v.kind] || 'business' };
+});
+
 export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
   const T = totals(st, market);
-  const inp = buildInputs(st, market);
+  const inp0 = buildInputs(st, market);
+  const reports = ventureReports(st, market, inp0, { paths });
+  const vflows = toPlan(reports, st, inp0, paths);
+  const inp = vflows.length ? { ...inp0, ventures: vflows } : inp0;
   const S = shocksFor(inp.years, paths, quick);
   const main = simulate(inp, S.main);
   const q = (patch) => simulate({ ...inp, ...patch }, S.quick, { keepPaths: false });
@@ -56,6 +87,13 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
     stress: stressTests(inp, qm, baseMini),
     sensitivity: sensitivity(st, inp, qm, baseMini),
     steps: [],
+    ventures: reports.map((r) => {
+      const { yearly, terminals, cum, ...rest } = r.res;
+      // The whole plan without this one venture, on the same futures.
+      const others = vflows.filter((x) => x.id !== r.id);
+      const w = simulate({ ...inp0, ventures: others.length ? others : undefined }, S.quick, { keepPaths: false });
+      return { id: r.id, ...rest, cum, levers: r.levers, breakEven: r.breakEven, measured: r.measured, planWithout: w.success, planWith: base.success, retireWithout: w.liquidAtRetire.p50, retireWith: base.liquidAtRetire.p50, freeWithout: w.freeAge.p50, freeWith: base.freeAge.p50 };
+    }),
   };
 
   // ------------------------------------------------------------ next steps, most important first
@@ -86,7 +124,7 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
     steps.push({ id: 'debtstuck', level: 'urgent', title: 'A debt payment does not cover its interest', body: 'That debt will never shrink at this payment. Raise the payment or talk to the lender.', go: 'debts' });
   }
 
-  const selfEmployed = !st.income.some((x) => x.kind !== 'other') || T.profit > T.monthlyIncome;
+  const selfEmployed = ['self', 'business'].includes(st.person.employment) || !st.income.some((x) => x.kind !== 'other') || T.profit > T.monthlyIncome;
   const wantMonths = selfEmployed ? 6 : 3;
   if (spendM > 0 && T.emergencyMonths != null && T.emergencyMonths >= 1 && T.emergencyMonths < wantMonths) {
     const gap = wantMonths * spendM - T.quick;
@@ -151,6 +189,17 @@ export function analyse(st, market, { paths = 2000, quick = 600 } = {}) {
   if (st.household.kids.length) {
     const fees = schoolTotal(st, inp.years);
     if (fees > 0) steps.push({ id: 'school', level: 'good', title: `School fees ahead: about ${f(fees)} in today's money`, body: `That is the total for ${st.household.kids.length === 1 ? 'your child' : `your ${st.household.kids.length} children`} through university, with fees rising ${pct(st.household.eduPrem, 0)} a year faster than prices. It is already in your plan; check the fees under Money → Household.`, go: 'money' });
+  }
+  const deps = (st.person.dependants || 0) + st.household.kids.length;
+  if (deps > 0 && st.person.lifeCover !== 'yes' && T.monthlyIncome > 0) {
+    steps.push({ id: 'cover', level: 'important', title: `Protect ${deps === 1 ? 'the person' : `the ${deps} people`} who depend on you`, body: `If your income stopped for good, your family would need about ${f(10 * 12 * T.monthlySpend)} to keep going for ten years. Term life insurance and health cover are usually the cheapest way to protect them.`, go: 'home' });
+  }
+  for (const r of out.ventures) {
+    const v = st.ventures.find((x) => x.id === r.id);
+    if (!v || v.include === false) continue;
+    const have = T.quick + T.investable;
+    if (r.peak.p50 > have) steps.push({ id: `fund-${v.id}`, level: 'urgent', title: `${v.name || 'Your venture'} needs more money than you have`, body: `It typically needs ${f(r.peak.p50)} (up to ${f(r.peak.p90)}), but your cash, savings and investments come to ${f(have)}. Plan where the rest comes from (a loan, a partner, a smaller start) before you begin.`, go: 'plan' });
+    else if (r.planWith < r.planWithout - 0.05) steps.push({ id: `venture-${v.id}`, level: 'important', title: `${v.name || 'Your venture'} lowers your plan's odds`, body: `With it your plan works in ${pct(r.planWith)} of futures; without it, ${pct(r.planWithout)}. Look at what would improve it before committing the money.`, go: 'plan' });
   }
   const order = { urgent: 0, important: 1, good: 2 };
   steps.sort((a, b) => order[a.level] - order[b.level]);
